@@ -33,7 +33,11 @@ static const char WEB_HEAD[] PROGMEM =
     "nav{margin-bottom:14px;border-bottom:1px solid #eee;padding-bottom:8px}"
     "nav a{font-size:.88em}.ok{color:green}.err{color:red}"
     ".info{color:#999;font-size:.8em;margin-top:16px}"
-    "</style></head><body><nav>";
+    "</style>"
+    "<script>"
+    "function once(f){if(f.dataset.busy)return false;f.dataset.busy=1;"
+    "var b=f.querySelector('[type=submit]');if(b)b.disabled=true;return true;}"
+    "</script></head><body><nav>";
 
 static const char WEB_NAV_BUILTINS[] PROGMEM =
     "<a href='/'>Home</a>"
@@ -51,7 +55,7 @@ static const char WEB_WIFI_FORM_PRE[] PROGMEM =
     "var s=this.ssid.value.trim(),p=this.pass.value.trim();"
     "if(!s){alert('SSID cannot be empty');return false;}"
     "if(!p){alert('Password cannot be empty');return false;}"
-    "return true;\">"
+    "return once(this);\">"
     "SSID<input type=text name=ssid maxlength=32 autocomplete=off required value=\"";
 
 static const char WEB_WIFI_FORM_MID[] PROGMEM =
@@ -75,21 +79,23 @@ static const char WEB_OTA_FORM[] PROGMEM =
     "<script>"
     "document.getElementById('f').onsubmit=function(e){"
     "e.preventDefault();"
+    "if(this.dataset.busy)return false;this.dataset.busy=1;"
     "var file=document.getElementById('fw').files[0],st=document.getElementById('st'),pg=document.getElementById('pg');"
-    "if(!file){alert('Choose firmware first');return false;}"
+    "var b=this.querySelector('[type=submit]');"
+    "if(!file){this.dataset.busy='';alert('Choose firmware first');return false;}"
     "var fd=new FormData();fd.append('firmware',file);"
     "function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}"
-    "var x=new XMLHttpRequest();pg.style.display='block';pg.value=0;st.textContent='Uploading 0%';"
+    "var x=new XMLHttpRequest();if(b)b.disabled=true;pg.style.display='block';pg.value=0;st.textContent='Uploading 0%';"
     "x.upload.onprogress=function(ev){if(ev.lengthComputable){var p=Math.floor(ev.loaded*100/ev.total);pg.value=p;st.textContent='Uploading '+p+'% ('+fb(ev.loaded)+'/'+fb(ev.total)+')';}};"
-    "x.onload=function(){st.textContent=(x.status==200?x.responseText:('Upload failed: HTTP '+x.status+' '+x.responseText));};"
-    "x.onerror=function(){st.textContent='Upload failed: network error';};"
+    "x.onload=function(){st.textContent=(x.status==200?x.responseText:('Upload failed: HTTP '+x.status+' '+x.responseText));if(x.status!=200){document.getElementById('f').dataset.busy='';if(b)b.disabled=false;}};"
+    "x.onerror=function(){st.textContent='Upload failed: network error';document.getElementById('f').dataset.busy='';if(b)b.disabled=false;};"
     "x.open('POST','/ota');x.send(fd);return false;};"
     "</script>";
 
 static const char WEB_REBOOT_CONFIRM[] PROGMEM =
     "<h2>Reboot</h2>"
     "<p>Are you sure you want to reboot the device?</p>"
-    "<form method=post onsubmit=\"return confirm('Reboot device now?')\">"
+    "<form method=post onsubmit=\"return confirm('Reboot device now?')&&once(this)\">"
     "<input type=submit value='Confirm Reboot' style='background:#c33'>"
     " <a href='/'>Cancel</a>"
     "</form>";
@@ -164,6 +170,12 @@ static void _sendAttrEscaped(const char* s) {
         _wb[out] = '\0';
         Esp8266BaseWeb::sendChunk(_wb);
     }
+}
+
+static void _redirect(const char* url) {
+    Esp8266BaseWeb::server().sendHeader("Location", url);
+    Esp8266BaseWeb::server().sendHeader("Cache-Control", "no-store");
+    Esp8266BaseWeb::server().send(303);
 }
 
 // ----------------------------------------------------------------------------
@@ -333,6 +345,22 @@ void Esp8266BaseWeb::_handleRoot() {
 void Esp8266BaseWeb::_handleWiFiGet() {
     if (!checkAuth()) return;
     sendHeader();
+    if (_server.hasArg("saved")) {
+        _server.sendContent("<p class=ok>Saved. Credentials updated and connection started.</p>");
+    } else if (_server.hasArg("error")) {
+        char err[24] = "";
+        strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
+        if (strcmp(err, "missing_ssid") == 0) {
+            _server.sendContent("<p class=err>SSID cannot be empty.</p>");
+        } else if (strcmp(err, "missing_password") == 0) {
+            _server.sendContent("<p class=err>Password cannot be empty.</p>");
+        } else if (strcmp(err, "save_failed") == 0) {
+            _server.sendContent("<p class=err>Failed to save WiFi credentials.</p>");
+        } else {
+            _server.sendContent("<p class=err>WiFi settings were not saved.</p>");
+        }
+    }
+
     char ssid[64] = "";
     char pass[64] = "";
     Esp8266BaseConfig::getStr("wifi_ssid", ssid, sizeof(ssid), "");
@@ -355,25 +383,19 @@ void Esp8266BaseWeb::_handleWiFiPost() {
     _trimWhitespace(ssid);
     _trimLeadingWhitespace(pass);
 
-    sendHeader();
     if (strlen(ssid) > 0 && strlen(pass) > 0) {
         ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=%s password_length=%u",
                           ssid, pass, (unsigned)strlen(pass));
-        Esp8266BaseWiFi::connect(ssid, pass);
-        _server.sendContent("<p class=ok>Saved. Connecting to <b>");
-        _sendAttrEscaped(ssid);
-        _server.sendContent("</b>...</p>");
+        if (Esp8266BaseWiFi::connect(ssid, pass)) {
+            _redirect("/wifi?saved=1");
+        } else {
+            _redirect("/wifi?error=save_failed");
+        }
     } else if (strlen(ssid) == 0) {
-        _server.sendContent("<p class=err>SSID cannot be empty.</p>");
+        _redirect("/wifi?error=missing_ssid");
     } else {
-        _server.sendContent("<p class=err>Password cannot be empty.</p>");
+        _redirect("/wifi?error=missing_password");
     }
-    sendContent_P(WEB_WIFI_FORM_PRE);
-    _sendAttrEscaped(ssid);
-    sendContent_P(WEB_WIFI_FORM_MID);
-    _sendAttrEscaped(pass);
-    sendContent_P(WEB_WIFI_FORM_POST);
-    sendFooter();
 }
 
 void Esp8266BaseWeb::_handleOtaGet() {

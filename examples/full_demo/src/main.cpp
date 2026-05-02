@@ -84,7 +84,7 @@ static const char PAGE_DEMO[] PROGMEM =
 static const char PAGE_CTRL[] PROGMEM =
     "<h2>Control Panel</h2>"
     "<h3>Deep Sleep (Sleep module)</h3>"
-    "<form method='post' action='/api/ctrl'>"
+    "<form method='post' action='/api/ctrl' onsubmit='return once(this)'>"
     "<input type='hidden' name='action' value='sleep'>"
     "Duration (s): "
     "<input type='number' name='sec' value='10' min='1' max='3600'"
@@ -92,12 +92,12 @@ static const char PAGE_CTRL[] PROGMEM =
     " <input type='submit' value='Enter Deep Sleep'>"
     "</form>"
     "<h3>Watchdog</h3>"
-    "<form method='post' action='/api/ctrl'>"
+    "<form method='post' action='/api/ctrl' onsubmit='return once(this)'>"
     "<input type='hidden' name='action' value='wdt_clear'>"
     "<input type='submit' value='Clear WDT Reset Count'>"
     "</form>"
     "<h3>Config Write Test</h3>"
-    "<form method='post' action='/api/ctrl'>"
+    "<form method='post' action='/api/ctrl' onsubmit='return once(this)'>"
     "<input type='hidden' name='action' value='cfg_write'>"
     "Value: "
     "<input type='text' name='val' maxlength='48' style='width:160px'>"
@@ -121,6 +121,26 @@ void handleCtrlPage() {
     Esp8266BaseWeb::sendFooter();
 }
 
+static void jsonEscape(const char* in, char* out, size_t outLen) {
+    if (!out || outLen == 0) return;
+    out[0] = '\0';
+    if (!in) return;
+
+    size_t n = 0;
+    while (*in && n + 1 < outLen) {
+        char c = *in++;
+        if ((c == '"' || c == '\\') && n + 2 < outLen) {
+            out[n++] = '\\';
+            out[n++] = c;
+        } else if ((uint8_t)c < 0x20) {
+            out[n++] = ' ';
+        } else {
+            out[n++] = c;
+        }
+    }
+    out[n] = '\0';
+}
+
 // ----------------------------------------------------------------
 // /api/demo — JSON 状态（GET，供 /demo 页面 JS 轮询）
 // ----------------------------------------------------------------
@@ -135,8 +155,10 @@ void handleDemoApi() {
 
     char cfgVal[48] = "";
     Esp8266BaseConfig::getStr(KEY_VAL, cfgVal, sizeof(cfgVal), "(empty)");
+    char cfgJson[100];
+    jsonEscape(cfgVal, cfgJson, sizeof(cfgJson));
 
-    char buf[280];
+    char buf[360];
     snprintf(buf, sizeof(buf),
              "{\"fw\":\"%s\",\"ver\":\"%s\","
              "\"heap\":%u,\"maxblk\":%u,"
@@ -155,7 +177,7 @@ void handleDemoApi() {
              Esp8266BaseSleep::wakeReason(),
              (long)g_bootCount,
              (unsigned long)Esp8266BaseWatchdog::resetCount(),
-             cfgVal,
+             cfgJson,
              millis() / 1000UL);
 
     Esp8266BaseWeb::server().send(200, "application/json", buf);

@@ -94,7 +94,7 @@ void handleFanPage() {
     // 静态部分放 PROGMEM
     static const char FAN_FORM[] PROGMEM =
         "<h2>Fan Control</h2>"
-        "<form method='post' action='/api/fan'>"
+        "<form method='post' action='/api/fan' onsubmit='return once(this)'>"
         "Speed: <input name='speed' type='number' min='0' max='100'>"
         "<input type='submit' value='Set'>"
         "</form>";
@@ -117,6 +117,8 @@ void handleFanPage() {
 | `sendFooter()` | free heap 显示 + `</body></html>` |
 | `sendContent_P(PGM_P)` | 单遍从 PROGMEM 读取并分块发送，无二次遍历 |
 | `sendChunk(const char*)` | 发送动态内容块（建议 <= 512B） |
+
+`sendHeader()` 内置了轻量 `once(form)` JS 辅助函数。页面表单建议在 `onsubmit` 中调用它，避免用户连续点击提交按钮。表单 POST 完成后建议使用 `303 See Other` 重定向回 GET 页面，避免浏览器刷新时重复提交。
 
 ---
 
@@ -191,7 +193,7 @@ void handleFanPage() {
 
 static const char FAN_PAGE[] PROGMEM =
     "<h2>Fan Control</h2>"
-    "<form method='post' action='/api/fan'>"
+    "<form method='post' action='/api/fan' onsubmit='return once(this)'>"
     "Speed (0-100): <input name='spd' type='number' min='0' max='100'>"
     "<input type='submit' value='Apply'>"
     "</form>";
@@ -211,7 +213,8 @@ void handleFanApi() {
     if (Esp8266BaseWeb::server().method() == HTTP_POST) {
         int spd = Esp8266BaseWeb::server().arg("spd").toInt();
         setFanSpeed(constrain(spd, 0, 100));
-        Esp8266BaseWeb::server().send(200, "application/json", "{\"ok\":true}");
+        Esp8266BaseWeb::server().sendHeader("Location", "/fan?saved=1");
+        Esp8266BaseWeb::server().send(303);
     } else {
         char buf[24];
         snprintf(buf, sizeof(buf), "{\"speed\":%d}", getFanSpeed());

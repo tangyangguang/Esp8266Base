@@ -131,8 +131,16 @@ NTP 对时前（millis 时间戳）：
 
 NTP 对时后（绝对时间）：
 ```
-[14:32:01][I][NTP ] Synced timestamp=1746087121
+[2026-05-02 14:32:01][I][NTP ] log_timestamp_mode=absolute_datetime
 ```
+
+首次对时成功时会先输出一条仍带 `millis()` 前缀的锚点日志：
+
+```
+[5846][I][NTP ] time_synchronized actual_time=2026-05-02 14:32:01 uptime_ms=5846 boot_time=2026-05-02 14:31:56
+```
+
+这条日志用于把对时前的相对启动时间换算成实际日期时间。
 
 ### 使用示例
 
@@ -355,12 +363,14 @@ static bool isRunning();
 |------|------|------|
 | `/` | GET | 首页（WiFi 状态 + 功能链接） |
 | `/wifi` | GET | WiFi 设置表单 |
-| `/wifi` | POST | 保存凭证并重连；页面回显已保存 SSID/密码 |
+| `/wifi` | POST | 保存凭证并重连；成功或失败后 `303` 跳回 GET 页面，避免刷新重复提交 |
 | `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度） |
 | `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，不额外校验 Basic Auth） |
 | `/reboot` | GET | 重启确认页 |
 | `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
+
+`/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 
 ### 使用示例
 
@@ -426,7 +436,7 @@ static bool begin();
 ```cpp
 static void handle();
 ```
-检查同步状态，成功后自动调用 `Esp8266BaseLog::setTimeProvider()` 切换日志时间格式。
+检查同步状态，成功后自动调用 `Esp8266BaseLog::setTimeProvider()` 切换日志时间格式。首次同步会记录实际时间、启动后毫秒数和推算出的本次启动时间，便于换算同步前的日志。
 
 ```cpp
 static bool isSynced();

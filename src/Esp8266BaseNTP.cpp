@@ -50,17 +50,30 @@ void Esp8266BaseNTP::handle() {
 
     if (!_synced) {
         _synced = true;
+        uint32_t uptimeMs = millis();
+        time_t bootTime = t > (time_t)(uptimeMs / 1000UL)
+            ? t - (time_t)(uptimeMs / 1000UL)
+            : 0;
+
+        char nowBuf[20];
+        char bootBuf[20] = "unknown";
         struct tm* tm_info = localtime(&t);
-        char tbuf[20];
-        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", tm_info);
-        ESP8266BASE_LOG_I("NTP ", "time_synchronized local_time=%s", tbuf);
+        strftime(nowBuf, sizeof(nowBuf), "%Y-%m-%d %H:%M:%S", tm_info);
+
+        if (bootTime > 0) {
+            struct tm* bootTm = localtime(&bootTime);
+            strftime(bootBuf, sizeof(bootBuf), "%Y-%m-%d %H:%M:%S", bootTm);
+        }
+
+        ESP8266BASE_LOG_I("NTP ", "time_synchronized actual_time=%s uptime_ms=%lu boot_time=%s",
+                          nowBuf, (unsigned long)uptimeMs, bootBuf);
     }
 
     // 仅切换一次 Log 时间格式
     if (!_logSwitched) {
         _logSwitched = true;
         Esp8266BaseLog::setTimeProvider(_timeStr);
-        ESP8266BASE_LOG_I("NTP ", "log_timestamp_mode=absolute_time");
+        ESP8266BASE_LOG_I("NTP ", "log_timestamp_mode=absolute_datetime");
     }
 }
 
@@ -91,10 +104,9 @@ bool Esp8266BaseNTP::formatTo(char* out, size_t len, const char* fmt) {
 // 返回指向静态缓冲的指针（非重入，适合串口单线程环境）
 // ----------------------------------------------------------------------------
 const char* Esp8266BaseNTP::_timeStr() {
-    static char buf[10];  // "HH:MM:SS\0" = 9 字节
+    static char buf[20];  // "YYYY-MM-DD HH:MM:SS\0" = 20 字节
     time_t t = time(nullptr);
     struct tm* tm_info = localtime(&t);
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
-             tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_info);
     return buf;
 }
