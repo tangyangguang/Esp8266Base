@@ -1,0 +1,20 @@
+{
+  "name": "Esp8266Base",
+  "version": "1.0.0",
+  "description": "Lightweight base library for ESP8266 Arduino projects. RAM-first design. No ESP32 support.",
+  "keywords": ["esp8266", "wifi", "ota", "littlefs", "watchdog", "ntp", "mdns"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourname/Esp8266Base"
+  },
+  "authors": [
+    {
+      "name": "shine"
+    }
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/yourname/Esp8266Base",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif8266"],
+  "headers": ["Esp8266Base.h"]
+}

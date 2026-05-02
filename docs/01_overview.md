@@ -1,0 +1,152 @@
+# Esp8266Base 项目总览
+
+> 版本：1.0.0  
+> 平台：ESP8266 Arduino Core（仅限）  
+> 前缀：主类 `Esp8266Base`，模块类 `Esp8266Base<模块名>`，宏 `ESP8266BASE_*`
+
+---
+
+## 一、项目定位
+
+`Esp8266Base` 是专为 ESP8266 设计的轻量级基础库。核心取舍原则：
+
+- RAM 余量 > 功能完整性
+- 稳定运行 > 功能丰富
+- 简单排错 > 复杂抽象
+- 单平台专注 > 跨平台通用
+
+代码中无任何 `#ifdef ESP32` 或跨平台分支，永远不添加。
+
+---
+
+## 二、目录结构
+
+```text
+Esp8266Base/
+├── library.json                   # PlatformIO 库描述
+├── README.md                      # 快速上手
+├── docs/
+│   ├── 01_overview.md             # 本文件：项目总览
+│   ├── 02_architecture.md         # 模块架构与依赖关系
+│   ├── 03_api_reference.md        # 完整 API 参考
+│   ├── 04_memory_budget.md        # RAM 预算与控制规则
+│   ├── 05_config_storage.md       # 配置存储设计
+│   └── 06_web_extension.md        # Web 扩展开发指南
+├── examples/
+│   ├── basic_wifi/                # WiFi STA/AP 配网示例
+│   ├── wifi_config_ota/           # Web 配网 + OTA 示例
+│   ├── custom_web/                # 自定义 Web 页面示例
+│   └── full_demo/                 # 全模块演示（参考实现）
+├── src/
+│   ├── Esp8266Base.h / .cpp       # 主入口
+│   ├── Esp8266BaseLog.h / .cpp    # 日志
+│   ├── Esp8266BaseConfig.h / .cpp # 配置存储
+│   ├── Esp8266BaseWiFi.h / .cpp   # WiFi
+│   ├── Esp8266BaseWeb.h / .cpp    # Web 管理控制台
+│   ├── Esp8266BaseOTA.h / .cpp    # OTA 固件更新
+│   ├── Esp8266BaseNTP.h / .cpp    # NTP 网络对时
+│   ├── Esp8266BaseMDNS.h / .cpp   # mDNS hostname.local
+│   ├── Esp8266BaseSleep.h / .cpp  # 深度睡眠 / Modem sleep
+│   └── Esp8266BaseWatchdog.h / .cpp # 软件看门狗
+└── partitions/
+    └── esp8266-4mb-2mfs.ld        # 4MB Flash 自定义分区脚本
+```
+
+---
+
+## 三、命名约定
+
+| 类型 | 规则 | 示例 |
+|------|------|------|
+| 主入口类 | `Esp8266Base` | `Esp8266Base::begin()` |
+| 模块类 | `Esp8266Base<Module>` | `Esp8266BaseLog`，`Esp8266BaseWiFi` |
+| 编译宏 | `ESP8266BASE_*` | `ESP8266BASE_LOG_LEVEL` |
+| 日志宏 | `ESP8266BASE_LOG_D/I/W/E` | `ESP8266BASE_LOG_I("WiFi", "connected")` |
+| 源文件 | `Esp8266Base<Module>.h/.cpp` | `Esp8266BaseConfig.h` |
+
+---
+
+## 四、模块一览
+
+| 模块 | 类名 | 主要职责 |
+|------|------|----------|
+| 主入口 | `Esp8266Base` | 初始化协调、统一 handle |
+| 日志 | `Esp8266BaseLog` | 串口日志、编译期等级、时间戳 |
+| 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
+| WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
+| Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、应用扩展 |
+| OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、认证校验 |
+| NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
+| mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
+| Sleep | `Esp8266BaseSleep` | modem/deep sleep 封装、唤醒原因 |
+| Watchdog | `Esp8266BaseWatchdog` | 主循环活性监控、WDT 计数持久化 |
+
+---
+
+## 五、编译配置
+
+`platformio.ini` 参考：
+
+```ini
+[env:esp12f]
+platform             = espressif8266
+board                = esp12e
+framework            = arduino
+monitor_speed        = 115200
+upload_speed         = 460800
+board_build.ldscript = ../../partitions/esp8266-4mb-2mfs.ld
+
+lib_deps =
+    LittleFS
+
+build_flags =
+    -DESP8266BASE_LOG_LEVEL=1
+    -DESP8266BASE_WEB_MAX_APP_PAGES=4
+    -DESP8266BASE_WEB_MAX_APP_APIS=6
+    -DESP8266BASE_WEB_AUTH_USER=\"admin\"
+    -DESP8266BASE_WEB_AUTH_PASS=\"esp8266\"
+    -DESP8266BASE_NTP_TIMEZONE=28800
+    -DESP8266BASE_WDT_TIMEOUT_MS=2500
+```
+
+编译宏说明：
+
+| 宏 | 默认值 | 说明 |
+|---|---|---|
+| `ESP8266BASE_LOG_LEVEL` | `1` | 0=D, 1=I, 2=W, 3=E, 4=关闭 |
+| `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大数量 |
+| `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大数量 |
+| `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 用户名 |
+| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 密码 |
+| `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
+| `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
+| `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
+| `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `15000` | WiFi STA 连接超时 ms |
+
+---
+
+## 六、RAM 控制规则
+
+以下规则不得违反：
+
+1. 禁止全局大缓冲（> 512B）
+2. 所有 HTML 内容放 `PROGMEM`，不保存在 DRAM
+3. Web 响应用 `sendContent()` 分段发送，不拼接整页 `String`
+4. 禁止 `std::function`，使用函数指针（`typedef void (*Handler)()`）
+5. 禁止 STL 容器，使用固定大小静态数组
+6. 禁止在模块全局状态中保存 `String` 对象，使用 `char[]`
+7. 禁止递归
+8. 每个新模块必须在 `docs/04_memory_budget.md` 中声明 RAM 预算
+
+---
+
+## 七、明确不支持
+
+- ESP32 / ESP32-S3 / ESP32-C3
+- HAL 抽象层
+- 事件总线 / 通用 Scheduler
+- 文件日志（FileLog）
+- 复杂 JSON API / 页面模板引擎
+- 多用户权限 / HTTPS / WebSocket / 异步 Web
+- POSIX 时区字符串 / 夏令时
+- 动态路由表 / 无限制页面注册
