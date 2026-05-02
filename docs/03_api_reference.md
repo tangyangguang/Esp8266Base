@@ -32,12 +32,12 @@
 ```cpp
 static bool begin();
 ```
-初始化所有已启用的模块，严格按固定顺序：Log → Sleep → Config → WiFi → Watchdog → Web → OTA。输出启动诊断日志。返回 `false` 仅表示 Config（LittleFS）初始化失败，其余模块仍会继续初始化。
+按编译期开关初始化模块，固定顺序：Log → Sleep → Config → WiFi → Watchdog → Web → OTA。输出启动诊断日志。返回 `false` 仅表示 Config（LittleFS）初始化失败，其余模块仍会继续初始化。
 
 ```cpp
 static void handle();
 ```
-在 `loop()` 中每轮调用。推进所有模块的非阻塞状态机，调用顺序：Config → WiFi → NTP触发 → mDNS触发 → NTP → mDNS → Web → Watchdog。
+在 `loop()` 中每轮调用。推进已编译模块的非阻塞状态机，调用顺序：Config → WiFi → NTP触发 → mDNS触发 → NTP → mDNS → Web → Watchdog。
 
 ```cpp
 static void setFirmwareInfo(const char* name, const char* version);
@@ -48,15 +48,6 @@ static void setFirmwareInfo(const char* name, const char* version);
 static void setHostname(const char* hostname);
 ```
 设置设备 hostname，用于 AP SSID 后缀、mDNS 名称、Web 页面标题。最长 24 字符。必须在 `begin()` 前调用。
-
-```cpp
-static void enableWeb(bool enabled);
-static void enableOTA(bool enabled);
-static void enableNTP(bool enabled);
-static void enableMDNS(bool enabled);
-static void enableWatchdog(bool enabled);
-```
-在 `begin()` 前调用，控制各模块是否启用。默认全部启用。
 
 ```cpp
 static const char* firmwareName();
@@ -267,7 +258,7 @@ enum class Esp8266BaseWiFiState : uint8_t {
 ```cpp
 static bool begin();
 ```
-从 Config 读取凭证并缓存到内存，启动 WiFi 状态机（非阻塞）。无凭证时直接进入 AP_CONFIG；有凭证但连接超时时进入 AP_CONFIG + STA 后台重连，AP 可访问配网页，STA 会持续按节流策略重试并在恢复后关闭 AP。
+从 Config 读取凭证并缓存到内存，启动 WiFi 状态机（非阻塞）。无凭证时直接进入 AP_CONFIG；有凭证时只按 STA 模式持续退避重连，不自动打开配置 AP。需要进入 AP 配网时，应明确清除 WiFi 凭证后重启。
 
 ```cpp
 static void handle();
@@ -296,8 +287,9 @@ static const char* apSSID();
 
 | 参数 | 默认值 |
 |------|--------|
-| STA 连接超时 | 15000ms（`ESP8266BASE_WIFI_CONNECT_TIMEOUT`） |
-| 首次重试间隔 | 15000ms（`ESP8266BASE_WIFI_RETRY_FAST`） |
+| STA 连接观察窗口 | 20000ms（`ESP8266BASE_WIFI_CONNECT_TIMEOUT`） |
+| 快速重试间隔 | 5000ms（`ESP8266BASE_WIFI_RETRY_FAST`） |
+| 快速重试次数 | 3（`ESP8266BASE_WIFI_RETRY_FAST_COUNT`） |
 | 慢速重试间隔 | 60000ms（`ESP8266BASE_WIFI_RETRY_SLOW`） |
 | AP SSID | `ESP8266-Config-<ChipID后4位>` |
 | AP 密码 | 空（开放），可通过 key `ap_pass` 配置 |
@@ -637,6 +629,12 @@ void loop() {
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 日志等级：0=D, 1=I, 2=W, 3=E, 4=关闭 |
+| `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
+| `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
+| `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
+| `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
+| `ESP8266BASE_USE_SLEEP` | `1` | 编译 Sleep |
+| `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大注册数 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大注册数 |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 用户名 |
@@ -647,7 +645,8 @@ void loop() {
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
 | `ESP8266BASE_CFG_KEY_MAX` | `24` | Config key 最大字符数 |
 | `ESP8266BASE_CFG_STR_MAX` | `96` | Config string value 最大字节数 |
-| `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `15000` | WiFi STA 连接超时 ms |
-| `ESP8266BASE_WIFI_RETRY_FAST` | `15000` | WiFi 首次重试间隔 ms |
+| `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
+| `ESP8266BASE_WIFI_RETRY_FAST` | `5000` | WiFi 快速重试间隔 ms |
+| `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
 | `ESP8266BASE_SLEEP_MAX_DEEP_SEC` | `3600` | deepSleep 最大秒数上限 |

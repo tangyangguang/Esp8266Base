@@ -71,9 +71,9 @@ Esp8266Base（主入口）
 2. Esp8266BaseSleep::begin()        — 读取唤醒原因（须在 Config 前）
 3. Esp8266BaseConfig::begin()       — 挂载 LittleFS；首次挂载失败时自动 format 后重试
 4. Esp8266BaseWiFi::begin()         — 读取凭证并缓存，启动状态机（非阻塞）
-5. Esp8266BaseWatchdog::begin()     — 如果已启用
-6. Esp8266BaseWeb::begin()          — 如果已启用（注册内置路由，开始监听）
-7. Esp8266BaseOTA::begin()          — 如果 Web 和 OTA 均已启用（注册 POST /ota）
+5. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
+6. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）
+7. Esp8266BaseOTA::begin()          — `ESP8266BASE_USE_OTA=1` 时（要求 Web，注册 POST /ota）
 8. Esp8266Base::logDiagnostics()    — 输出启动诊断日志
 ```
 
@@ -91,10 +91,10 @@ Esp8266Base（主入口）
 3. NTP 触发检测                      — WiFi 已连接且 NTP 未启动：调用 Esp8266BaseNTP::begin()
 4. mDNS 触发检测                     — WiFi 已连接且 mDNS 未启动：调用 Esp8266BaseMDNS::begin()
                                        WiFi 掉线时：重置 mDNS 状态，等待重连后重启
-5. Esp8266BaseNTP::handle()         — 对时状态检查（如果已启用）
-6. Esp8266BaseMDNS::handle()        — MDNS.update()（如果已启用）
-7. Esp8266BaseWeb::handle()         — server.handleClient()（如果已启用）
-8. Esp8266BaseWatchdog::handle()    — 超时检查（如果已启用）
+5. Esp8266BaseNTP::handle()         — `ESP8266BASE_USE_NTP=1` 时
+6. Esp8266BaseMDNS::handle()        — `ESP8266BASE_USE_MDNS=1` 时
+7. Esp8266BaseWeb::handle()         — `ESP8266BASE_USE_WEB=1` 时，请求前后喂库级 WDT
+8. Esp8266BaseWatchdog::handle()    — `ESP8266BASE_USE_WATCHDOG=1` 时
    Esp8266BaseWatchdog::feed()      — 本轮完成后喂狗
 ```
 
@@ -105,26 +105,24 @@ Esp8266Base（主入口）
 ## 六、WiFi 状态机
 
 ```text
-          ┌──────┐
-     ───► │ IDLE │ ──── begin() ──────────────────────────────┐
-          └──────┘                                             │
-                                                               ▼
-          ┌────────────┐  首次连接超时     ┌───────────────────────┐
-          │ CONNECTING │ ──────────────►  │ AP_CONFIG + STA retry │
-          └─────┬──────┘                  │ （AP 可配网，后台重连）│
-                │ connected               └──────────┬────────────┘
-                ▼                                    │ STA 恢复或 connect() 保存新凭证
-          ┌───────────┐                              │
-          │ CONNECTED │ ◄────────────────────────────┘
-          └─────┬─────┘
-                │ WiFi 掉线
-                ▼
-          ┌────────────┐  （使用内存缓存凭证，不再读 Flash）
-          │ CONNECTING │ （快速重试 15s，之后慢速重试 60s）
-          └────────────┘
+          ┌──────┐       有凭证       ┌────────────┐
+     ───► │ IDLE │ ─────────────────► │ CONNECTING │
+          └──┬───┘                    └─────┬──────┘
+             │ 无凭证                       │ connected
+             ▼                              ▼
+          ┌───────────┐  connect()    ┌───────────┐
+          │ AP_CONFIG │ ────────────► │ CONNECTED │
+          └───────────┘               └─────┬─────┘
+                                           │ WiFi 掉线
+                                           ▼
+                                     ┌────────────┐
+                                     │ CONNECTING │
+                                     │ 前 3 次 15s │
+                                     │ 之后 60s    │
+                                     └────────────┘
 ```
 
-重连使用内存中缓存的凭证（`_staSSID` / `_staPass`），从不在重连路径上读 Flash。若启动时已有凭证但暂时连不上，设备会进入 `WIFI_AP_STA`：AP 继续提供配网页面，STA 后台按 15s/60s 节流策略持续重连；STA 连上后自动关闭 AP 并回到纯 STA。
+重连使用内存中缓存的凭证（`_staSSID` / `_staPass`），从不在重连路径上读 Flash。若启动时已有凭证但暂时连不上，设备保持纯 STA 模式并持续退避重连，不自动打开配置 AP。只有无凭证，或用户明确清除凭证后重启，才进入 `AP_CONFIG`。
 
 ---
 

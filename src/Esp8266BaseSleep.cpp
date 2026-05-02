@@ -1,3 +1,5 @@
+#include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_SLEEP
 #include "Esp8266BaseSleep.h"
 #include "Esp8266BaseLog.h"
 #include "Esp8266BaseConfig.h"
@@ -107,3 +109,4 @@ const char* Esp8266BaseSleep::wakeReason() {
 bool Esp8266BaseSleep::isDeepSleepWake() {
     return strcmp(_wakeReason, "deep-sleep") == 0;
 }
+#endif

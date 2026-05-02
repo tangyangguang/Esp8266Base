@@ -37,12 +37,6 @@ void setup() {
     Esp8266Base::setFirmwareInfo("my-device", "1.0.0");
     Esp8266Base::setHostname("esp-device");  // 访问 http://esp-device.local/
 
-    Esp8266Base::enableWeb(true);
-    Esp8266Base::enableOTA(true);
-    Esp8266Base::enableNTP(true);
-    Esp8266Base::enableMDNS(true);
-    Esp8266Base::enableWatchdog(true);
-
     Esp8266Base::begin();
 
     // 注册自定义页面（begin() 之后调用）
@@ -124,6 +118,12 @@ lib_deps             = LittleFS
 
 build_flags =
     -DESP8266BASE_LOG_LEVEL=1
+    -DESP8266BASE_USE_WEB=1
+    -DESP8266BASE_USE_OTA=1
+    -DESP8266BASE_USE_NTP=1
+    -DESP8266BASE_USE_MDNS=1
+    -DESP8266BASE_USE_SLEEP=1
+    -DESP8266BASE_USE_WATCHDOG=1
     -DESP8266BASE_WEB_AUTH_USER=\"admin\"
     -DESP8266BASE_WEB_AUTH_PASS=\"esp8266\"
     -DESP8266BASE_WDT_TIMEOUT_MS=2500
@@ -133,10 +133,17 @@ build_flags =
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 0=D 1=I 2=W 3=E 4=关闭 |
+| `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
+| `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `USE_WEB=1` |
+| `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
+| `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
+| `ESP8266BASE_USE_SLEEP` | `1` | 编译 Sleep |
+| `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面上限 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 上限 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时 ms |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
+| `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数，之后进入慢速重试 |
 
 根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为烟测入口；各示例目录仍保留自己的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
 

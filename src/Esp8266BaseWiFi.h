@@ -6,20 +6,24 @@
 //
 // 状态机：
 //   IDLE → CONNECTING → CONNECTED
-//               ↓ 首次连接超时
-//           AP_CONFIG + STA retry（AP 可配网，同时后台持续重连）
-//               ↓ STA connected
-//           CONNECTED（关闭 AP）
+//               ↓ 连接超时
+//           CONNECTING（退避后一直重连）
+//
+// 只有无保存凭证，或用户明确清除凭证后重启，才进入 AP_CONFIG。
 //
 // RAM 预算：<= 256B（全局静态，不含 WiFi SDK 内部）
 // ----------------------------------------------------------------------------
 
 #ifndef ESP8266BASE_WIFI_CONNECT_TIMEOUT
-#define ESP8266BASE_WIFI_CONNECT_TIMEOUT 15000   // ms：首次连接超时
+#define ESP8266BASE_WIFI_CONNECT_TIMEOUT 20000   // ms：单次 STA 连接观察窗口
 #endif
 
 #ifndef ESP8266BASE_WIFI_RETRY_FAST
-#define ESP8266BASE_WIFI_RETRY_FAST 15000        // ms：掉线后首次重试间隔
+#define ESP8266BASE_WIFI_RETRY_FAST 5000         // ms：快速重试间隔
+#endif
+
+#ifndef ESP8266BASE_WIFI_RETRY_FAST_COUNT
+#define ESP8266BASE_WIFI_RETRY_FAST_COUNT 3      // 前几次使用快速重试
 #endif
 
 #ifndef ESP8266BASE_WIFI_RETRY_SLOW
@@ -66,7 +70,6 @@ private:
     static uint32_t             _connectStart; // 4B：连接尝试开始时刻；0 表示等待下次重试
     static uint32_t             _retryAt;      // 4B：下次重试的绝对 millis
     static uint8_t              _retryCount;   // 1B：已重试次数（用于区分首次/慢速）
-    static bool                 _everConnected;// 1B：是否曾经连上（区分首次/断线重连）
     static char                 _apSSID[28];   // 28B："ESP8266-Config-XXXX\0"
     static char                 _ip[16];       // 16B：点分十进制 IP
     static char                 _staSSID[64];  // 64B：缓存的 STA SSID，避免重连时重读 Flash

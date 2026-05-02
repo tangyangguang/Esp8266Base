@@ -20,6 +20,7 @@
 
 #include <Arduino.h>
 #include "Esp8266Base.h"
+#include <LittleFS.h>
 
 // 自定义 Config key
 static const char KEY_BOOT[] = "demo_boot";
@@ -63,8 +64,7 @@ static const char PAGE_DEMO[] PROGMEM =
     "</table>"
     "<script>"
     "function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}"
-    "function r(){"
-    "fetch('/api/demo').then(x=>x.json()).then(d=>{"
+    "function a(d){"
     "document.getElementById('fw').textContent=d.fw+' v'+d.ver;"
     "document.getElementById('up').textContent=d.uptime+'s';"
     "document.getElementById('hp').textContent=fb(d.heap);"
@@ -76,15 +76,21 @@ static const char PAGE_DEMO[] PROGMEM =
     "document.getElementById('bc').textContent=d.boot;"
     "document.getElementById('wdt').textContent=d.wdt_cnt;"
     "document.getElementById('cv').textContent=d.cfg_val;"
-    "})}"
-    "r();setInterval(r,2000);"
+    "}"
+    "function r(){fetch('/api/demo').then(x=>x.json()).then(a)}";
+
+static const char PAGE_DEMO_POST[] PROGMEM =
+    "setInterval(r,2000);"
     "</script>";
 
 // /ctrl — 控制面板（纯 GET 页面，动作提交到 POST /api/ctrl）
 static const char PAGE_CTRL[] PROGMEM =
     "<h2>Control Panel</h2>"
+    "<h3>Stored Config</h3>";
+
+static const char PAGE_CTRL_ACTIONS[] PROGMEM =
     "<h3>Deep Sleep (Sleep module)</h3>"
-    "<form method='post' action='/api/ctrl' onsubmit='return once(this)'>"
+    "<form method='post' action='/api/ctrl' onsubmit=\"return confirm('Enter deep sleep now? ESP8266 wakes only if GPIO16 is wired to RST.')&&once(this)\">"
     "<input type='hidden' name='action' value='sleep'>"
     "Duration (s): "
     "<input type='number' name='sec' value='10' min='1' max='3600'"
@@ -107,10 +113,22 @@ static const char PAGE_CTRL[] PROGMEM =
 // ----------------------------------------------------------------
 // Page handlers
 // ----------------------------------------------------------------
+static void jsonEscape(const char* in, char* out, size_t outLen);
+static void sendHtmlEscaped(const char* in);
+static void sendConfigTable();
+static void buildDemoJson(char* buf, size_t len);
+static bool g_sleepPending = false;
+
 void handleDemoPage() {
     if (!Esp8266BaseWeb::checkAuth()) return;
     Esp8266BaseWeb::sendHeader();
     Esp8266BaseWeb::sendContent_P(PAGE_DEMO);
+    char buf[360];
+    buildDemoJson(buf, sizeof(buf));
+    Esp8266BaseWeb::sendChunk("a(");
+    Esp8266BaseWeb::sendChunk(buf);
+    Esp8266BaseWeb::sendChunk(");");
+    Esp8266BaseWeb::sendContent_P(PAGE_DEMO_POST);
     Esp8266BaseWeb::sendFooter();
 }
 
@@ -118,6 +136,8 @@ void handleCtrlPage() {
     if (!Esp8266BaseWeb::checkAuth()) return;
     Esp8266BaseWeb::sendHeader();
     Esp8266BaseWeb::sendContent_P(PAGE_CTRL);
+    sendConfigTable();
+    Esp8266BaseWeb::sendContent_P(PAGE_CTRL_ACTIONS);
     Esp8266BaseWeb::sendFooter();
 }
 
@@ -141,12 +161,87 @@ static void jsonEscape(const char* in, char* out, size_t outLen) {
     out[n] = '\0';
 }
 
-// ----------------------------------------------------------------
-// /api/demo — JSON 状态（GET，供 /demo 页面 JS 轮询）
-// ----------------------------------------------------------------
-void handleDemoApi() {
-    if (!Esp8266BaseWeb::checkAuth()) return;
+static void sendHtmlEscaped(const char* in) {
+    if (!in) return;
+    char out[96];
+    size_t n = 0;
+    while (*in) {
+        const char* repl = nullptr;
+        switch (*in) {
+            case '&': repl = "&amp;"; break;
+            case '<': repl = "&lt;"; break;
+            case '>': repl = "&gt;"; break;
+            case '"': repl = "&quot;"; break;
+            default: break;
+        }
+        if (repl) {
+            for (const char* p = repl; *p; p++) {
+                out[n++] = *p;
+                if (n == sizeof(out) - 1) {
+                    out[n] = '\0';
+                    Esp8266BaseWeb::sendChunk(out);
+                    n = 0;
+                }
+            }
+        } else {
+            out[n++] = *in;
+            if (n == sizeof(out) - 1) {
+                out[n] = '\0';
+                Esp8266BaseWeb::sendChunk(out);
+                n = 0;
+            }
+        }
+        in++;
+    }
+    if (n > 0) {
+        out[n] = '\0';
+        Esp8266BaseWeb::sendChunk(out);
+    }
+}
 
+static void sendConfigTable() {
+    Esp8266BaseConfig::flush();
+    Esp8266BaseWeb::sendChunk(
+        "<table border='1' cellpadding='5' cellspacing='0' style='width:100%'>"
+        "<tr><th>Key</th><th>Value</th></tr>");
+
+    bool any = false;
+    Dir dir = LittleFS.openDir("/");
+    while (dir.next()) {
+        String name = dir.fileName();
+        const char* key = nullptr;
+        if (name.startsWith("/cfg_")) {
+            key = name.c_str() + 5;
+        } else if (name.startsWith("cfg_")) {
+            key = name.c_str() + 4;
+        } else {
+            continue;
+        }
+        any = true;
+
+        char value[ESP8266BASE_CFG_STR_MAX + 1] = "";
+        File f = LittleFS.open(name, "r");
+        if (f) {
+            size_t n = f.readBytes(value, sizeof(value) - 1);
+            value[n] = '\0';
+            f.close();
+        }
+
+        Esp8266BaseWeb::sendChunk("<tr><td>");
+        sendHtmlEscaped(key);
+        Esp8266BaseWeb::sendChunk("</td><td>");
+        sendHtmlEscaped(value);
+        Esp8266BaseWeb::sendChunk("</td></tr>");
+        yield();
+    }
+
+    if (!any) {
+        Esp8266BaseWeb::sendChunk("<tr><td colspan='2'>(no stored config)</td></tr>");
+    }
+    Esp8266BaseWeb::sendChunk("</table>");
+}
+
+static void buildDemoJson(char* buf, size_t len) {
     char timeBuf[20] = "not synced";
     Esp8266BaseNTP::formatTo(timeBuf, sizeof(timeBuf), "%H:%M:%S");
 
@@ -158,8 +253,7 @@ void handleDemoApi() {
     char cfgJson[100];
     jsonEscape(cfgVal, cfgJson, sizeof(cfgJson));
 
-    char buf[360];
-    snprintf(buf, sizeof(buf),
+    snprintf(buf, len,
              "{\"fw\":\"%s\",\"ver\":\"%s\","
              "\"heap\":%u,\"maxblk\":%u,"
              "\"ip\":\"%s\",\"mdns\":\"%s\","
@@ -179,7 +273,15 @@ void handleDemoApi() {
              (unsigned long)Esp8266BaseWatchdog::resetCount(),
              cfgJson,
              millis() / 1000UL);
+}
 
+// ----------------------------------------------------------------
+// /api/demo — JSON 状态（GET，供 /demo 页面 JS 轮询）
+// ----------------------------------------------------------------
+void handleDemoApi() {
+    if (!Esp8266BaseWeb::checkAuth()) return;
+    char buf[360];
+    buildDemoJson(buf, sizeof(buf));
     Esp8266BaseWeb::server().send(200, "application/json", buf);
 }
 
@@ -195,19 +297,29 @@ void handleCtrlApi() {
             sizeof(action) - 1);
 
     if (strcmp(action, "sleep") == 0) {
+        if (g_sleepPending) {
+            Esp8266BaseWeb::server().send(409, "text/plain", "Deep sleep already requested");
+            return;
+        }
+        g_sleepPending = true;
+
         int sec = Esp8266BaseWeb::server().arg("sec").toInt();
         if (sec < 1) sec = 10;
 
-        char body[200];
+        char body[420];
         snprintf(body, sizeof(body),
                  "<!DOCTYPE html><html><head><meta charset=UTF-8></head>"
                  "<body><h2>Deep Sleep</h2>"
-                 "<p>Sleeping for %d seconds...</p>"
+                 "<p>Command accepted. Sleeping for %d seconds...</p>"
+                 "<p>ESP8266 deep sleep turns WiFi and Web off. The device wakes automatically only when GPIO16 is wired to RST; otherwise press RST or power-cycle it.</p>"
+                 "<p>After wake, reopen <a href='/demo'>/demo</a>.</p>"
                  "</body></html>", sec);
         Esp8266BaseWeb::server().send(200, "text/html", body);
+        Esp8266BaseWeb::server().client().flush();
         Esp8266BaseWeb::server().client().stop();
-        delay(300);
-        ESP8266BASE_LOG_I("App ", "Deep sleep triggered sec=%d", sec);
+        delay(1200);
+        ESP8266BASE_LOG_I("App ", "deep_sleep_requested source=web duration=%ds wake_requires=GPIO16_to_RST",
+                          sec);
         Esp8266BaseSleep::deepSleep((uint32_t)sec);
         return;  // not reached
 
@@ -297,12 +409,6 @@ void setup() {
 
     Esp8266Base::setFirmwareInfo("full-demo", "1.0.0");
     Esp8266Base::setHostname("esp-demo");
-
-    Esp8266Base::enableWeb(true);
-    Esp8266Base::enableOTA(true);
-    Esp8266Base::enableNTP(true);
-    Esp8266Base::enableMDNS(true);
-    Esp8266Base::enableWatchdog(true);
 
     Esp8266Base::begin();
 

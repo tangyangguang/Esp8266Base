@@ -89,13 +89,6 @@ void setup() {
     Esp8266Base::setFirmwareInfo("sleep-wdt", "0.2.0");
     Esp8266Base::setHostname("esp-sleep");
 
-    // Phase 4：全部启用（Web/OTA 关闭以节省 RAM，专注 Sleep/WDT 演示）
-    Esp8266Base::enableWeb(false);
-    Esp8266Base::enableOTA(false);
-    Esp8266Base::enableNTP(false);
-    Esp8266Base::enableMDNS(false);
-    Esp8266Base::enableWatchdog(true);
-
     Esp8266Base::begin();
 
     // 启动后立即检查 WDT 重启记录

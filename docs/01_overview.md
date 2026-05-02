@@ -125,7 +125,7 @@ build_flags =
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
-| `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `15000` | WiFi STA 连接超时 ms |
+| `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
 
 根目录配置使用 `full_demo` 作为库烟测入口；单独编译示例时进入 `examples/<name>` 目录运行 `pio run -e esp12f`。上传统一使用 `460800` baud。
 

@@ -73,8 +73,11 @@ private:
     static char             _authUser[24];                      // 24B
     static char             _authPass[24];                      // 24B
     static char             _titleBuf[48];                      // "hostname (fw ver)" 48B
+    static char             _activeUri[32];                     // 当前请求 URI，用于慢请求日志
+    static char             _activeMethod[5];                   // GET/POST
 
     // 内置路由处理函数（静态，无捕获）
+    static void _markRequest();
     static void _handleRoot();
     static void _handleWiFiGet();
     static void _handleWiFiPost();

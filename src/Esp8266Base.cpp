@@ -7,14 +7,12 @@ char Esp8266Base::_fwName[24]    = "esp8266base";
 char Esp8266Base::_fwVersion[16] = "0.1.0";
 char Esp8266Base::_hostname[24]  = "esp8266";
 
-bool Esp8266Base::_webEnabled      = true;
-bool Esp8266Base::_otaEnabled      = true;
-bool Esp8266Base::_ntpEnabled      = true;
-bool Esp8266Base::_mdnsEnabled     = true;
-bool Esp8266Base::_watchdogEnabled = true;
-
+#if ESP8266BASE_USE_NTP
 bool Esp8266Base::_ntpWasTriggered = false;
+#endif
+#if ESP8266BASE_USE_MDNS
 bool Esp8266Base::_mdnsWasStarted  = false;
+#endif
 
 // ----------------------------------------------------------------------------
 // 启动前配置
@@ -31,12 +29,6 @@ void Esp8266Base::setHostname(const char* hostname) {
     }
 }
 
-void Esp8266Base::enableWeb(bool enabled)      { _webEnabled      = enabled; }
-void Esp8266Base::enableOTA(bool enabled)      { _otaEnabled      = enabled; }
-void Esp8266Base::enableNTP(bool enabled)      { _ntpEnabled      = enabled; }
-void Esp8266Base::enableMDNS(bool enabled)     { _mdnsEnabled     = enabled; }
-void Esp8266Base::enableWatchdog(bool enabled) { _watchdogEnabled = enabled; }
-
 // ----------------------------------------------------------------------------
 // begin — 按序初始化各模块
 // ----------------------------------------------------------------------------
@@ -47,7 +39,9 @@ bool Esp8266Base::begin() {
     Esp8266BaseLog::begin();
 
     // 2. Sleep — 检测唤醒原因（在 Config 前，尽早记录）
+#if ESP8266BASE_USE_SLEEP
     Esp8266BaseSleep::begin();
+#endif
 
     // 3. Config — 挂载 LittleFS，加载配置
     if (!Esp8266BaseConfig::begin()) {
@@ -58,20 +52,20 @@ bool Esp8266Base::begin() {
     Esp8266BaseWiFi::begin();
 
     // 5. Watchdog — begin() 后启动，使循环受监控
-    if (_watchdogEnabled) {
-        Esp8266BaseWatchdog::begin();
-    }
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::begin();
+#endif
 
     // 6. Web — 注册内置路由（OTA 路由由 OTA 模块在此后注册）
-    if (_webEnabled) {
-        Esp8266BaseWeb::setTitle(_hostname, _fwName, _fwVersion);
-        Esp8266BaseWeb::begin();
-    }
+#if ESP8266BASE_USE_WEB
+    Esp8266BaseWeb::setTitle(_hostname, _fwName, _fwVersion);
+    Esp8266BaseWeb::begin();
+#endif
 
     // 7. OTA — 必须在 Web 启动后注册 POST /ota
-    if (_webEnabled && _otaEnabled) {
-        Esp8266BaseOTA::begin();
-    }
+#if ESP8266BASE_USE_OTA
+    Esp8266BaseOTA::begin();
+#endif
 
     // 8. NTP / mDNS — 需要 WiFi 连接后触发（在 handle() 中检测）
 
@@ -92,40 +86,56 @@ void Esp8266Base::handle() {
     Esp8266BaseWiFi::handle();
 
     // 3. WiFi 连接后触发 NTP / mDNS；WiFi 掉线后重置 mDNS 标志以便重连后重启
+#if ESP8266BASE_USE_NTP || ESP8266BASE_USE_MDNS
     bool wifiNow = Esp8266BaseWiFi::isConnected();
-    if (_ntpEnabled && !_ntpWasTriggered && wifiNow) {
+#endif
+#if ESP8266BASE_USE_NTP
+    if (!_ntpWasTriggered && wifiNow) {
         Esp8266BaseNTP::begin();
         _ntpWasTriggered = true;
     }
-    if (_mdnsEnabled) {
-        if (!_mdnsWasStarted && wifiNow) {
-            Esp8266BaseMDNS::begin(_hostname);
-            _mdnsWasStarted = true;
-        } else if (_mdnsWasStarted && !wifiNow) {
-            _mdnsWasStarted = false;  // WiFi 掉线，下次连上时重启 mDNS
-        }
+#endif
+#if ESP8266BASE_USE_MDNS
+    if (!_mdnsWasStarted && wifiNow) {
+        Esp8266BaseMDNS::begin(_hostname);
+        _mdnsWasStarted = true;
+    } else if (_mdnsWasStarted && !wifiNow) {
+        _mdnsWasStarted = false;  // WiFi 掉线，下次连上时重启 mDNS
     }
+#endif
 
     // 4. NTP handle（同步状态检查，每 5s 一次）
-    if (_ntpEnabled && _ntpWasTriggered) {
+#if ESP8266BASE_USE_NTP
+    if (_ntpWasTriggered) {
         Esp8266BaseNTP::handle();
     }
+#endif
 
     // 5. mDNS handle（MDNS.update()）
-    if (_mdnsEnabled && _mdnsWasStarted) {
+#if ESP8266BASE_USE_MDNS
+    if (_mdnsWasStarted) {
         Esp8266BaseMDNS::handle();
     }
+#endif
 
     // 6. Web handle（server.handleClient()）
-    if (_webEnabled) {
-        Esp8266BaseWeb::handle();
-    }
+    // Feed around Web I/O so slow clients do not trip the library watchdog.
+    // Do not pause/resume here: handle() runs every loop and Debug logs would flood serial.
+#if ESP8266BASE_USE_WEB
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+    Esp8266BaseWeb::handle();
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+#endif
 
     // 7. Watchdog handle — 最后检查，再喂狗，确保本轮所有模块都已执行且未超时
-    if (_watchdogEnabled) {
-        Esp8266BaseWatchdog::handle();
-        Esp8266BaseWatchdog::feed();
-    }
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::handle();
+    Esp8266BaseWatchdog::feed();
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -140,7 +150,11 @@ void Esp8266Base::logDiagnostics() {
     ESP8266BASE_LOG_I("Base", "firmware=%s version=%s free_heap=%s",
                       _fwName, _fwVersion, heapBuf);
 
+#if ESP8266BASE_USE_SLEEP
     ESP8266BASE_LOG_I("SLEP", "wake_reason=%s", Esp8266BaseSleep::wakeReason());
+#else
+    ESP8266BASE_LOG_I("SLEP", "sleep_module=disabled");
+#endif
 
     ESP8266BASE_LOG_I("Cfg ", "config_ready=%s pending_writes=%d/%d",
                       Esp8266BaseConfig::isReady() ? "yes" : "no",
@@ -154,15 +168,25 @@ void Esp8266Base::logDiagnostics() {
                           ssid, Esp8266BaseWiFi::apSSID());
     }
 
-    if (_watchdogEnabled) {
-        ESP8266BASE_LOG_I("WDT ", "watchdog_enabled=yes previous_watchdog_reset=%s reset_count=%u",
-                          Esp8266BaseWatchdog::wasWatchdogReset() ? "yes" : "no",
-                          (unsigned)Esp8266BaseWatchdog::resetCount());
-    }
+#if ESP8266BASE_USE_WATCHDOG
+    ESP8266BASE_LOG_I("WDT ", "watchdog_enabled=yes previous_watchdog_reset=%s reset_count=%u",
+                      Esp8266BaseWatchdog::wasWatchdogReset() ? "yes" : "no",
+                      (unsigned)Esp8266BaseWatchdog::resetCount());
+#else
+    ESP8266BASE_LOG_I("WDT ", "watchdog_enabled=no");
+#endif
 
-    if (_webEnabled) {
-        ESP8266BASE_LOG_I("Web ", "web_enabled=yes ota_enabled=%s", _otaEnabled ? "yes" : "no");
-    }
+#if ESP8266BASE_USE_WEB
+    ESP8266BASE_LOG_I("Web ", "web_enabled=yes ota_enabled=%s",
+#if ESP8266BASE_USE_OTA
+                      "yes"
+#else
+                      "no"
+#endif
+    );
+#else
+    ESP8266BASE_LOG_I("Web ", "web_enabled=no ota_enabled=no");
+#endif
 
     ESP8266BASE_LOG_I("Heap", "free_heap=%s max_block=%s", heapBuf, maxBuf);
 }

@@ -1,5 +1,8 @@
+#include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_NTP
 #include "Esp8266BaseNTP.h"
 #include "Esp8266BaseLog.h"
+#include <sntp.h>
 #include <time.h>
 
 // ----------------------------------------------------------------------------
@@ -8,6 +11,8 @@
 bool     Esp8266BaseNTP::_synced      = false;
 bool     Esp8266BaseNTP::_logSwitched = false;
 uint32_t Esp8266BaseNTP::_lastCheckMs = 0;
+uint32_t Esp8266BaseNTP::_startedMs = 0;
+uint32_t Esp8266BaseNTP::_lastPendingLogMs = 0;
 
 // NTP 服务器列表（全部在 Flash）
 static const char NTP_S1[] PROGMEM = "ntp.aliyun.com";
@@ -26,9 +31,14 @@ bool Esp8266BaseNTP::begin() {
     strncpy_P(s3, NTP_S3, sizeof(s3) - 1); s3[sizeof(s3)-1] = '\0';
 
     configTime(ESP8266BASE_NTP_TIMEZONE, 0, s1, s2, s3);
+    _synced = false;
+    _logSwitched = false;
+    _lastCheckMs = 0;
+    _lastPendingLogMs = 0;
+    _startedMs = millis();
 
-    ESP8266BASE_LOG_I("NTP ", "ntp_started timezone=UTC+%d servers=%s,%s",
-                      ESP8266BASE_NTP_TIMEZONE / 3600, s1, s2);
+    ESP8266BASE_LOG_I("NTP ", "ntp_client_started timezone=UTC+%d servers=%s,%s,%s check_interval=5s recv_timeout=15s",
+                      ESP8266BASE_NTP_TIMEZONE / 3600, s1, s2, s3);
     return true;
 }
 
@@ -46,7 +56,19 @@ void Esp8266BaseNTP::handle() {
     _lastCheckMs = now;
 
     time_t t = time(nullptr);
-    if (t < 1000000000UL) return;  // 未同步（2001 年以前的时间戳认为无效）
+    if (t < 1000000000UL) {
+        if (!_synced && (now - _lastPendingLogMs >= 30000UL || _lastPendingLogMs == 0)) {
+            _lastPendingLogMs = now;
+            ESP8266BASE_LOG_W("NTP ", "ntp_sync_pending elapsed=%lus raw_time=%lu sntp_enabled=%s reach=%03o/%03o/%03o next_check=5s",
+                              (unsigned long)((now - _startedMs) / 1000UL),
+                              (unsigned long)t,
+                              sntp_enabled() ? "yes" : "no",
+                              (unsigned)sntp_getreachability(0),
+                              (unsigned)sntp_getreachability(1),
+                              (unsigned)sntp_getreachability(2));
+        }
+        return;  // 未同步（2001 年以前的时间戳认为无效）
+    }
 
     if (!_synced) {
         _synced = true;
@@ -110,3 +132,4 @@ const char* Esp8266BaseNTP::_timeStr() {
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_info);
     return buf;
 }
+#endif

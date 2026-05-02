@@ -35,6 +35,8 @@ private:
     static bool     _synced;        // 1B
     static bool     _logSwitched;   // 1B：Log 时间格式是否已切换
     static uint32_t _lastCheckMs;   // 4B
+    static uint32_t _startedMs;     // 4B：本次 NTP 启动时间
+    static uint32_t _lastPendingLogMs; // 4B：未同步状态日志节流
 
     // Log 时间回调（静态函数，注入 Esp8266BaseLog）
     static const char* _timeStr();

@@ -135,13 +135,6 @@ void setup() {
     Esp8266Base::setFirmwareInfo("basic-wifi", "0.1.0");
     Esp8266Base::setHostname("esp-basic");
 
-    // Phase 1 only：禁用尚未实现的 Phase 2+ 模块
-    Esp8266Base::enableWeb(false);
-    Esp8266Base::enableOTA(false);
-    Esp8266Base::enableNTP(false);
-    Esp8266Base::enableMDNS(false);
-    Esp8266Base::enableWatchdog(false);
-
     // 初始化：Log → Config（LittleFS）→ WiFi → 诊断日志
     bool ok = Esp8266Base::begin();
     if (!ok) {

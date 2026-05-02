@@ -10,7 +10,6 @@ Esp8266BaseWiFiState Esp8266BaseWiFi::_state         = Esp8266BaseWiFiState::IDL
 uint32_t             Esp8266BaseWiFi::_connectStart   = 0;
 uint32_t             Esp8266BaseWiFi::_retryAt        = 0;
 uint8_t              Esp8266BaseWiFi::_retryCount     = 0;
-bool                 Esp8266BaseWiFi::_everConnected  = false;
 char                 Esp8266BaseWiFi::_apSSID[28]     = "";
 char                 Esp8266BaseWiFi::_ip[16]         = "";
 char                 Esp8266BaseWiFi::_staSSID[64]    = "";
@@ -67,17 +66,9 @@ void Esp8266BaseWiFi::handle() {
                 break;
             }
 
-            // 超时判断
             if (now - _connectStart >= ESP8266BASE_WIFI_CONNECT_TIMEOUT) {
-                WiFi.disconnect(true);
-
-                if (!_everConnected) {
-                    // 首次启动连接失败 → 进入 AP 配网，同时后台继续 STA 重连
-                    ESP8266BASE_LOG_W("WiFi", "station_connect_timeout starting_config_ap_and_background_retry ap_ssid=%s", _apSSID);
-                    _startAP();
-                } else {
-                    _scheduleRetry();
-                }
+                WiFi.disconnect(false);
+                _scheduleRetry();
             }
             break;
         }
@@ -96,24 +87,6 @@ void Esp8266BaseWiFi::handle() {
         }
 
         case Esp8266BaseWiFiState::AP_CONFIG: {
-            uint32_t now = millis();
-
-            if (strlen(_staSSID) == 0) break;
-
-            if (WiFi.status() == WL_CONNECTED) {
-                ESP8266BASE_LOG_I("WiFi", "station_recovered closing_config_ap");
-                WiFi.softAPdisconnect(true);
-                delay(100);
-                WiFi.mode(WIFI_STA);
-                _handleConnected();
-                break;
-            }
-
-            if (_connectStart != 0 && now - _connectStart >= ESP8266BASE_WIFI_CONNECT_TIMEOUT) {
-                _scheduleRetry();
-            } else if (_connectStart == 0 && now >= _retryAt) {
-                _startSTA(_staSSID, _staPass, true);
-            }
             break;
         }
 
@@ -198,12 +171,11 @@ void Esp8266BaseWiFi::_startSTA(const char* ssid, const char* pass, bool keepAP)
         WiFi.mode(WIFI_AP_STA);
         WiFi.disconnect(false);
     } else {
-        WiFi.disconnect(true);
-        delay(100);
         WiFi.mode(WIFI_STA);
+        WiFi.disconnect(false);
     }
     WiFi.setSleepMode(WIFI_NONE_SLEEP);
-    delay(50);
+    delay(20);
     WiFi.begin(ssid, (pass && strlen(pass) > 0) ? pass : nullptr);
     if (!keepAP) {
         _state = Esp8266BaseWiFiState::CONNECTING;
@@ -222,8 +194,7 @@ void Esp8266BaseWiFi::_startAP() {
     // Clean state before switching to AP
     WiFi.disconnect(true);
     delay(100);
-    bool hasSTA = strlen(_staSSID) > 0;
-    WiFi.mode(hasSTA ? WIFI_AP_STA : WIFI_AP);
+    WiFi.mode(WIFI_AP);
     delay(100);
 
     // Force channel 6 to ensure macOS/iOS can see the AP
@@ -236,31 +207,29 @@ void Esp8266BaseWiFi::_startAP() {
         WiFi.softAP(_apSSID, nullptr, channel, hidden);
     }
     _state = Esp8266BaseWiFiState::AP_CONFIG;
-    ESP8266BASE_LOG_I("WiFi", "config_ap_started ssid=%s ip=%s channel=%d background_station_retry=%s",
-                      _apSSID, WiFi.softAPIP().toString().c_str(), channel,
-                      hasSTA ? "yes" : "no");
-
-    if (hasSTA) {
-        _retryCount = 0;
-        _startSTA(_staSSID, _staPass, true);
-    }
+    ESP8266BASE_LOG_I("WiFi", "config_ap_started ssid=%s ip=%s channel=%d",
+                      _apSSID, WiFi.softAPIP().toString().c_str(), channel);
 }
 
 void Esp8266BaseWiFi::_handleConnected() {
     _updateIP();
     _state         = Esp8266BaseWiFiState::CONNECTED;
     _retryCount    = 0;
-    _everConnected = true;
-    ESP8266BASE_LOG_I("WiFi", "station_connected ip=%s rssi=%d", _ip, (int)WiFi.RSSI());
+    ESP8266BASE_LOG_I("WiFi", "station_connected ip=%s gateway=%s dns=%s rssi=%d",
+                      _ip,
+                      WiFi.gatewayIP().toString().c_str(),
+                      WiFi.dnsIP().toString().c_str(),
+                      (int)WiFi.RSSI());
 }
 
 void Esp8266BaseWiFi::_scheduleRetry() {
     _retryCount++;
-    uint32_t interval = (_retryCount == 1)
+    uint32_t interval = (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT)
         ? ESP8266BASE_WIFI_RETRY_FAST
         : ESP8266BASE_WIFI_RETRY_SLOW;
-    ESP8266BASE_LOG_W("WiFi", "station_reconnect_failed attempt=%d retry_in=%lus",
-                      (int)_retryCount, (unsigned long)(interval / 1000));
+    ESP8266BASE_LOG_W("WiFi", "station_reconnect_scheduled attempt=%d retry_in=%lus mode=%s",
+                      (int)_retryCount, (unsigned long)(interval / 1000),
+                      (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT) ? "fast" : "slow");
     _connectStart = 0;
     _retryAt      = millis() + interval;
 }

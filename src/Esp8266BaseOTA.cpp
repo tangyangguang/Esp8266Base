@@ -1,3 +1,5 @@
+#include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_OTA
 #include "Esp8266BaseOTA.h"
 #include "Esp8266BaseWeb.h"
 #include "Esp8266BaseWatchdog.h"
@@ -105,3 +107,4 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         ESP8266BASE_LOG_W("OTA ", "upload_aborted");
     }
 }
+#endif

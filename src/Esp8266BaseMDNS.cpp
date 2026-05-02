@@ -1,3 +1,5 @@
+#include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_MDNS
 #include "Esp8266BaseMDNS.h"
 #include "Esp8266BaseLog.h"
 #include <ESP8266mDNS.h>
@@ -40,3 +42,4 @@ void Esp8266BaseMDNS::handle() {
 bool Esp8266BaseMDNS::isRunning() {
     return _running;
 }
+#endif

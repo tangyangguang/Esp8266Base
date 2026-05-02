@@ -1,3 +1,5 @@
+#include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
 #include "Esp8266BaseLog.h"
 #include "Esp8266BaseConfig.h"
@@ -16,6 +18,8 @@ bool                     Esp8266BaseWeb::_running   = false;
 char                     Esp8266BaseWeb::_authUser[24] = ESP8266BASE_WEB_AUTH_USER;
 char                     Esp8266BaseWeb::_authPass[24] = ESP8266BASE_WEB_AUTH_PASS;
 char                     Esp8266BaseWeb::_titleBuf[48] = "ESP8266";
+char                     Esp8266BaseWeb::_activeUri[32] = "";
+char                     Esp8266BaseWeb::_activeMethod[5] = "";
 
 // ----------------------------------------------------------------------------
 // PROGMEM HTML 片段（全部在 Flash，不占 DRAM）
@@ -197,7 +201,7 @@ bool Esp8266BaseWeb::begin() {
 
     _server.begin();
     _running = true;
-    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes app_pages=%d/%d app_apis=%d/%d",
+    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=8 app_pages_registered=%d/%d app_apis_registered=%d/%d",
                       (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES,
                       (int)_apiCount,  ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
@@ -205,7 +209,17 @@ bool Esp8266BaseWeb::begin() {
 
 void Esp8266BaseWeb::handle() {
     if (!_running) return;
+    _activeUri[0] = '\0';
+    _activeMethod[0] = '\0';
+    uint32_t start = millis();
     _server.handleClient();
+    uint32_t elapsed = millis() - start;
+    if (elapsed > 250UL) {
+        const char* method = _activeMethod[0] ? _activeMethod : "?";
+        const char* uri = _activeUri[0] ? _activeUri : "(unknown)";
+        ESP8266BASE_LOG_W("Web ", "slow_request method=%s uri=%s elapsed=%lums",
+                          method, uri, (unsigned long)elapsed);
+    }
 }
 
 bool Esp8266BaseWeb::isRunning() {
@@ -224,7 +238,8 @@ bool Esp8266BaseWeb::addPage(const char* path, Esp8266BaseWebHandler handler) {
     _pageCount++;
 
     _server.on(path, HTTP_GET, handler);
-    ESP8266BASE_LOG_D("Web ", "registered_page path=%s", path);
+    ESP8266BASE_LOG_I("Web ", "app_page_registered path=%s app_pages_registered=%d/%d",
+                      path, (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES);
     return true;
 }
 
@@ -240,7 +255,8 @@ bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     _apiCount++;
 
     _server.on(path, handler);   // GET + POST 均响应，handler 内自行区分
-    ESP8266BASE_LOG_D("Web ", "registered_api path=%s", path);
+    ESP8266BASE_LOG_I("Web ", "app_api_registered path=%s app_apis_registered=%d/%d",
+                      path, (int)_apiCount, ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
 }
 
@@ -270,19 +286,35 @@ bool Esp8266BaseWeb::verifyAuth() {
     return _server.authenticate(_authUser, _authPass);
 }
 
+void Esp8266BaseWeb::_markRequest() {
+    strncpy(_activeMethod, (_server.method() == HTTP_POST) ? "POST" : "GET",
+            sizeof(_activeMethod) - 1);
+    _activeMethod[sizeof(_activeMethod) - 1] = '\0';
+
+    String uri = _server.uri();
+    strncpy(_activeUri, uri.c_str(), sizeof(_activeUri) - 1);
+    _activeUri[sizeof(_activeUri) - 1] = '\0';
+}
+
 // ----------------------------------------------------------------------------
 // 分段发送辅助
 // ----------------------------------------------------------------------------
 void Esp8266BaseWeb::sendHeader() {
-    _server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-    _server.send(200, "text/html", "");
+    _markRequest();
+    WiFiClient& client = _server.client();
+    client.setNoDelay(true);
+    client.setTimeout(1500);
+    client.print(F("HTTP/1.1 200 OK\r\n"
+                   "Content-Type: text/html; charset=utf-8\r\n"
+                   "Connection: close\r\n"
+                   "Cache-Control: no-store\r\n\r\n"));
     sendContent_P(WEB_HEAD);
     sendContent_P(WEB_NAV_BUILTINS);
     // 注册的应用页面也加入导航（显示简短路径名）
     for (uint8_t i = 0; i < _pageCount; i++) {
         snprintf(_wb, sizeof(_wb), "<a href='%s'>%s</a>",
                  _pages[i].path, _pages[i].path + 1);
-        _server.sendContent(_wb);
+        sendChunk(_wb);
     }
     sendContent_P(WEB_NAV_END);
 }
@@ -290,31 +322,37 @@ void Esp8266BaseWeb::sendHeader() {
 void Esp8266BaseWeb::sendFooter() {
     sendContent_P(WEB_FOOT_PRE);
     Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), _wb, sizeof(_wb));
-    _server.sendContent(_wb);
+    sendChunk(_wb);
     sendContent_P(WEB_FOOT_POST);
+    _server.client().flush();
+    _server.client().stop();
+    yield();
 }
 
 void Esp8266BaseWeb::sendContent_P(PGM_P content) {
     // 单遍从 PROGMEM 逐字节读取并分块发送，避免 strlen_P 二次遍历
-    char buf[128];
+    char buf[256];
     size_t chunk = 0;
     uint8_t c;
     while ((c = pgm_read_byte(content++)) != 0) {
         buf[chunk++] = (char)c;
         if (chunk == sizeof(buf) - 1) {
-            buf[chunk] = '\0';
-            _server.sendContent(buf);
+            _server.client().write((const uint8_t*)buf, chunk);
+            yield();
             chunk = 0;
         }
     }
     if (chunk > 0) {
-        buf[chunk] = '\0';
-        _server.sendContent(buf);
+        _server.client().write((const uint8_t*)buf, chunk);
+        yield();
     }
 }
 
 void Esp8266BaseWeb::sendChunk(const char* content) {
-    if (content) _server.sendContent(content);
+    if (content) {
+        _server.client().write((const uint8_t*)content, strlen(content));
+        yield();
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -323,21 +361,21 @@ void Esp8266BaseWeb::sendChunk(const char* content) {
 void Esp8266BaseWeb::_handleRoot() {
     if (!checkAuth()) return;
     sendHeader();
-    snprintf(_wb, sizeof(_wb), "<h2>%s</h2>", _titleBuf);
-    _server.sendContent(_wb);
+        snprintf(_wb, sizeof(_wb), "<h2>%s</h2>", _titleBuf);
+    sendChunk(_wb);
 
     if (Esp8266BaseWiFi::isConnected()) {
         snprintf(_wb, sizeof(_wb),
                  "<p>WiFi: <b>Connected</b><br>IP: %s<br>Uptime: %lus</p>",
                  Esp8266BaseWiFi::ip(), millis() / 1000UL);
-        _server.sendContent(_wb);
+        sendChunk(_wb);
     } else if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG) {
         snprintf(_wb, sizeof(_wb),
                  "<p>WiFi: <b>AP Mode</b> (%s)<br>IP: 192.168.4.1</p>",
                  Esp8266BaseWiFi::apSSID());
-        _server.sendContent(_wb);
+        sendChunk(_wb);
     } else {
-        _server.sendContent("<p>WiFi: Connecting...</p>");
+        sendChunk("<p>WiFi: Connecting...</p>");
     }
     sendFooter();
 }
@@ -346,18 +384,18 @@ void Esp8266BaseWeb::_handleWiFiGet() {
     if (!checkAuth()) return;
     sendHeader();
     if (_server.hasArg("saved")) {
-        _server.sendContent("<p class=ok>Saved. Credentials updated and connection started.</p>");
+        sendChunk("<p class=ok>Saved. Credentials updated and connection started.</p>");
     } else if (_server.hasArg("error")) {
         char err[24] = "";
         strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
         if (strcmp(err, "missing_ssid") == 0) {
-            _server.sendContent("<p class=err>SSID cannot be empty.</p>");
+            sendChunk("<p class=err>SSID cannot be empty.</p>");
         } else if (strcmp(err, "missing_password") == 0) {
-            _server.sendContent("<p class=err>Password cannot be empty.</p>");
+            sendChunk("<p class=err>Password cannot be empty.</p>");
         } else if (strcmp(err, "save_failed") == 0) {
-            _server.sendContent("<p class=err>Failed to save WiFi credentials.</p>");
+            sendChunk("<p class=err>Failed to save WiFi credentials.</p>");
         } else {
-            _server.sendContent("<p class=err>WiFi settings were not saved.</p>");
+            sendChunk("<p class=err>WiFi settings were not saved.</p>");
         }
     }
 
@@ -425,6 +463,7 @@ void Esp8266BaseWeb::_handleRebootPost() {
 }
 
 void Esp8266BaseWeb::_handleHealth() {
+    _markRequest();
     // 不需要 Auth（健康检查通常开放）
     snprintf(_wb, sizeof(_wb),
              "{\"heap\":%u,\"maxBlock\":%u,\"ip\":\"%s\","
@@ -438,5 +477,7 @@ void Esp8266BaseWeb::_handleHealth() {
 }
 
 void Esp8266BaseWeb::_handleNotFound() {
+    _markRequest();
     _server.send(404, "text/plain", "Not found");
 }
+#endif

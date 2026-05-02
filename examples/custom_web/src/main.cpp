@@ -114,12 +114,6 @@ void setup() {
     Esp8266Base::setFirmwareInfo("custom-web", "0.2.0");
     Esp8266Base::setHostname("esp-sensor");
 
-    Esp8266Base::enableWeb(true);
-    Esp8266Base::enableOTA(true);
-    Esp8266Base::enableNTP(true);
-    Esp8266Base::enableMDNS(true);
-    Esp8266Base::enableWatchdog(true);
-
     Esp8266Base::begin();
 
     // 注册自定义路由（必须在 begin() 之后）

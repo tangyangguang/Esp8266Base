@@ -32,6 +32,8 @@
 
 ## 三、全局静态 RAM 预算表
 
+模块通过 `ESP8266BASE_USE_*` 编译期开关裁剪。关闭模块时，对应 `.cpp` 会编译为空单元，模块的静态状态、页面字符串和大部分代码都不会进入最终固件；`ESP8266BASE_USE_OTA=1` 依赖 `ESP8266BASE_USE_WEB=1`，配置错误会在编译期报错。
+
 | 模块 | 预算上限 | 主要来源 |
 |------|---------|----------|
 | Esp8266BaseLog | <= 160B | level(1B) + fn ptr(4B)；格式缓冲 128B 在栈上 |
@@ -44,6 +46,16 @@
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
 | Esp8266BaseWatchdog | <= 96B | timeout(4B) + 计时器(8B) + pause(1B) + count(4B) |
 | **库总计（自有）** | **< 2.5KB** | 不含 Arduino SDK 内部开销 |
+
+当前示例构建实测（PlatformIO `esp12f` release）：
+
+| 示例 | 启用模块 | RAM | Flash |
+|------|----------|-----|-------|
+| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 31,160B | 308,151B |
+| `sleep_watchdog` | Sleep + WDT | 31,132B | 309,195B |
+| `custom_web` | Web + mDNS + WDT | 33,060B | 372,748B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 34,684B | 389,232B |
+| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 36,324B | 396,456B |
 
 Arduino SDK 内部开销（不可控，参考值）：
 

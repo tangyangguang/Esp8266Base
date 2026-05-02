@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include "Esp8266BaseOptions.h"
 
 // Phase 1 核心模块（已实现）
 #include "Esp8266BaseLog.h"
@@ -7,13 +8,24 @@
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWiFi.h"
 
-// Phase 2+ 模块（声明已就绪，实现在各自 Phase 完成）
+#if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
+#endif
+#if ESP8266BASE_USE_OTA
 #include "Esp8266BaseOTA.h"
+#endif
+#if ESP8266BASE_USE_NTP
 #include "Esp8266BaseNTP.h"
+#endif
+#if ESP8266BASE_USE_MDNS
 #include "Esp8266BaseMDNS.h"
+#endif
+#if ESP8266BASE_USE_SLEEP
 #include "Esp8266BaseSleep.h"
+#endif
+#if ESP8266BASE_USE_WATCHDOG
 #include "Esp8266BaseWatchdog.h"
+#endif
 
 // ----------------------------------------------------------------------------
 // Esp8266Base — 主入口
@@ -34,13 +46,6 @@ public:
 
     // 设置设备 hostname（mDNS + AP SSID 后缀），最长 24 字符
     static void setHostname(const char* hostname);
-
-    // 控制各模块是否启用（默认全部 true）
-    static void enableWeb(bool enabled);
-    static void enableOTA(bool enabled);
-    static void enableNTP(bool enabled);
-    static void enableMDNS(bool enabled);
-    static void enableWatchdog(bool enabled);
 
     // ---- 核心 API ----
 
@@ -64,12 +69,10 @@ private:
     static char _fwVersion[16];  // 16B
     static char _hostname[24];   // 24B
 
-    static bool _webEnabled;       // 1B
-    static bool _otaEnabled;       // 1B
-    static bool _ntpEnabled;       // 1B
-    static bool _mdnsEnabled;      // 1B
-    static bool _watchdogEnabled;  // 1B
-
+#if ESP8266BASE_USE_NTP
     static bool _ntpWasTriggered;  // 1B：WiFi 连接后 NTP 已触发
+#endif
+#if ESP8266BASE_USE_MDNS
     static bool _mdnsWasStarted;   // 1B：WiFi 连接后 mDNS 已启动
+#endif
 };

@@ -1,3 +1,5 @@
+#include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_WATCHDOG
 #include "Esp8266BaseWatchdog.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseLog.h"
@@ -111,3 +113,4 @@ void Esp8266BaseWatchdog::clearResetCount() {
     Esp8266BaseConfig::setInt("wdt_pending", 0);
     ESP8266BASE_LOG_I("WDT ", "watchdog_reset_count_cleared");
 }
+#endif
