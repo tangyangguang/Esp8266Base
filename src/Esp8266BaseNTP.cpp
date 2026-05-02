@@ -27,7 +27,7 @@ bool Esp8266BaseNTP::begin() {
 
     configTime(ESP8266BASE_NTP_TIMEZONE, 0, s1, s2, s3);
 
-    ESP8266BASE_LOG_I("NTP ", "ready=1 tz=UTC+%d servers=%s,%s",
+    ESP8266BASE_LOG_I("NTP ", "ntp_started timezone=UTC+%d servers=%s,%s",
                       ESP8266BASE_NTP_TIMEZONE / 3600, s1, s2);
     return true;
 }
@@ -53,14 +53,14 @@ void Esp8266BaseNTP::handle() {
         struct tm* tm_info = localtime(&t);
         char tbuf[20];
         strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", tm_info);
-        ESP8266BASE_LOG_I("NTP ", "synced=1 time=%s", tbuf);
+        ESP8266BASE_LOG_I("NTP ", "time_synchronized local_time=%s", tbuf);
     }
 
     // 仅切换一次 Log 时间格式
     if (!_logSwitched) {
         _logSwitched = true;
         Esp8266BaseLog::setTimeProvider(_timeStr);
-        ESP8266BASE_LOG_I("NTP ", "Log time format switched to absolute");
+        ESP8266BASE_LOG_I("NTP ", "log_timestamp_mode=absolute_time");
     }
 }
 

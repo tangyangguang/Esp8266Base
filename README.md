@@ -67,7 +67,7 @@ void loop() {
 | 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、应用扩展 |
-| OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、认证校验 |
+| OTA | `Esp8266BaseOTA` | Web OTA 上传、进度显示、WDT 联动 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
 | Sleep | `Esp8266BaseSleep` | modem/deep sleep 封装、唤醒原因 |
@@ -137,6 +137,8 @@ build_flags =
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 上限 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时 ms |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
+
+根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为烟测入口；各示例目录仍保留自己的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
 
 ---
 

@@ -51,7 +51,7 @@ Esp8266Base（主入口）
   ├── Esp8266BaseConfig     （依赖 LittleFS）
   ├── Esp8266BaseWiFi       （依赖 Config 读取凭证；凭证缓存在内存，重连不再读 Flash）
   ├── Esp8266BaseWeb        （begin() 在 WiFi 之后；始终监听，AP 模式也可访问）
-  │     └── Esp8266BaseOTA  （依赖 Web server 已启动；认证与 Web Basic Auth 共用）
+  │     └── Esp8266BaseOTA  （依赖 Web server 已启动；GET 页面使用 Web Basic Auth）
   ├── Esp8266BaseNTP        （WiFi 连接后由 handle() 触发 begin()，成功后回调 Log 切换时间）
   ├── Esp8266BaseMDNS       （WiFi 连接后由 handle() 触发 begin()；WiFi 掉线后重置，重连自动重启）
   ├── Esp8266BaseSleep      （deepSleep 前调用 Config::flush() 和 Watchdog::pause()）
@@ -94,8 +94,8 @@ Esp8266Base（主入口）
 5. Esp8266BaseNTP::handle()         — 对时状态检查（如果已启用）
 6. Esp8266BaseMDNS::handle()        — MDNS.update()（如果已启用）
 7. Esp8266BaseWeb::handle()         — server.handleClient()（如果已启用）
-8. Esp8266BaseWatchdog::feed()      — 喂狗（如果已启用）
-   Esp8266BaseWatchdog::handle()    — 超时检查
+8. Esp8266BaseWatchdog::handle()    — 超时检查（如果已启用）
+   Esp8266BaseWatchdog::feed()      — 本轮完成后喂狗
 ```
 
 每个 handle() 不得有长阻塞。长操作必须分步推进或在操作中定期 `yield()`。
@@ -110,10 +110,10 @@ Esp8266Base（主入口）
           └──────┘                                             │
                                                                ▼
           ┌────────────┐  首次连接超时     ┌───────────────────────┐
-          │ CONNECTING │ ──────────────►  │      AP_CONFIG        │
-          └─────┬──────┘                  │ （等待用户输入凭证）   │
+          │ CONNECTING │ ──────────────►  │ AP_CONFIG + STA retry │
+          └─────┬──────┘                  │ （AP 可配网，后台重连）│
                 │ connected               └──────────┬────────────┘
-                ▼                                    │ connect() 保存新凭证
+                ▼                                    │ STA 恢复或 connect() 保存新凭证
           ┌───────────┐                              │
           │ CONNECTED │ ◄────────────────────────────┘
           └─────┬─────┘
@@ -124,7 +124,7 @@ Esp8266Base（主入口）
           └────────────┘
 ```
 
-重连使用内存中缓存的凭证（`_staSSID` / `_staPass`），从不在重连路径上读 Flash。
+重连使用内存中缓存的凭证（`_staSSID` / `_staPass`），从不在重连路径上读 Flash。若启动时已有凭证但暂时连不上，设备会进入 `WIFI_AP_STA`：AP 继续提供配网页面，STA 后台按 15s/60s 节流策略持续重连；STA 连上后自动关闭 AP 并回到纯 STA。
 
 ---
 
@@ -137,8 +137,9 @@ ESP8266WebServer（端口 80）
   │     GET  /wifi
   │     POST /wifi
   │     GET  /ota
-  │     POST /ota        ──► Esp8266BaseOTA 处理（含认证校验）
-  │     GET  /reboot
+  │     POST /ota        ──► Esp8266BaseOTA 处理（页面登录后上传，不额外校验）
+  │     GET  /reboot      ──► 确认页
+  │     POST /reboot      ──► flush Config 后重启
   │     GET  /health
   │
   └── 应用路由（静态数组）
@@ -199,7 +200,7 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | Esp8266BaseConfig | <= 512B | deferred 队列 4×34B + 状态标志 + 读写缓冲 97B |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器 + _apSSID(28B) + _ip(16B) + _staSSID/Pass(128B) |
 | Esp8266BaseWeb（路由表） | <= 512B | AppRoute 数组 320B + auth(48B) + title(48B) + 状态 |
-| Esp8266BaseOTA | <= 128B | _inProgress(1B) + _authOk(1B) |
+| Esp8266BaseOTA | <= 128B | _inProgress(1B) |
 | Esp8266BaseNTP | <= 160B | 同步状态 + 时区偏移(4B) + 计时器(8B) |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + 标志(2B) |

@@ -191,6 +191,11 @@ static bool flush();
 强制写完所有 pending 写入。在 deep sleep 或 `ESP.restart()` 前调用。
 
 ```cpp
+static bool clearAll();
+```
+删除所有 `/cfg_*` 配置文件，用于恢复出厂配置。调用前会先 `flush()`；成功后通常应重启设备。
+
+```cpp
 static uint8_t pendingCount();
 static bool isReady();
 ```
@@ -254,7 +259,7 @@ enum class Esp8266BaseWiFiState : uint8_t {
 ```cpp
 static bool begin();
 ```
-从 Config 读取凭证并缓存到内存，启动 WiFi 状态机（非阻塞）。无凭证时直接进入 AP_CONFIG。
+从 Config 读取凭证并缓存到内存，启动 WiFi 状态机（非阻塞）。无凭证时直接进入 AP_CONFIG；有凭证但连接超时时进入 AP_CONFIG + STA 后台重连，AP 可访问配网页，STA 会持续按节流策略重试并在恢复后关闭 AP。
 
 ```cpp
 static void handle();
@@ -335,7 +340,7 @@ static bool checkAuth();
 ```cpp
 static bool verifyAuth();
 ```
-仅验证 Basic Auth，不发送 401 响应（供 OTA 上传 handler 在接收数据前检测认证）。
+仅验证 Basic Auth，不发送 401 响应。OTA 上传不再调用此函数做二次认证。
 
 ```cpp
 static void setAuth(const char* user, const char* pass);
@@ -350,10 +355,11 @@ static bool isRunning();
 |------|------|------|
 | `/` | GET | 首页（WiFi 状态 + 功能链接） |
 | `/wifi` | GET | WiFi 设置表单 |
-| `/wifi` | POST | 保存凭证并重连 |
-| `/ota` | GET | OTA 上传页面 |
-| `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理） |
-| `/reboot` | GET | 延迟 500ms 后重启 |
+| `/wifi` | POST | 保存凭证并重连；页面回显已保存 SSID/密码 |
+| `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度） |
+| `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，不额外校验 Basic Auth） |
+| `/reboot` | GET | 重启确认页 |
+| `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
 
 ### 使用示例
@@ -395,12 +401,12 @@ OTA 上传是否正在进行。
 
 ### OTA 过程行为
 
-1. 收到 POST /ota 请求时，立即校验 Basic Auth（使用 `Esp8266BaseWeb::verifyAuth()`）
-2. 认证失败：丢弃所有数据块，上传结束后返回 HTTP 401
-3. 认证成功：`Esp8266BaseWatchdog::pause()`，分块写入固件，每块后 `yield()`
-4. 上传完成：`Esp8266BaseWatchdog::resume()`，延迟 500ms 后 `ESP.restart()`
-5. 上传失败：`Esp8266BaseWatchdog::resume()`，返回简短错误信息
-6. 上传中止：`Update.end()`，`Esp8266BaseWatchdog::resume()`
+1. GET /ota 页面使用 Web Basic Auth；页面内用 XMLHttpRequest 上传并显示进度
+2. POST /ota 不做额外 Basic Auth 校验，避免 multipart upload 被二次认证拒绝
+3. 上传开始：`Esp8266BaseWatchdog::pause()`，调用 `Update.begin(ESP.getFreeSketchSpace())`
+4. 上传过程：分块写入固件，每块后 `yield()`
+5. 上传完成：`Esp8266BaseWatchdog::resume()`，延迟 500ms 后 `ESP.restart()`
+6. 上传失败或中止：`Esp8266BaseWatchdog::resume()`，返回简短错误信息
 
 OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。
 
@@ -494,12 +500,12 @@ static bool begin();
 ```cpp
 static void modemSleep();
 ```
-关闭 WiFi radio，CPU 继续运行（电流 ~70mA → ~15mA）。WiFi 将断开。
+启用 ESP8266 SDK 管理的 `WIFI_MODEM_SLEEP`。CPU 继续运行，STA 连接保持，射频由 SDK 按 DTIM 间隔休眠。
 
 ```cpp
 static void wakeModem();
 ```
-重新启用 WiFi radio。需要外部重新发起 WiFi 连接。
+恢复 `WIFI_NONE_SLEEP`。
 
 ```cpp
 static void deepSleep(uint32_t sleepSec);
@@ -564,7 +570,7 @@ static bool begin(uint32_t timeoutMs = ESP8266BASE_WDT_TIMEOUT_MS);
 static void handle();
 static void feed();
 ```
-`handle()` 检查主循环活性，超时时写入重启记录后执行 `ESP.restart()`。`feed()` 重置计时器。两者均由 `Esp8266Base::handle()` 自动调用。长阻塞操作中需手动调用 `feed()`。
+`handle()` 检查主循环活性，超时时写入重启记录后执行 `ESP.restart()`。`feed()` 重置计时器。两者均由 `Esp8266Base::handle()` 自动调用，顺序为先检查、再在本轮完成后喂狗。长阻塞操作中需手动调用 `feed()`。
 
 ```cpp
 static void pause();

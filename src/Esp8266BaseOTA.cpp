@@ -3,13 +3,13 @@
 #include "Esp8266BaseWatchdog.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseLog.h"
+#include "Esp8266BaseUtil.h"
 #include <Updater.h>
 
 // ----------------------------------------------------------------------------
 // 静态成员定义
 // ----------------------------------------------------------------------------
 bool Esp8266BaseOTA::_inProgress = false;
-bool Esp8266BaseOTA::_authOk     = false;
 
 // ----------------------------------------------------------------------------
 // begin — 注册 POST /ota
@@ -26,7 +26,7 @@ bool Esp8266BaseOTA::begin() {
         _handleUploadChunk      // 接收每个数据块
     );
 
-    ESP8266BASE_LOG_I("OTA ", "ready=1 route=POST/ota");
+    ESP8266BASE_LOG_I("OTA ", "ota_upload_route_registered method=POST path=/ota");
     return true;
 }
 
@@ -41,12 +41,6 @@ void Esp8266BaseOTA::_handleUploadComplete() {
     _inProgress = false;
     Esp8266BaseWatchdog::resume();
 
-    if (!_authOk) {
-        Esp8266BaseWeb::server().send(401, "text/plain", "Unauthorized");
-        ESP8266BASE_LOG_W("OTA ", "Upload rejected: auth failed");
-        return;
-    }
-
     bool ok = !Update.hasError();
     const char* msg = ok ? "OK: Firmware updated. Rebooting..." : "FAIL";
 
@@ -55,12 +49,14 @@ void Esp8266BaseOTA::_handleUploadComplete() {
     Esp8266BaseWeb::server().client().stop();
 
     if (ok) {
-        ESP8266BASE_LOG_I("OTA ", "Upload OK heap=%u, rebooting", (unsigned)ESP.getFreeHeap());
+        char heapBuf[16];
+        Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
+        ESP8266BASE_LOG_I("OTA ", "upload_success free_heap=%s action=reboot", heapBuf);
         Esp8266BaseConfig::flush();
         delay(500);
         ESP.restart();
     } else {
-        ESP8266BASE_LOG_E("OTA ", "Upload failed: %s", Update.getErrorString().c_str());
+        ESP8266BASE_LOG_E("OTA ", "upload_failed error=%s", Update.getErrorString().c_str());
     }
 }
 
@@ -71,41 +67,41 @@ void Esp8266BaseOTA::_handleUploadChunk() {
     HTTPUpload& upload = Esp8266BaseWeb::server().upload();
 
     if (upload.status == UPLOAD_FILE_START) {
-        // 在接受任何数据前验证认证（verifyAuth 不发 401，由 complete 统一响应）
-        _authOk     = Esp8266BaseWeb::verifyAuth();
         _inProgress = true;
         Esp8266BaseWatchdog::pause();
-        if (!_authOk) {
-            ESP8266BASE_LOG_W("OTA ", "Auth failed, upload will be rejected");
-            return;
-        }
-        ESP8266BASE_LOG_I("OTA ", "Start file=%s heap=%u",
-                          upload.filename.c_str(), (unsigned)ESP.getFreeHeap());
+        char heapBuf[16];
+        char spaceBuf[16];
+        Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
+        Esp8266BaseUtil::formatBytes(ESP.getFreeSketchSpace(), spaceBuf, sizeof(spaceBuf));
+        ESP8266BASE_LOG_I("OTA ", "upload_started file=%s free_heap=%s sketch_space=%s",
+                          upload.filename.c_str(), heapBuf, spaceBuf);
         if (!Update.begin(ESP.getFreeSketchSpace())) {
-            ESP8266BASE_LOG_E("OTA ", "begin() fail: %s", Update.getErrorString().c_str());
+            ESP8266BASE_LOG_E("OTA ", "update_begin_failed error=%s", Update.getErrorString().c_str());
         }
 
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (!_authOk) return;  // 未认证，丢弃所有数据块
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-            ESP8266BASE_LOG_E("OTA ", "write() fail at %u bytes", upload.totalSize);
+            char totalBuf[16];
+            Esp8266BaseUtil::formatBytes(upload.totalSize, totalBuf, sizeof(totalBuf));
+            ESP8266BASE_LOG_E("OTA ", "update_write_failed written=%s", totalBuf);
         }
         yield();  // 每块写入后让出 CPU，防止 Soft WDT
 
     } else if (upload.status == UPLOAD_FILE_END) {
-        if (!_authOk) return;
         if (Update.end(true)) {
-            ESP8266BASE_LOG_I("OTA ", "End total=%u bytes heap_min=%u",
-                              upload.totalSize, (unsigned)ESP.getFreeHeap());
+            char totalBuf[16];
+            char heapBuf[16];
+            Esp8266BaseUtil::formatBytes(upload.totalSize, totalBuf, sizeof(totalBuf));
+            Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
+            ESP8266BASE_LOG_I("OTA ", "upload_finished total_size=%s free_heap=%s", totalBuf, heapBuf);
         } else {
-            ESP8266BASE_LOG_E("OTA ", "end() fail: %s", Update.getErrorString().c_str());
+            ESP8266BASE_LOG_E("OTA ", "update_end_failed error=%s", Update.getErrorString().c_str());
         }
 
     } else if (upload.status == UPLOAD_FILE_ABORTED) {
         Update.end();
         _inProgress = false;
-        _authOk     = false;
         Esp8266BaseWatchdog::resume();
-        ESP8266BASE_LOG_W("OTA ", "Upload aborted");
+        ESP8266BASE_LOG_W("OTA ", "upload_aborted");
     }
 }

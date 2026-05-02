@@ -5,7 +5,7 @@
 // Esp8266BaseSleep — 睡眠管理
 //
 // 支持两种模式：
-//   1. modemSleep()  — 关闭 RF，CPU 继续运行（省电 ~70 mA → ~15 mA）
+//   1. modemSleep()  — 启用 SDK modem sleep，CPU 继续运行，WiFi 保持连接
 //   2. deepSleep(s)  — 全芯片休眠，指定秒数后由 GPIO16→RST 唤醒
 //                       ⚠ 需要 GPIO16 连接 RST 引脚
 //
@@ -24,10 +24,10 @@ public:
     // 初始化：检测并记录唤醒原因
     static bool begin();
 
-    // Modem sleep：关闭 RF，保持 CPU 运行（WiFi 会断开）
+    // Modem sleep：启用 SDK 管理的 WIFI_MODEM_SLEEP，保持 STA 连接
     static void modemSleep();
 
-    // 唤醒 Modem（重新启用 RF，需外部重新连接 WiFi）
+    // 唤醒 Modem：恢复 WIFI_NONE_SLEEP
     static void wakeModem();
 
     // 深度睡眠 sleepSec 秒（0 = 永久睡眠，直到 RST）

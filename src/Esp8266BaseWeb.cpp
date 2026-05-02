@@ -2,6 +2,7 @@
 #include "Esp8266BaseLog.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWiFi.h"
+#include "Esp8266BaseUtil.h"
 
 // ----------------------------------------------------------------------------
 // 静态成员定义
@@ -42,30 +43,128 @@ static const char WEB_NAV_BUILTINS[] PROGMEM =
 
 static const char WEB_NAV_END[]    PROGMEM = "</nav>";
 static const char WEB_FOOT_PRE[]   PROGMEM = "<div class=info>Free heap: ";
-static const char WEB_FOOT_POST[]  PROGMEM = " B</div></body></html>";
+static const char WEB_FOOT_POST[]  PROGMEM = "</div></body></html>";
 
-static const char WEB_WIFI_FORM[] PROGMEM =
+static const char WEB_WIFI_FORM_PRE[] PROGMEM =
     "<h2>WiFi Settings</h2>"
-    "<form method=post>"
-    "SSID<input type=text name=ssid maxlength=32 autocomplete=off>"
-    "Password<input type=password name=pass maxlength=64>"
+    "<form method=post onsubmit=\""
+    "var s=this.ssid.value.trim(),p=this.pass.value.trim();"
+    "if(!s){alert('SSID cannot be empty');return false;}"
+    "if(!p){alert('Password cannot be empty');return false;}"
+    "return true;\">"
+    "SSID<input type=text name=ssid maxlength=32 autocomplete=off required value=\"";
+
+static const char WEB_WIFI_FORM_MID[] PROGMEM =
+    "\">Password<input id=wp type=password name=pass maxlength=64 required value=\"";
+
+static const char WEB_WIFI_FORM_POST[] PROGMEM =
+    "\"><input type=button value='Show/Hide Password' onclick=\""
+    "var p=document.getElementById('wp');p.type=p.type=='password'?'text':'password'\">"
     "<input type=submit value='Save &amp; Connect'>"
     "</form>";
 
 static const char WEB_OTA_FORM[] PROGMEM =
     "<h2>OTA Update</h2>"
-    "<form method=post enctype=multipart/form-data>"
-    "<input type=file name=firmware accept=.bin>"
+    "<form id=f>"
+    "<input id=fw type=file name=firmware accept=.bin required>"
     "<br><br>"
     "<input type=submit value='Upload Firmware'>"
+    "</form>"
+    "<progress id=pg value=0 max=100 style='width:100%;display:none'></progress>"
+    "<p id=st></p>"
+    "<script>"
+    "document.getElementById('f').onsubmit=function(e){"
+    "e.preventDefault();"
+    "var file=document.getElementById('fw').files[0],st=document.getElementById('st'),pg=document.getElementById('pg');"
+    "if(!file){alert('Choose firmware first');return false;}"
+    "var fd=new FormData();fd.append('firmware',file);"
+    "function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}"
+    "var x=new XMLHttpRequest();pg.style.display='block';pg.value=0;st.textContent='Uploading 0%';"
+    "x.upload.onprogress=function(ev){if(ev.lengthComputable){var p=Math.floor(ev.loaded*100/ev.total);pg.value=p;st.textContent='Uploading '+p+'% ('+fb(ev.loaded)+'/'+fb(ev.total)+')';}};"
+    "x.onload=function(){st.textContent=(x.status==200?x.responseText:('Upload failed: HTTP '+x.status+' '+x.responseText));};"
+    "x.onerror=function(){st.textContent='Upload failed: network error';};"
+    "x.open('POST','/ota');x.send(fd);return false;};"
+    "</script>";
+
+static const char WEB_REBOOT_CONFIRM[] PROGMEM =
+    "<h2>Reboot</h2>"
+    "<p>Are you sure you want to reboot the device?</p>"
+    "<form method=post onsubmit=\"return confirm('Reboot device now?')\">"
+    "<input type=submit value='Confirm Reboot' style='background:#c33'>"
+    " <a href='/'>Cancel</a>"
     "</form>";
 
-static const char WEB_REBOOT_MSG[] PROGMEM =
-    "<h2>Reboot</h2><p>Rebooting in 1 second...</p>"
-    "<script>setTimeout(()=>location='/',3000)</script>";
+static const char WEB_REBOOTING[] PROGMEM =
+    "<h2>Rebooting...</h2>"
+    "<p>Device is restarting. Please wait a few seconds, then <a href='/'>reload</a>.</p>";
 
 // 内部共享小缓冲（用于 sendContent_P 和动态内容，非重入）
 static char _wb[160];
+
+static void _trimWhitespace(char* s) {
+    if (!s) return;
+    char* start = s;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+        start++;
+    }
+    if (start != s) {
+        memmove(s, start, strlen(start) + 1);
+    }
+    size_t len = strlen(s);
+    while (len > 0) {
+        char c = s[len - 1];
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+        s[--len] = '\0';
+    }
+}
+
+static void _trimLeadingWhitespace(char* s) {
+    if (!s) return;
+    char* start = s;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+        start++;
+    }
+    if (start != s) {
+        memmove(s, start, strlen(start) + 1);
+    }
+}
+
+static void _sendAttrEscaped(const char* s) {
+    if (!s) return;
+    size_t out = 0;
+    while (*s) {
+        const char* repl = nullptr;
+        switch (*s) {
+            case '&':  repl = "&amp;"; break;
+            case '"':  repl = "&quot;"; break;
+            case '<':  repl = "&lt;"; break;
+            case '>':  repl = "&gt;"; break;
+            default: break;
+        }
+        if (repl) {
+            for (const char* r = repl; *r; r++) {
+                _wb[out++] = *r;
+                if (out == sizeof(_wb) - 1) {
+                    _wb[out] = '\0';
+                    Esp8266BaseWeb::sendChunk(_wb);
+                    out = 0;
+                }
+            }
+        } else {
+            _wb[out++] = *s;
+            if (out == sizeof(_wb) - 1) {
+                _wb[out] = '\0';
+                Esp8266BaseWeb::sendChunk(_wb);
+                out = 0;
+            }
+        }
+        s++;
+    }
+    if (out > 0) {
+        _wb[out] = '\0';
+        Esp8266BaseWeb::sendChunk(_wb);
+    }
+}
 
 // ----------------------------------------------------------------------------
 // 公开 API
@@ -79,13 +178,14 @@ bool Esp8266BaseWeb::begin() {
     _server.on("/wifi",   HTTP_POST, _handleWiFiPost);
     _server.on("/ota",    HTTP_GET,  _handleOtaGet);
     // POST /ota 由 Esp8266BaseOTA::begin() 注册（需要 upload handler）
-    _server.on("/reboot", HTTP_GET,  _handleReboot);
+    _server.on("/reboot", HTTP_GET,  _handleRebootGet);
+    _server.on("/reboot", HTTP_POST, _handleRebootPost);
     _server.on("/health", HTTP_GET,  _handleHealth);
     _server.onNotFound(_handleNotFound);
 
     _server.begin();
     _running = true;
-    ESP8266BASE_LOG_I("Web ", "ready=1 auth=1 pages=%d/%d apis=%d/%d",
+    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes app_pages=%d/%d app_apis=%d/%d",
                       (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES,
                       (int)_apiCount,  ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
@@ -112,7 +212,7 @@ bool Esp8266BaseWeb::addPage(const char* path, Esp8266BaseWebHandler handler) {
     _pageCount++;
 
     _server.on(path, HTTP_GET, handler);
-    ESP8266BASE_LOG_D("Web ", "addPage %s", path);
+    ESP8266BASE_LOG_D("Web ", "registered_page path=%s", path);
     return true;
 }
 
@@ -128,7 +228,7 @@ bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     _apiCount++;
 
     _server.on(path, handler);   // GET + POST 均响应，handler 内自行区分
-    ESP8266BASE_LOG_D("Web ", "addApi %s", path);
+    ESP8266BASE_LOG_D("Web ", "registered_api path=%s", path);
     return true;
 }
 
@@ -177,7 +277,7 @@ void Esp8266BaseWeb::sendHeader() {
 
 void Esp8266BaseWeb::sendFooter() {
     sendContent_P(WEB_FOOT_PRE);
-    snprintf(_wb, sizeof(_wb), "%u", (unsigned)ESP.getFreeHeap());
+    Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), _wb, sizeof(_wb));
     _server.sendContent(_wb);
     sendContent_P(WEB_FOOT_POST);
 }
@@ -233,14 +333,15 @@ void Esp8266BaseWeb::_handleRoot() {
 void Esp8266BaseWeb::_handleWiFiGet() {
     if (!checkAuth()) return;
     sendHeader();
-    sendContent_P(WEB_WIFI_FORM);
-    // 显示当前已保存的 SSID
     char ssid[64] = "";
+    char pass[64] = "";
     Esp8266BaseConfig::getStr("wifi_ssid", ssid, sizeof(ssid), "");
-    if (strlen(ssid) > 0) {
-        snprintf(_wb, sizeof(_wb), "<p>Saved SSID: <b>%s</b></p>", ssid);
-        _server.sendContent(_wb);
-    }
+    Esp8266BaseConfig::getStr("wifi_pass", pass, sizeof(pass), "");
+    sendContent_P(WEB_WIFI_FORM_PRE);
+    _sendAttrEscaped(ssid);
+    sendContent_P(WEB_WIFI_FORM_MID);
+    _sendAttrEscaped(pass);
+    sendContent_P(WEB_WIFI_FORM_POST);
     sendFooter();
 }
 
@@ -251,18 +352,27 @@ void Esp8266BaseWeb::_handleWiFiPost() {
     char pass[64] = "";
     strncpy(ssid, _server.arg("ssid").c_str(), sizeof(ssid) - 1);
     strncpy(pass, _server.arg("pass").c_str(), sizeof(pass) - 1);
+    _trimWhitespace(ssid);
+    _trimLeadingWhitespace(pass);
 
     sendHeader();
-    sendContent_P(WEB_WIFI_FORM);
-    if (strlen(ssid) > 0) {
+    if (strlen(ssid) > 0 && strlen(pass) > 0) {
+        ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=%s password_length=%u",
+                          ssid, pass, (unsigned)strlen(pass));
         Esp8266BaseWiFi::connect(ssid, pass);
-        snprintf(_wb, sizeof(_wb),
-                 "<p class=ok>Saved. Connecting to <b>%s</b>...</p>", ssid);
-        _server.sendContent(_wb);
-        ESP8266BASE_LOG_I("Web ", "WiFi credentials updated ssid=%s", ssid);
-    } else {
+        _server.sendContent("<p class=ok>Saved. Connecting to <b>");
+        _sendAttrEscaped(ssid);
+        _server.sendContent("</b>...</p>");
+    } else if (strlen(ssid) == 0) {
         _server.sendContent("<p class=err>SSID cannot be empty.</p>");
+    } else {
+        _server.sendContent("<p class=err>Password cannot be empty.</p>");
     }
+    sendContent_P(WEB_WIFI_FORM_PRE);
+    _sendAttrEscaped(ssid);
+    sendContent_P(WEB_WIFI_FORM_MID);
+    _sendAttrEscaped(pass);
+    sendContent_P(WEB_WIFI_FORM_POST);
     sendFooter();
 }
 
@@ -273,13 +383,20 @@ void Esp8266BaseWeb::_handleOtaGet() {
     sendFooter();
 }
 
-void Esp8266BaseWeb::_handleReboot() {
+void Esp8266BaseWeb::_handleRebootGet() {
     if (!checkAuth()) return;
     sendHeader();
-    sendContent_P(WEB_REBOOT_MSG);
+    sendContent_P(WEB_REBOOT_CONFIRM);
+    sendFooter();
+}
+
+void Esp8266BaseWeb::_handleRebootPost() {
+    if (!checkAuth()) return;
+    sendHeader();
+    sendContent_P(WEB_REBOOTING);
     sendFooter();
     _server.client().stop();
-    ESP8266BASE_LOG_I("Web ", "Reboot requested");
+    ESP8266BASE_LOG_I("Web ", "reboot_requested source=web");
     Esp8266BaseConfig::flush();
     delay(500);
     ESP.restart();

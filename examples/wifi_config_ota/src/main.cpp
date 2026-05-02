@@ -33,10 +33,11 @@ static const char STATUS_PAGE[] PROGMEM =
     "<tr><td>NTP Synced</td><td id='ntp'>-</td></tr>"
     "</table>"
     "<script>"
+    "function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}"
     "function refresh(){fetch('/api/status').then(r=>r.json()).then(d=>{"
     "document.getElementById('fw').textContent=d.firmware;"
     "document.getElementById('up').textContent=d.uptime+'s';"
-    "document.getElementById('hp').textContent=d.heap+'B';"
+    "document.getElementById('hp').textContent=fb(d.heap);"
     "document.getElementById('ip').textContent=d.ip;"
     "document.getElementById('ntp').textContent=d.ntp_synced?'Yes':'No';"
     "})}"
@@ -59,13 +60,6 @@ void handleStatusPage() {
 void handleStatusApi() {
     if (!Esp8266BaseWeb::checkAuth()) return;
 
-    char ip[20] = "0.0.0.0";
-    if (Esp8266BaseWiFi::isConnected()) {
-        IPAddress addr = WiFi.localIP();
-        snprintf(ip, sizeof(ip), "%d.%d.%d.%d",
-                 addr[0], addr[1], addr[2], addr[3]);
-    }
-
     char buf[160];
     snprintf(buf, sizeof(buf),
              "{\"firmware\":\"%s\",\"version\":\"%s\","
@@ -74,7 +68,7 @@ void handleStatusApi() {
              Esp8266Base::firmwareName(),
              Esp8266Base::firmwareVersion(),
              (unsigned)ESP.getFreeHeap(),
-             ip,
+             Esp8266BaseWiFi::isConnected() ? Esp8266BaseWiFi::ip() : "0.0.0.0",
              millis() / 1000UL,
              Esp8266BaseNTP::isSynced() ? "true" : "false");
 

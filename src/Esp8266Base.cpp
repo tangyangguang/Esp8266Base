@@ -121,10 +121,10 @@ void Esp8266Base::handle() {
         Esp8266BaseWeb::handle();
     }
 
-    // 7. Watchdog handle — 最后喂狗，确保所有模块都已执行
+    // 7. Watchdog handle — 最后检查，再喂狗，确保本轮所有模块都已执行且未超时
     if (_watchdogEnabled) {
-        Esp8266BaseWatchdog::feed();
         Esp8266BaseWatchdog::handle();
+        Esp8266BaseWatchdog::feed();
     }
 }
 
@@ -132,36 +132,39 @@ void Esp8266Base::handle() {
 // logDiagnostics — 标准启动诊断日志
 // ----------------------------------------------------------------------------
 void Esp8266Base::logDiagnostics() {
-    ESP8266BASE_LOG_I("Base", "fw=%s ver=%s heap=%u",
-                      _fwName, _fwVersion, (unsigned)ESP.getFreeHeap());
+    char heapBuf[16];
+    char maxBuf[16];
+    Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
+    Esp8266BaseUtil::formatBytes(ESP.getMaxFreeBlockSize(), maxBuf, sizeof(maxBuf));
 
-    ESP8266BASE_LOG_I("SLEP", "wake=%s", Esp8266BaseSleep::wakeReason());
+    ESP8266BASE_LOG_I("Base", "firmware=%s version=%s free_heap=%s",
+                      _fwName, _fwVersion, heapBuf);
 
-    ESP8266BASE_LOG_I("Cfg ", "ready=%d pending=%d/%d",
-                      (int)Esp8266BaseConfig::isReady(),
+    ESP8266BASE_LOG_I("SLEP", "wake_reason=%s", Esp8266BaseSleep::wakeReason());
+
+    ESP8266BASE_LOG_I("Cfg ", "config_ready=%s pending_writes=%d/%d",
+                      Esp8266BaseConfig::isReady() ? "yes" : "no",
                       (int)Esp8266BaseConfig::pendingCount(),
                       ESP8266BASE_CFG_DEFERRED_SIZE);
 
     {
         char ssid[64] = "";
         Esp8266BaseConfig::getStr("wifi_ssid", ssid, sizeof(ssid), "(none)");
-        ESP8266BASE_LOG_I("WiFi", "ssid=%s ap=%s",
+        ESP8266BASE_LOG_I("WiFi", "saved_station_ssid=%s default_config_ap_ssid=%s",
                           ssid, Esp8266BaseWiFi::apSSID());
     }
 
     if (_watchdogEnabled) {
-        ESP8266BASE_LOG_I("WDT ", "enabled=1 wdt_reset=%d count=%u",
-                          (int)Esp8266BaseWatchdog::wasWatchdogReset(),
+        ESP8266BASE_LOG_I("WDT ", "watchdog_enabled=yes previous_watchdog_reset=%s reset_count=%u",
+                          Esp8266BaseWatchdog::wasWatchdogReset() ? "yes" : "no",
                           (unsigned)Esp8266BaseWatchdog::resetCount());
     }
 
     if (_webEnabled) {
-        ESP8266BASE_LOG_I("Web ", "enabled=1 ota=%d", (int)_otaEnabled);
+        ESP8266BASE_LOG_I("Web ", "web_enabled=yes ota_enabled=%s", _otaEnabled ? "yes" : "no");
     }
 
-    ESP8266BASE_LOG_I("Heap", "free=%u maxBlock=%u",
-                      (unsigned)ESP.getFreeHeap(),
-                      (unsigned)ESP.getMaxFreeBlockSize());
+    ESP8266BASE_LOG_I("Heap", "free_heap=%s max_block=%s", heapBuf, maxBuf);
 }
 
 // ----------------------------------------------------------------------------

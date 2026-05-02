@@ -35,7 +35,7 @@ bool Esp8266BaseConfig::begin() {
     }
 
     _ready = true;
-    ESP8266BASE_LOG_I("Cfg ", "ready=1 pending=0/%d", ESP8266BASE_CFG_DEFERRED_SIZE);
+    ESP8266BASE_LOG_I("Cfg ", "config_storage_ready pending_writes=0/%d", ESP8266BASE_CFG_DEFERRED_SIZE);
     return true;
 }
 
@@ -200,13 +200,13 @@ bool Esp8266BaseConfig::getBool(const char* key, bool def) {
 // ----------------------------------------------------------------------------
 bool Esp8266BaseConfig::setIntDeferred(const char* key, int32_t value) {
     if (!_ready) return false;
-    if (!key || strlen(key) > ESP8266BASE_CFG_KEY_MAX) return false;
+    if (!key || strlen(key) == 0 || strlen(key) > ESP8266BASE_CFG_KEY_MAX) return false;
     return _enqueue(key, value, false, 1);
 }
 
 bool Esp8266BaseConfig::setBoolDeferred(const char* key, bool value) {
     if (!_ready) return false;
-    if (!key || strlen(key) > ESP8266BASE_CFG_KEY_MAX) return false;
+    if (!key || strlen(key) == 0 || strlen(key) > ESP8266BASE_CFG_KEY_MAX) return false;
     return _enqueue(key, 0, value, 2);
 }
 
@@ -228,6 +228,30 @@ bool Esp8266BaseConfig::flush() {
         }
     }
     return true;
+}
+
+bool Esp8266BaseConfig::clearAll() {
+    if (!_ready) return false;
+    flush();
+
+    bool ok = true;
+    Dir dir = LittleFS.openDir("/");
+    while (dir.next()) {
+        String name = dir.fileName();
+        if (name.startsWith("/cfg_")) {
+            if (!LittleFS.remove(name)) {
+                ok = false;
+                ESP8266BASE_LOG_W("Cfg ", "remove failed path=%s", name.c_str());
+            }
+            yield();
+        }
+    }
+
+    for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
+        _deferred[i].used = false;
+    }
+    ESP8266BASE_LOG_I("Cfg ", "clear_all_config_files result=%s", ok ? "success" : "partial_failure");
+    return ok;
 }
 
 // ----------------------------------------------------------------------------

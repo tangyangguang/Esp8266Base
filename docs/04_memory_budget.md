@@ -38,7 +38,7 @@
 | Esp8266BaseConfig | <= 512B | deferred 队列 4×34B=136B + _ready(1B) + _cfgBuf(97B) |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb（路由表） | <= 512B | AppRoute 4×32+6×32=320B + _authUser/Pass(48B) + _titleBuf(48B) + 状态(3B) |
-| Esp8266BaseOTA | <= 128B | _inProgress(1B) + _authOk(1B) |
+| Esp8266BaseOTA | <= 128B | _inProgress(1B) |
 | Esp8266BaseNTP | <= 160B | 同步状态 + 时区偏移(4B) + 计时器(8B) |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |

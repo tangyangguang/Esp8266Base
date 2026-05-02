@@ -47,7 +47,7 @@ public:
     static void sendContent_P(PGM_P content);     // 从 PROGMEM 分段发送
     static void sendChunk(const char* content);   // 发送动态内容块
     static bool checkAuth();                      // 验证 Basic Auth，失败自动返回 401
-    static bool verifyAuth();                     // 仅验证，不发 401（供上传 handler 使用）
+    static bool verifyAuth();                     // 仅验证，不发 401
     static void setAuth(const char* user, const char* pass);
 
     // 暴露底层 server，供需要直接操作的 handler 使用
@@ -79,7 +79,8 @@ private:
     static void _handleWiFiGet();
     static void _handleWiFiPost();
     static void _handleOtaGet();   // OTA GET 由此处理，POST 由 Esp8266BaseOTA 注册
-    static void _handleReboot();
+    static void _handleRebootGet();
+    static void _handleRebootPost();
     static void _handleHealth();
     static void _handleNotFound();
 };

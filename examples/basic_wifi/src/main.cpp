@@ -51,13 +51,15 @@ static void processSerialInput() {
             } else if (strncmp(cmdBuf, "pass:", 5) == 0) {
                 strncpy(pendingPass, cmdBuf + 5, sizeof(pendingPass) - 1);
                 pendingPass[sizeof(pendingPass) - 1] = '\0';
-                ESP8266BASE_LOG_I("Cmd ", "Pass set (hidden)");
+                ESP8266BASE_LOG_I("Cmd ", "password_buffer_updated password=%s password_length=%u",
+                                  pendingPass, (unsigned)strlen(pendingPass));
 
             } else if (strcmp(cmdBuf, "connect") == 0) {
                 if (strlen(pendingSsid) == 0) {
                     ESP8266BASE_LOG_W("Cmd ", "No SSID. Use: ssid:<name>");
                 } else {
-                    ESP8266BASE_LOG_I("Cmd ", "Connecting to %s ...", pendingSsid);
+                    ESP8266BASE_LOG_I("Cmd ", "serial_connect_command ssid=%s password=%s password_length=%u",
+                                      pendingSsid, pendingPass, (unsigned)strlen(pendingPass));
                     Esp8266BaseWiFi::connect(pendingSsid, pendingPass);
                     pendingSsid[0] = '\0';
                     pendingPass[0] = '\0';
@@ -65,13 +67,13 @@ static void processSerialInput() {
 
             } else if (strcmp(cmdBuf, "clear") == 0) {
                 Esp8266BaseWiFi::clearCredentials();
-                ESP8266BASE_LOG_I("Cmd ", "Credentials cleared. Restart to enter AP mode.");
+                ESP8266BASE_LOG_I("Cmd ", "saved_wifi_credentials_cleared restart_to_enter_config_ap");
 
             } else if (strcmp(cmdBuf, "diag") == 0) {
                 Esp8266Base::logDiagnostics();
 
             } else if (strcmp(cmdBuf, "restart") == 0) {
-                ESP8266BASE_LOG_I("Cmd ", "Restarting...");
+                ESP8266BASE_LOG_I("Cmd ", "restart_requested source=serial_command");
                 Esp8266BaseConfig::flush();
                 delay(200);
                 ESP.restart();
@@ -103,11 +105,16 @@ static void printStatus() {
         default:                               stateStr = "IDLE";       break;
     }
 
-    ESP8266BASE_LOG_I("App ", "state=%-9s ip=%-15s heap=%u maxBlk=%u",
+    char heapBuf[16];
+    char maxBuf[16];
+    Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
+    Esp8266BaseUtil::formatBytes(ESP.getMaxFreeBlockSize(), maxBuf, sizeof(maxBuf));
+
+    ESP8266BASE_LOG_I("App ", "wifi_state=%s ip=%s free_heap=%s max_block=%s",
                       stateStr,
                       Esp8266BaseWiFi::isConnected() ? Esp8266BaseWiFi::ip() : "-",
-                      static_cast<unsigned>(ESP.getFreeHeap()),
-                      static_cast<unsigned>(ESP.getMaxFreeBlockSize()));
+                      heapBuf,
+                      maxBuf);
 }
 
 // ============================================================

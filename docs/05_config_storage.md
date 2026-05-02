@@ -155,6 +155,15 @@ Esp8266BaseConfig::flush();
 Esp8266BaseSleep::deepSleep(60);
 ```
 
+### 恢复出厂配置
+
+```cpp
+Esp8266BaseConfig::clearAll();
+ESP.restart();
+```
+
+`clearAll()` 删除所有 `/cfg_*` 文件，包括 WiFi 凭证、Web 凭证、看门狗计数和应用自定义配置。适合长按按键恢复出厂配置。
+
 ---
 
 ## 九、RAM 预算

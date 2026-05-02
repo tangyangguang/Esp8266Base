@@ -2,6 +2,7 @@
 #include "Esp8266BaseLog.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWatchdog.h"
+#include "Esp8266BaseUtil.h"
 #include <ESP8266WiFi.h>
 #include <user_interface.h>   // rst_info, REASON_DEEP_SLEEP_AWAKE 等
 
@@ -40,7 +41,7 @@ bool Esp8266BaseSleep::begin() {
     }
 
     _initialized = true;
-    ESP8266BASE_LOG_I("SLEP", "ready=1 wake=%s", _wakeReason);
+    ESP8266BASE_LOG_I("SLEP", "sleep_module_ready wake_reason=%s", _wakeReason);
     return true;
 }
 
@@ -49,21 +50,19 @@ bool Esp8266BaseSleep::begin() {
 // ----------------------------------------------------------------------------
 void Esp8266BaseSleep::modemSleep() {
     if (_modemSleeping) return;
-    WiFi.forceSleepBegin();
-    delay(1);  // 等待 modem 进入睡眠
+    // 使用 SDK 的 Modem Sleep 模式，保持 WiFi 连接但降低功耗
+    // 不会断开连接，SDK 会自动在 DTIM 间隔关闭射频
+    WiFi.setSleepMode(WIFI_MODEM_SLEEP);
     _modemSleeping = true;
-    ESP8266BASE_LOG_I("SLEP", "modem_sleep=1");
+    ESP8266BASE_LOG_I("SLEP", "modem_sleep_enabled mode=sdk_managed_wifi_modem_sleep");
 }
 
-// ----------------------------------------------------------------------------
-// wakeModem — 重新启用 RF
-// ----------------------------------------------------------------------------
 void Esp8266BaseSleep::wakeModem() {
     if (!_modemSleeping) return;
-    WiFi.forceSleepWake();
-    delay(1);
+    // 恢复为无睡眠模式
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);
     _modemSleeping = false;
-    ESP8266BASE_LOG_I("SLEP", "modem_sleep=0");
+    ESP8266BASE_LOG_I("SLEP", "modem_sleep_disabled mode=wifi_none_sleep");
 }
 
 // ----------------------------------------------------------------------------
@@ -75,8 +74,10 @@ void Esp8266BaseSleep::deepSleep(uint32_t sleepSec) {
         sleepSec = ESP8266BASE_SLEEP_MAX_DEEP_SEC;
     }
 
-    ESP8266BASE_LOG_I("SLEP", "deep_sleep sec=%u heap=%u",
-                      (unsigned)sleepSec, (unsigned)ESP.getFreeHeap());
+    char heapBuf[16];
+    Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
+    ESP8266BASE_LOG_I("SLEP", "entering_deep_sleep duration=%us free_heap=%s",
+                      (unsigned)sleepSec, heapBuf);
 
     // 预飞：暂停看门狗
     Esp8266BaseWatchdog::pause();

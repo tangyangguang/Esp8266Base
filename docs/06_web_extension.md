@@ -180,7 +180,7 @@ void handleFanPage() {
 
 公开接口（如健康检查）可不调用 `checkAuth()`。
 
-`verifyAuth()` 仅验证不发 401，供需要在接收数据前检测认证的场景使用（OTA 内部已使用）。
+`verifyAuth()` 仅验证不发 401，供需要在接收数据前检测认证的场景使用。内置 OTA 上传 POST 不做额外认证，认证只发生在 `/ota` 页面 GET。
 
 ---
 

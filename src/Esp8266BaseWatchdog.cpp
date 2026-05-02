@@ -29,7 +29,7 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
         _wasWdtReset = true;
         // 清除 pending 标志，避免下次误判
         Esp8266BaseConfig::setInt("wdt_pending", 0);
-        ESP8266BASE_LOG_W("WDT ", "Boot after WDT reset count=%u", (unsigned)_resetCount);
+        ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u", (unsigned)_resetCount);
     } else {
         _wasWdtReset = false;
     }
@@ -37,7 +37,7 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     _lastFeedMs = millis();
     _running    = true;
 
-    ESP8266BASE_LOG_I("WDT ", "ready=1 timeout=%ums wdt_resets=%u",
+    ESP8266BASE_LOG_I("WDT ", "watchdog_ready timeout=%ums reset_count=%u",
                       (unsigned)_timeoutMs, (unsigned)_resetCount);
     return true;
 }
@@ -56,7 +56,7 @@ void Esp8266BaseWatchdog::handle() {
         Esp8266BaseConfig::setInt("wdt_pending",  1);
         Esp8266BaseConfig::flush();
 
-        ESP8266BASE_LOG_E("WDT ", "TIMEOUT elapsed=%ums count=%u -> restart",
+        ESP8266BASE_LOG_E("WDT ", "watchdog_timeout elapsed=%ums reset_count=%u action=restart",
                           (unsigned)elapsed, (unsigned)_resetCount);
 
         // 给串口缓冲区时间输出
@@ -77,13 +77,13 @@ void Esp8266BaseWatchdog::feed() {
 // ----------------------------------------------------------------------------
 void Esp8266BaseWatchdog::pause() {
     _paused = true;
-    ESP8266BASE_LOG_D("WDT ", "paused");
+    ESP8266BASE_LOG_D("WDT ", "watchdog_paused");
 }
 
 void Esp8266BaseWatchdog::resume() {
     _lastFeedMs = millis();  // resume 时重置计时，避免因暂停期间"超时"
     _paused     = false;
-    ESP8266BASE_LOG_D("WDT ", "resumed");
+    ESP8266BASE_LOG_D("WDT ", "watchdog_resumed");
 }
 
 // ----------------------------------------------------------------------------
@@ -109,5 +109,5 @@ void Esp8266BaseWatchdog::clearResetCount() {
     _resetCount = 0;
     Esp8266BaseConfig::setInt("wdt_count",   0);
     Esp8266BaseConfig::setInt("wdt_pending", 0);
-    ESP8266BASE_LOG_I("WDT ", "reset count cleared");
+    ESP8266BASE_LOG_I("WDT ", "watchdog_reset_count_cleared");
 }

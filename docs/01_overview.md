@@ -75,7 +75,7 @@ Esp8266Base/
 | 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、应用扩展 |
-| OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、认证校验 |
+| OTA | `Esp8266BaseOTA` | Web OTA 上传、进度显示、WDT 联动 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
 | Sleep | `Esp8266BaseSleep` | modem/deep sleep 封装、唤醒原因 |
@@ -88,13 +88,17 @@ Esp8266Base/
 `platformio.ini` 参考：
 
 ```ini
+[platformio]
+src_dir = examples/full_demo/src
+
 [env:esp12f]
 platform             = espressif8266
 board                = esp12e
 framework            = arduino
 monitor_speed        = 115200
 upload_speed         = 460800
-board_build.ldscript = ../../partitions/esp8266-4mb-2mfs.ld
+lib_extra_dirs       = .
+board_build.ldscript = partitions/esp8266-4mb-2mfs.ld
 
 lib_deps =
     LittleFS
@@ -122,6 +126,8 @@ build_flags =
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
 | `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `15000` | WiFi STA 连接超时 ms |
+
+根目录配置使用 `full_demo` 作为库烟测入口；单独编译示例时进入 `examples/<name>` 目录运行 `pio run -e esp12f`。上传统一使用 `460800` baud。
 
 ---
 

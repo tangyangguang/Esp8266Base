@@ -11,6 +11,8 @@
  *   mDNS     — http://esp-demo.local/
  *   Sleep    — 唤醒原因显示 + Web 触发深度睡眠
  *   Watchdog — WDT 重启计数显示 + Web 清零
+ *   Button   — GPIO0 长按 1 秒清除全部 /cfg_* 配置并重启
+ *   LED      — GPIO2 板载指示灯（低电平亮）：联网常亮，AP 慢闪，连接中快闪
  *
  * 首次使用：连接 AP "ESP8266-Config-XXXX" → http://192.168.4.1/ 配置 WiFi
  * 认证：admin / esp8266
@@ -22,9 +24,19 @@
 // 自定义 Config key
 static const char KEY_BOOT[] = "demo_boot";
 static const char KEY_VAL[]  = "demo_val";
+static const char DEFAULT_DEMO_VAL[] = "demo-default";
+
+// ESP-12F 常见板载资源：GPIO0 FLASH 键，GPIO2 蓝色 LED（active-low）
+static const uint8_t  BOARD_BUTTON_PIN = 0;
+static const uint8_t  BOARD_LED_PIN    = 2;
+static const uint32_t CLEAR_HOLD_MS    = 1000;
 
 // 启动计数（从 Config 读取后加一）
 static int32_t g_bootCount = 0;
+static uint32_t g_buttonDownAt = 0;
+static bool     g_clearFired   = false;
+static uint32_t g_ledLastMs    = 0;
+static bool     g_ledBlinkOn   = false;
 
 // ----------------------------------------------------------------
 // PROGMEM HTML
@@ -43,17 +55,20 @@ static const char PAGE_DEMO[] PROGMEM =
     "<tr><td>mDNS</td><td id='dns'>-</td></tr>"
     "<tr><td>NTP Time</td><td id='ntp'>-</td></tr>"
     "<tr><td>Wake Reason</td><td id='wake'>-</td></tr>"
+    "<tr><td>Board Button</td><td>GPIO0 long press 1s clears config</td></tr>"
+    "<tr><td>Board LED</td><td>GPIO2 active-low</td></tr>"
     "<tr><td>Boot Count (Config)</td><td id='bc'>-</td></tr>"
     "<tr><td>WDT Resets (Watchdog)</td><td id='wdt'>-</td></tr>"
     "<tr><td>demo_val (Config)</td><td id='cv'>-</td></tr>"
     "</table>"
     "<script>"
+    "function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}"
     "function r(){"
     "fetch('/api/demo').then(x=>x.json()).then(d=>{"
     "document.getElementById('fw').textContent=d.fw+' v'+d.ver;"
     "document.getElementById('up').textContent=d.uptime+'s';"
-    "document.getElementById('hp').textContent=d.heap+'B';"
-    "document.getElementById('mb').textContent=d.maxblk+'B';"
+    "document.getElementById('hp').textContent=fb(d.heap);"
+    "document.getElementById('mb').textContent=fb(d.maxblk);"
     "document.getElementById('ip').textContent=d.ip;"
     "document.getElementById('dns').textContent=d.mdns;"
     "document.getElementById('ntp').textContent=d.ntp;"
@@ -184,8 +199,12 @@ void handleCtrlApi() {
                 Esp8266BaseWeb::server().arg("val").c_str(),
                 sizeof(val) - 1);
         bool ok = Esp8266BaseConfig::setStr(KEY_VAL, val);
-        ESP8266BASE_LOG_I("App ", "Config write %s val='%s'",
-                          ok ? "OK" : "FAIL", val);
+        ESP8266BASE_LOG_I("App ", "config_save key=%s value=%s result=%s",
+                          KEY_VAL, val, ok ? "success" : "failed");
+        char readBack[48] = "";
+        bool got = Esp8266BaseConfig::getStr(KEY_VAL, readBack, sizeof(readBack), "");
+        ESP8266BASE_LOG_I("App ", "config_read_after_save key=%s found=%s value=%s",
+                          KEY_VAL, got ? "yes" : "no", readBack);
     }
 
     // 重定向回 /ctrl 页面
@@ -194,11 +213,65 @@ void handleCtrlApi() {
 }
 
 // ----------------------------------------------------------------
+// 板载按钮 / LED
+// ----------------------------------------------------------------
+static void setBoardLed(bool on) {
+    digitalWrite(BOARD_LED_PIN, on ? LOW : HIGH);
+}
+
+static void updateBoardLed() {
+    uint32_t now = millis();
+    Esp8266BaseWiFiState state = Esp8266BaseWiFi::state();
+
+    if (state == Esp8266BaseWiFiState::CONNECTED) {
+        setBoardLed(true);
+        return;
+    }
+
+    uint32_t interval = (state == Esp8266BaseWiFiState::AP_CONFIG) ? 1000UL : 250UL;
+    if (now - g_ledLastMs >= interval) {
+        g_ledLastMs = now;
+        g_ledBlinkOn = !g_ledBlinkOn;
+        setBoardLed(g_ledBlinkOn);
+    }
+}
+
+static void handleBoardButton() {
+    bool pressed = (digitalRead(BOARD_BUTTON_PIN) == LOW);
+    uint32_t now = millis();
+
+    if (!pressed) {
+        g_buttonDownAt = 0;
+        g_clearFired = false;
+        return;
+    }
+
+    if (g_buttonDownAt == 0) {
+        g_buttonDownAt = now;
+        return;
+    }
+
+    if (!g_clearFired && now - g_buttonDownAt >= CLEAR_HOLD_MS) {
+        g_clearFired = true;
+        setBoardLed(true);
+        ESP8266BASE_LOG_W("Btn ", "button_long_press_detected pin=GPIO0 duration=1s action=clear_all_config_and_restart");
+        Esp8266BaseWatchdog::pause();
+        Esp8266BaseConfig::clearAll();
+        delay(300);
+        ESP.restart();
+    }
+}
+
+// ----------------------------------------------------------------
 // setup / loop
 // ----------------------------------------------------------------
 void setup() {
     Serial.begin(115200);
     delay(100);
+
+    pinMode(BOARD_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(BOARD_LED_PIN, OUTPUT);
+    setBoardLed(false);
 
     Esp8266Base::setFirmwareInfo("full-demo", "1.0.0");
     Esp8266Base::setHostname("esp-demo");
@@ -214,6 +287,21 @@ void setup() {
     // Config 演示：读取 + 递增启动计数（deferred 写，不阻塞启动）
     g_bootCount = Esp8266BaseConfig::getInt(KEY_BOOT, 0) + 1;
     Esp8266BaseConfig::setIntDeferred(KEY_BOOT, g_bootCount);
+    ESP8266BASE_LOG_I("App ", "config_deferred_save key=%s value=%ld",
+                      KEY_BOOT, (long)g_bootCount);
+
+    char demoVal[48] = "";
+    bool hasDemoVal = Esp8266BaseConfig::getStr(KEY_VAL, demoVal, sizeof(demoVal), "");
+    ESP8266BASE_LOG_I("App ", "config_read key=%s found=%s value=%s",
+                      KEY_VAL, hasDemoVal ? "yes" : "no", demoVal);
+    if (!hasDemoVal || demoVal[0] == '\0') {
+        bool saved = Esp8266BaseConfig::setStr(KEY_VAL, DEFAULT_DEMO_VAL);
+        ESP8266BASE_LOG_I("App ", "config_save_default key=%s value=%s result=%s",
+                          KEY_VAL, DEFAULT_DEMO_VAL, saved ? "success" : "failed");
+        Esp8266BaseConfig::getStr(KEY_VAL, demoVal, sizeof(demoVal), "");
+        ESP8266BASE_LOG_I("App ", "config_read_after_default_save key=%s value=%s",
+                          KEY_VAL, demoVal);
+    }
 
     // 注册路由（必须在 begin() 之后）
     // 2 页面 + 2 API，均在 4/6 上限内
@@ -222,15 +310,19 @@ void setup() {
     Esp8266BaseWeb::addApi("/api/demo",  handleDemoApi);
     Esp8266BaseWeb::addApi("/api/ctrl",  handleCtrlApi);
 
+    char heapBuf[16];
+    Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
     ESP8266BASE_LOG_I("App ",
-                      "boot=%ld wake=%s wdt_prev=%s resets=%lu heap=%u",
+                      "app_started boot_count=%ld wake_reason=%s previous_watchdog_reset=%s watchdog_reset_count=%lu free_heap=%s",
                       (long)g_bootCount,
                       Esp8266BaseSleep::wakeReason(),
-                      Esp8266BaseWatchdog::wasWatchdogReset() ? "YES" : "no",
+                      Esp8266BaseWatchdog::wasWatchdogReset() ? "yes" : "no",
                       (unsigned long)Esp8266BaseWatchdog::resetCount(),
-                      (unsigned)ESP.getFreeHeap());
+                      heapBuf);
 }
 
 void loop() {
     Esp8266Base::handle();
+    handleBoardButton();
+    updateBoardLed();
 }

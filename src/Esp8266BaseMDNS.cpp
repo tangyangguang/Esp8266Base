@@ -25,7 +25,7 @@ bool Esp8266BaseMDNS::begin(const char* hostname) {
     MDNS.addService("http", "tcp", 80);
 
     _running = true;
-    ESP8266BASE_LOG_I("mDNS", "run=1 host=%s.local", hostname);
+    ESP8266BASE_LOG_I("mDNS", "mdns_started host=%s.local service=http tcp_port=80", hostname);
     return true;
 }
 

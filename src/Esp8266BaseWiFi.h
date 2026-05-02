@@ -7,8 +7,9 @@
 // 状态机：
 //   IDLE → CONNECTING → CONNECTED
 //               ↓ 首次连接超时
-//           AP_CONFIG ← connect() 保存新凭证后重试
-//           CONNECTED → 掉线 → CONNECTING (慢速重试，不回 AP)
+//           AP_CONFIG + STA retry（AP 可配网，同时后台持续重连）
+//               ↓ STA connected
+//           CONNECTED（关闭 AP）
 //
 // RAM 预算：<= 256B（全局静态，不含 WiFi SDK 内部）
 // ----------------------------------------------------------------------------
@@ -62,7 +63,7 @@ public:
 
 private:
     static Esp8266BaseWiFiState _state;        // 1B
-    static uint32_t             _connectStart; // 4B：进入 CONNECTING 的时刻
+    static uint32_t             _connectStart; // 4B：连接尝试开始时刻；0 表示等待下次重试
     static uint32_t             _retryAt;      // 4B：下次重试的绝对 millis
     static uint8_t              _retryCount;   // 1B：已重试次数（用于区分首次/慢速）
     static bool                 _everConnected;// 1B：是否曾经连上（区分首次/断线重连）
@@ -71,7 +72,9 @@ private:
     static char                 _staSSID[64];  // 64B：缓存的 STA SSID，避免重连时重读 Flash
     static char                 _staPass[64];  // 64B：缓存的 STA 密码
 
-    static void _startSTA(const char* ssid, const char* pass);
+    static void _startSTA(const char* ssid, const char* pass, bool keepAP = false);
     static void _startAP();
+    static void _handleConnected();
+    static void _scheduleRetry();
     static void _updateIP();
 };

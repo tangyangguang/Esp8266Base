@@ -56,6 +56,9 @@ public:
     // 强制写完所有 pending（deep sleep / 重启前调用）
     static bool flush();
 
+    // 删除所有 /cfg_* 配置文件（恢复出厂配置前调用）
+    static bool clearAll();
+
     // 当前 pending 条数（用于诊断日志）
     static uint8_t pendingCount();
 
