@@ -1,6 +1,6 @@
 # Esp8266Base RAM 预算与控制规则
 
-> 版本：1.0.0  
+> 版本：1.0.0
 > 本文档是所有开发决策的资源约束基准。任何实现与 RAM 目标冲突时，以 **RAM 目标优先**。
 
 ---
@@ -39,23 +39,23 @@
 | Esp8266BaseLog | <= 160B | level(1B) + fn ptr(4B)；格式缓冲 128B 在栈上 |
 | Esp8266BaseConfig | <= 512B | deferred 队列 4×34B=136B + _ready(1B) + _cfgBuf(97B) |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
-| Esp8266BaseWeb（路由表） | <= 512B | AppRoute 4×32+6×32=320B + _authUser/Pass(48B) + _titleBuf(48B) + 状态(3B) |
+| Esp8266BaseWeb（路由表） | <= 512B | AppRoute 4×32+6×32=320B + _authUser/Pass(48B) + _titleBuf(48B) + _activeUri/Method(37B) + 状态 |
 | Esp8266BaseOTA | <= 128B | _inProgress(1B) |
-| Esp8266BaseNTP | <= 160B | 同步状态 + 时区偏移(4B) + 计时器(8B) |
+| Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
 | Esp8266BaseWatchdog | <= 96B | timeout(4B) + 计时器(8B) + pause(1B) + count(4B) |
 | **库总计（自有）** | **< 2.5KB** | 不含 Arduino SDK 内部开销 |
 
-当前示例构建实测（PlatformIO `esp12f` release）：
+示例构建资源参考（PlatformIO `esp12f` release）：
 
 | 示例 | 启用模块 | RAM | Flash |
 |------|----------|-----|-------|
-| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 31,160B | 308,151B |
-| `sleep_watchdog` | Sleep + WDT | 31,132B | 309,195B |
-| `custom_web` | Web + mDNS + WDT | 33,060B | 372,748B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 34,684B | 389,232B |
-| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 36,324B | 396,456B |
+| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 31,176B | 308,343B |
+| `sleep_watchdog` | Sleep + WDT | 31,144B | 309,391B |
+| `custom_web` | Web + mDNS + WDT | 33,252B | 373,324B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 35,320B | 393,172B |
+| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 36,904B | 400,372B |
 
 Arduino SDK 内部开销（不可控，参考值）：
 
@@ -70,10 +70,10 @@ Arduino SDK 内部开销（不可控，参考值）：
 
 ## 四、硬性 RAM 控制规则
 
-**规则 1：禁止全局大缓冲**  
+**规则 1：禁止全局大缓冲**
 不得声明 `static char buf[1024]` 或更大的全局/静态缓冲。单个临时缓冲默认不超过 512B。
 
-**规则 2：禁止在常驻状态保存 HTML**  
+**规则 2：禁止在常驻状态保存 HTML**
 所有 HTML 内容必须放 `PROGMEM`，不得保存在 DRAM 字符串中。
 
 ```cpp
@@ -84,10 +84,10 @@ static const char PAGE_HTML[] PROGMEM = "<html>...</html>";
 static String pageHtml = "<html>...</html>";
 ```
 
-**规则 3：动态响应分段发送**  
-Web 响应必须使用 `server.sendContent()` 分段发送，不得将整页 HTML 拼接为 `String` 后一次发送。
+**规则 3：动态响应流式发送**
+Web 页面必须使用 `sendContent_P()` / `sendChunk()` 流式输出，不得将整页 HTML 拼接为 `String` 后一次发送。
 
-**规则 4：禁止 std::function**  
+**规则 4：禁止 std::function**
 每个 `std::function` 对象在 heap 上额外占用 16-24B。使用函数指针代替：
 
 ```cpp
@@ -98,7 +98,7 @@ typedef void (*Esp8266BaseWebHandler)();
 std::function<void()> handler;
 ```
 
-**规则 5：禁止 STL 容器**  
+**规则 5：禁止 STL 容器**
 不使用 `std::vector`、`std::map`、`std::list`。使用固定大小静态数组：
 
 ```cpp
@@ -110,7 +110,7 @@ static uint8_t _pageCount = 0;
 std::vector<AppRoute> _pages;
 ```
 
-**规则 6：禁止长期保存 String 对象**  
+**规则 6：禁止长期保存 String 对象**
 模块全局状态中不保存 `String`，使用 `char[]`：
 
 ```cpp
@@ -121,10 +121,10 @@ static char _hostname[24];
 static String _hostname;
 ```
 
-**规则 7：避免多模块重复保存配置**  
+**规则 7：避免多模块重复保存配置**
 `ssid` / `pass` 只在 WiFi 模块内存缓存一份，其他模块通过引用访问。
 
-**规则 8：每模块必须有 RAM 预算**  
+**规则 8：每模块必须有 RAM 预算**
 新增模块必须在本文档第三节声明 RAM 预算。
 
 ---

@@ -23,7 +23,7 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     if (timeoutMs > 3000) timeoutMs = 3000;
     _timeoutMs = timeoutMs;
 
-    // 读取历史重启记录
+    // 读取累计重启记录
     _resetCount  = (uint32_t)Esp8266BaseConfig::getInt("wdt_count");
     int pending  = Esp8266BaseConfig::getInt("wdt_pending");
 

@@ -401,12 +401,12 @@ static bool isInProgress();
 ```
 OTA 上传是否正在进行。
 
-### OTA 过程行为
+### OTA 行为
 
 1. GET /ota 页面使用 Web Basic Auth；页面内用 XMLHttpRequest 上传并显示进度
 2. POST /ota 不做额外 Basic Auth 校验，避免 multipart upload 被二次认证拒绝
 3. 上传开始：`Esp8266BaseWatchdog::pause()`，调用 `Update.begin(ESP.getFreeSketchSpace())`
-4. 上传过程：分块写入固件，每块后 `yield()`
+4. 上传期间：分块写入固件，每块后 `yield()`
 5. 上传完成：`Esp8266BaseWatchdog::resume()`，延迟 500ms 后 `ESP.restart()`
 6. 上传失败或中止：`Esp8266BaseWatchdog::resume()`，返回简短错误信息
 
@@ -423,12 +423,12 @@ OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZ
 ```cpp
 static bool begin();
 ```
-配置 NTP 服务器和时区，启动对时。由 `Esp8266Base::handle()` 在 WiFi 首次连接时自动调用。
+配置 NTP 服务器和时区，启动系统 SNTP 客户端，并启用库内主动 UDP NTP 查询。由 `Esp8266Base::handle()` 在 WiFi 首次连接时自动调用。
 
 ```cpp
 static void handle();
 ```
-检查同步状态，成功后自动调用 `Esp8266BaseLog::setTimeProvider()` 切换日志时间格式。首次同步会记录实际时间、启动后毫秒数和推算出的本次启动时间，便于换算同步前的日志。
+检查同步状态。系统 SNTP 或库内主动 UDP NTP 任一路径成功后，都会设置系统时间，并自动调用 `Esp8266BaseLog::setTimeProvider()` 切换日志时间格式。首次同步会记录实际时间、启动后毫秒数和推算出的本次启动时间，便于换算同步前的日志。
 
 ```cpp
 static bool isSynced();
@@ -448,6 +448,7 @@ static bool formatTo(char* out, size_t len, const char* fmt);
 | 时区偏移 | 28800（UTC+8，`ESP8266BASE_NTP_TIMEZONE`） |
 | NTP 服务器 | ntp.aliyun.com, ntp.tencent.com, cn.pool.ntp.org |
 | 重新同步间隔 | 3600s（`ESP8266BASE_NTP_SYNC_INTERVAL`） |
+| 主动 UDP 查询 | 未同步时自动轮询 3 个服务器，单次等待 3s |
 
 ### 使用示例
 
@@ -585,7 +586,7 @@ static bool wasWatchdogReset();
 static uint32_t resetCount();
 static void clearResetCount();
 ```
-WDT 重启历史查询与清零（从 Config key `wdt_pending` / `wdt_count` 读取）。
+WDT 重启累计次数查询与清零（从 Config key `wdt_pending` / `wdt_count` 读取）。
 
 ### 默认配置
 

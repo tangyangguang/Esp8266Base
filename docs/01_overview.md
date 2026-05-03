@@ -36,6 +36,7 @@ Esp8266Base/
 │   ├── basic_wifi/                # WiFi STA/AP 配网示例
 │   ├── wifi_config_ota/           # Web 配网 + OTA 示例
 │   ├── custom_web/                # 自定义 Web 页面示例
+│   ├── sleep_watchdog/            # Sleep + Watchdog 示例
 │   └── full_demo/                 # 全模块演示（参考实现）
 ├── src/
 │   ├── Esp8266Base.h / .cpp       # 主入口
@@ -105,6 +106,12 @@ lib_deps =
 
 build_flags =
     -DESP8266BASE_LOG_LEVEL=1
+    -DESP8266BASE_USE_WEB=1
+    -DESP8266BASE_USE_OTA=1
+    -DESP8266BASE_USE_NTP=1
+    -DESP8266BASE_USE_MDNS=1
+    -DESP8266BASE_USE_SLEEP=1
+    -DESP8266BASE_USE_WATCHDOG=1
     -DESP8266BASE_WEB_MAX_APP_PAGES=4
     -DESP8266BASE_WEB_MAX_APP_APIS=6
     -DESP8266BASE_WEB_AUTH_USER=\"admin\"
@@ -118,6 +125,12 @@ build_flags =
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 0=D, 1=I, 2=W, 3=E, 4=关闭 |
+| `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
+| `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
+| `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
+| `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
+| `ESP8266BASE_USE_SLEEP` | `1` | 编译 Sleep |
+| `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大数量 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大数量 |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 用户名 |
@@ -126,8 +139,11 @@ build_flags =
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
 | `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
+| `ESP8266BASE_WIFI_RETRY_FAST` | `5000` | WiFi 快速重试间隔 ms |
+| `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数 |
+| `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
 
-根目录配置使用 `full_demo` 作为库烟测入口；单独编译示例时进入 `examples/<name>` 目录运行 `pio run -e esp12f`。上传统一使用 `460800` baud。
+根目录配置使用 `full_demo` 作为默认构建入口；单独编译示例时进入 `examples/<name>` 目录运行 `pio run -e esp12f`。上传统一使用 `460800` baud。
 
 ---
 
@@ -137,7 +153,7 @@ build_flags =
 
 1. 禁止全局大缓冲（> 512B）
 2. 所有 HTML 内容放 `PROGMEM`，不保存在 DRAM
-3. Web 响应用 `sendContent()` 分段发送，不拼接整页 `String`
+3. Web 页面使用 `sendContent_P()` / `sendChunk()` 流式输出，不拼接整页 `String`
 4. 禁止 `std::function`，使用函数指针（`typedef void (*Handler)()`）
 5. 禁止 STL 容器，使用固定大小静态数组
 6. 禁止在模块全局状态中保存 `String` 对象，使用 `char[]`

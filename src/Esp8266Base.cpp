@@ -4,7 +4,7 @@
 // 静态成员定义
 // ----------------------------------------------------------------------------
 char Esp8266Base::_fwName[24]    = "esp8266base";
-char Esp8266Base::_fwVersion[16] = "0.1.0";
+char Esp8266Base::_fwVersion[16] = "1.0.0";
 char Esp8266Base::_hostname[24]  = "esp8266";
 
 #if ESP8266BASE_USE_NTP

@@ -52,7 +52,7 @@ Esp8266Base（主入口）
   ├── Esp8266BaseWiFi       （依赖 Config 读取凭证；凭证缓存在内存，重连不再读 Flash）
   ├── Esp8266BaseWeb        （begin() 在 WiFi 之后；始终监听，AP 模式也可访问）
   │     └── Esp8266BaseOTA  （依赖 Web server 已启动；GET 页面使用 Web Basic Auth）
-  ├── Esp8266BaseNTP        （WiFi 连接后由 handle() 触发 begin()，成功后回调 Log 切换时间）
+  ├── Esp8266BaseNTP        （WiFi 连接后由 handle() 触发 begin()；SNTP + 主动 UDP NTP 双路径对时）
   ├── Esp8266BaseMDNS       （WiFi 连接后由 handle() 触发 begin()；WiFi 掉线后重置，重连自动重启）
   ├── Esp8266BaseSleep      （deepSleep 前调用 Config::flush() 和 Watchdog::pause()）
   └── Esp8266BaseWatchdog   （OTA 期间自动 pause/resume；handle() 最后执行，确保其他模块已运行）
@@ -117,7 +117,7 @@ Esp8266Base（主入口）
                                            ▼
                                      ┌────────────┐
                                      │ CONNECTING │
-                                     │ 前 3 次 15s │
+                                     │ 前 3 次 5s  │
                                      │ 之后 60s    │
                                      └────────────┘
 ```
@@ -197,9 +197,9 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | Esp8266BaseLog | <= 160B | level(1B) + fn ptr(4B)；格式缓冲 128B 在栈上 |
 | Esp8266BaseConfig | <= 512B | deferred 队列 4×34B + 状态标志 + 读写缓冲 97B |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器 + _apSSID(28B) + _ip(16B) + _staSSID/Pass(128B) |
-| Esp8266BaseWeb（路由表） | <= 512B | AppRoute 数组 320B + auth(48B) + title(48B) + 状态 |
+| Esp8266BaseWeb（路由表） | <= 512B | AppRoute 数组 320B + auth(48B) + title(48B) + request trace(37B) + 状态 |
 | Esp8266BaseOTA | <= 128B | _inProgress(1B) |
-| Esp8266BaseNTP | <= 160B | 同步状态 + 时区偏移(4B) + 计时器(8B) |
+| Esp8266BaseNTP | <= 224B | 同步状态 + 计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + 标志(2B) |
 | Esp8266BaseWatchdog | <= 96B | timeout(4B) + 计时器(8B) + pause(1B) + count(4B) |

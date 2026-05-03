@@ -37,6 +37,14 @@ private:
     static uint32_t _lastCheckMs;   // 4B
     static uint32_t _startedMs;     // 4B：本次 NTP 启动时间
     static uint32_t _lastPendingLogMs; // 4B：未同步状态日志节流
+    static uint32_t _nextManualMs;  // 4B：库内 UDP NTP 下次请求时间
+    static uint32_t _manualSentMs;  // 4B：库内 UDP NTP 请求发送时间
+    static uint8_t  _manualServer;  // 1B：当前库内 UDP NTP 服务器索引
+    static bool     _manualWaiting; // 1B：正在等待库内 UDP NTP 响应
+
+    static bool _pollManual(uint32_t now);
+    static void _sendManual(uint32_t now);
+    static void _finishSync(time_t t);
 
     // Log 时间回调（静态函数，注入 Esp8266BaseLog）
     static const char* _timeStr();

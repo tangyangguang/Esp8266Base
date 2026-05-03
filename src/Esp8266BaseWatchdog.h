@@ -20,7 +20,7 @@
 
 class Esp8266BaseWatchdog {
 public:
-    // 初始化：读取 Config 中历史重启计数，设置超时时间（ms，会被 clamp 到 1000~3000）
+    // 初始化：读取 Config 中累计重启计数，设置超时时间（ms，会被 clamp 到 1000~3000）
     static bool begin(uint32_t timeoutMs = ESP8266BASE_WDT_TIMEOUT_MS);
 
     // 每轮调用：检查是否超时，超时则保存状态并重启
@@ -37,7 +37,7 @@ public:
     static bool     isRunning();
     static bool     isPaused();
     static bool     wasWatchdogReset();  // 本次启动是否由 WDT 触发
-    static uint32_t resetCount();        // 历史累计 WDT 重启次数
+    static uint32_t resetCount();        // 累计 WDT 重启次数
     static void     clearResetCount();   // 清零计数（写入 Config）
 
 private:

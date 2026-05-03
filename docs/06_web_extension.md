@@ -115,8 +115,8 @@ void handleFanPage() {
 |------|------|
 | `sendHeader()` | HTTP 200 + HTML head + 内联 CSS + 导航栏（PROGMEM）|
 | `sendFooter()` | free heap 显示 + `</body></html>` |
-| `sendContent_P(PGM_P)` | 单遍从 PROGMEM 读取并分块发送，无二次遍历 |
-| `sendChunk(const char*)` | 发送动态内容块（建议 <= 512B） |
+| `sendContent_P(PGM_P)` | 单遍从 PROGMEM 读取并流式输出，无二次遍历 |
+| `sendChunk(const char*)` | 流式输出动态内容块（建议 <= 512B） |
 
 `sendHeader()` 内置了轻量 `once(form)` JS 辅助函数。页面表单建议在 `onsubmit` 中调用它，避免用户连续点击提交按钮。表单 POST 完成后建议使用 `303 See Other` 重定向回 GET 页面，避免浏览器刷新时重复提交。
 

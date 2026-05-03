@@ -42,10 +42,10 @@ public:
     static bool addApi (const char* path, Esp8266BaseWebHandler handler);
 
     // 应用 handler 辅助函数（在自定义 handler 内使用）
-    static void sendHeader();                     // 输出 HTML 头 + 导航栏（开始 chunked 传输）
+    static void sendHeader();                     // 输出 HTTP 头 + HTML head + 导航栏
     static void sendFooter();                     // 输出 HTML 尾（含 free heap）
-    static void sendContent_P(PGM_P content);     // 从 PROGMEM 分段发送
-    static void sendChunk(const char* content);   // 发送动态内容块
+    static void sendContent_P(PGM_P content);     // 从 PROGMEM 流式输出
+    static void sendChunk(const char* content);   // 流式输出动态内容块
     static bool checkAuth();                      // 验证 Basic Auth，失败自动返回 401
     static bool verifyAuth();                     // 仅验证，不发 401
     static void setAuth(const char* user, const char* pass);

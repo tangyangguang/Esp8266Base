@@ -132,7 +132,7 @@ void setup() {
     memset(cmdBuf,      0, sizeof(cmdBuf));
 
     // 配置固件信息（必须在 begin() 前）
-    Esp8266Base::setFirmwareInfo("basic-wifi", "0.1.0");
+    Esp8266Base::setFirmwareInfo("basic-wifi", "1.0.0");
     Esp8266Base::setHostname("esp-basic");
 
     // 初始化：Log → Config（LittleFS）→ WiFi → 诊断日志

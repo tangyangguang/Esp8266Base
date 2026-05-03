@@ -97,6 +97,7 @@ Esp8266Base/
 │   ├── basic_wifi/                 # WiFi STA/AP 配网示例
 │   ├── wifi_config_ota/            # Web 配网 + OTA 示例
 │   ├── custom_web/                 # 自定义 Web 页面示例
+│   ├── sleep_watchdog/             # Sleep + Watchdog 示例
 │   └── full_demo/                  # 全模块演示（参考实现）
 └── partitions/
     └── esp8266-4mb-2mfs.ld         # 4MB Flash 分区脚本（2MB固件+2MB LittleFS）
@@ -143,9 +144,12 @@ build_flags =
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 上限 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时 ms |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
+| `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
+| `ESP8266BASE_WIFI_RETRY_FAST` | `5000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数，之后进入慢速重试 |
+| `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
 
-根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为烟测入口；各示例目录仍保留自己的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
+根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为默认构建入口；各示例目录提供独立的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
 
 ---
 
