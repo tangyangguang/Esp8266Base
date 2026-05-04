@@ -34,6 +34,12 @@ static const char NTP_S3[] PROGMEM = ESP8266BASE_NTP_SERVER_3;
 static const char* const NTP_SERVERS[] PROGMEM = { NTP_S1, NTP_S2, NTP_S3 };
 static const uint8_t NTP_SERVER_COUNT = sizeof(NTP_SERVERS) / sizeof(NTP_SERVERS[0]);
 
+static void _formatIP(const IPAddress& ip, char* out, size_t len) {
+    if (!out || len == 0) return;
+    snprintf(out, len, "%u.%u.%u.%u",
+             (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2], (unsigned)ip[3]);
+}
+
 // ----------------------------------------------------------------------------
 // begin
 // ----------------------------------------------------------------------------
@@ -131,9 +137,11 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
             tv.tv_usec = 0;
             settimeofday(&tv, nullptr);
             _manualWaiting = false;
+            char ip[16];
+            _formatIP(_manualIp, ip, sizeof(ip));
             ESP8266BASE_LOG_I("NTP ", "manual_ntp_synchronized server_index=%u ip=%s rtt=%lums",
                               (unsigned)_manualServer,
-                              _manualIp.toString().c_str(),
+                              ip,
                               (unsigned long)(now - _manualSentMs));
             _finishSync(time(nullptr));
             return true;
@@ -143,8 +151,10 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
     }
 
     if (_manualWaiting && now - _manualSentMs >= 3000UL) {
+        char ip[16];
+        _formatIP(_manualIp, ip, sizeof(ip));
         ESP8266BASE_LOG_W("NTP ", "manual_ntp_timeout server_index=%u ip=%s timeout=3s",
-                          (unsigned)_manualServer, _manualIp.toString().c_str());
+                          (unsigned)_manualServer, ip);
         _manualWaiting = false;
         _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
         _nextManualMs = now + 2000UL;
@@ -172,14 +182,16 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
 
     _ntpUdp.beginPacket(_manualIp, NTP_PORT);
     _ntpUdp.write(pkt, sizeof(pkt));
+    char ip[16];
+    _formatIP(_manualIp, ip, sizeof(ip));
     if (_ntpUdp.endPacket()) {
         _manualSentMs = now;
         _manualWaiting = true;
         ESP8266BASE_LOG_I("NTP ", "manual_ntp_request server=%s ip=%s",
-                          server, _manualIp.toString().c_str());
+                          server, ip);
     } else {
         ESP8266BASE_LOG_W("NTP ", "manual_ntp_send_failed server=%s ip=%s",
-                          server, _manualIp.toString().c_str());
+                          server, ip);
         _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
         _nextManualMs = now + 5000UL;
     }

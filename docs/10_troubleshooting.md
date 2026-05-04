@@ -31,7 +31,8 @@
 
 ```text
 loaded_saved_wifi_credentials ssid=... password=... password_length=...
-station_reconnect_scheduled attempt=1 retry_in=5s mode=fast
+station_connect_timeout ssid=... status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
+station_reconnect_scheduled attempt=1 retry_in=5s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
 ```
 
 可能原因：
@@ -44,7 +45,7 @@ station_reconnect_scheduled attempt=1 retry_in=5s mode=fast
 处理：
 
 - 日志会明文显示密码，先核对密码。
-- 看 RSSI、路由器 DHCP 列表。
+- 看 `status`、`status_code`、RSSI、路由器 DHCP 列表。
 - 临时靠近路由器测试。
 - 清除凭证后重新配网。
 

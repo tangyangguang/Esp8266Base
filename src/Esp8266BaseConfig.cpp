@@ -407,11 +407,13 @@ bool Esp8266BaseConfig::clearAll() {
     bool ok = true;
     Dir dir = LittleFS.openDir("/");
     while (dir.next()) {
-        String name = dir.fileName();
-        if (name.startsWith("/cfg_") || name.startsWith("cfg_")) {
+        char name[32];
+        strncpy(name, dir.fileName().c_str(), sizeof(name) - 1);
+        name[sizeof(name) - 1] = '\0';
+        if (strncmp(name, "/cfg_", 5) == 0 || strncmp(name, "cfg_", 4) == 0) {
             if (!LittleFS.remove(name)) {
                 ok = false;
-                ESP8266BASE_LOG_W("Cfg ", "remove failed path=%s", name.c_str());
+                ESP8266BASE_LOG_W("Cfg ", "remove failed path=%s", name);
             }
             yield();
         }

@@ -80,4 +80,5 @@ private:
     static void _handleConnected();
     static void _scheduleRetry();
     static void _updateIP();
+    static const char* _statusName(uint8_t status);
 };

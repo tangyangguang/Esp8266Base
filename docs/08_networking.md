@@ -54,10 +54,19 @@ config_ap_started ssid=ESP8266-Config-18E7 ip=192.168.4.1 channel=6
 有 `eb_wifi_ssid` 时设备进入 STA 连接：
 
 ```text
-station_connecting ssid=IOTHOME password=... password_length=11 keep_config_ap=no
+station_connecting ssid=IOTHOME password=... password_length=11 keep_config_ap=no status=WL_DISCONNECTED status_code=6
 ```
 
 如果连接失败，设备不会自动打开 AP，而是持续重连。这样可以避免上游 WiFi 临时不可用时设备错误进入配置 AP。
+
+连接超时和重试会输出更完整的诊断字段：
+
+```text
+station_connect_timeout ssid=IOTHOME status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
+station_reconnect_scheduled attempt=1 retry_in=5s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
+```
+
+`status` 是 `WiFi.status()` 的可读名称，`status_code` 是原始数值。常见值包括 `WL_NO_SSID_AVAIL`、`WL_CONNECT_FAILED`、`WL_CONNECTION_LOST`、`WL_DISCONNECTED`。
 
 重试策略：
 
@@ -142,7 +151,7 @@ log_timestamp_mode=absolute_datetime
 | 现象 | 重点日志 |
 |---|---|
 | 进入 AP | `no_saved_wifi_credentials` |
-| 有凭证但没连上 | `station_reconnect_scheduled` |
+| 有凭证但没连上 | `station_connect_timeout`、`station_reconnect_scheduled` |
 | 密码错误 | 明文 password 日志、路由器认证日志 |
 | mDNS 访问慢 | `mdns_started`、改用 IP 验证 |
 | NTP 不同步 | `ntp_sync_pending`、DNS/网关/UDP 123 |

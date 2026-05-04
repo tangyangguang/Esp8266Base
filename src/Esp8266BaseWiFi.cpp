@@ -15,6 +15,12 @@ char                 Esp8266BaseWiFi::_ip[16]         = "";
 char                 Esp8266BaseWiFi::_staSSID[64]    = "";
 char                 Esp8266BaseWiFi::_staPass[64]    = "";
 
+static void _formatIP(const IPAddress& ip, char* out, size_t len) {
+    if (!out || len == 0) return;
+    snprintf(out, len, "%u.%u.%u.%u",
+             (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2], (unsigned)ip[3]);
+}
+
 // ----------------------------------------------------------------------------
 // begin
 // ----------------------------------------------------------------------------
@@ -69,6 +75,14 @@ void Esp8266BaseWiFi::handle() {
             }
 
             if (now - _connectStart >= ESP8266BASE_WIFI_CONNECT_TIMEOUT) {
+                uint8_t status = (uint8_t)WiFi.status();
+                ESP8266BASE_LOG_W("WiFi",
+                                  "station_connect_timeout ssid=%s status=%s status_code=%u elapsed=%lums rssi=%d",
+                                  _staSSID,
+                                  _statusName(status),
+                                  (unsigned)status,
+                                  (unsigned long)(now - _connectStart),
+                                  (int)WiFi.RSSI());
                 WiFi.disconnect(false);
                 _scheduleRetry();
             }
@@ -76,8 +90,11 @@ void Esp8266BaseWiFi::handle() {
         }
 
         case Esp8266BaseWiFiState::CONNECTED: {
-            if (WiFi.status() != WL_CONNECTED) {
-                ESP8266BASE_LOG_W("WiFi", "station_connection_lost reconnecting_with_saved_credentials");
+            uint8_t status = (uint8_t)WiFi.status();
+            if (status != WL_CONNECTED) {
+                ESP8266BASE_LOG_W("WiFi",
+                                  "station_connection_lost status=%s status_code=%u last_ip=%s rssi=%d reconnecting_with_saved_credentials",
+                                  _statusName(status), (unsigned)status, _ip, (int)WiFi.RSSI());
                 _ip[0]      = '\0';
                 _retryCount   = 0;
                 _state        = Esp8266BaseWiFiState::CONNECTING;
@@ -185,9 +202,10 @@ void Esp8266BaseWiFi::_startSTA(const char* ssid, const char* pass, bool keepAP)
     _connectStart = millis();
     _retryAt      = millis();   // 立即开始计时
     // Intentionally log the WiFi password in plaintext for field debugging.
-    ESP8266BASE_LOG_I("WiFi", "station_connecting ssid=%s password=%s password_length=%u keep_config_ap=%s",
+    uint8_t status = (uint8_t)WiFi.status();
+    ESP8266BASE_LOG_I("WiFi", "station_connecting ssid=%s password=%s password_length=%u keep_config_ap=%s status=%s status_code=%u",
                       ssid, pass ? pass : "", (unsigned)(pass ? strlen(pass) : 0),
-                      keepAP ? "yes" : "no");
+                      keepAP ? "yes" : "no", _statusName(status), (unsigned)status);
 }
 
 void Esp8266BaseWiFi::_startAP() {
@@ -210,19 +228,22 @@ void Esp8266BaseWiFi::_startAP() {
         WiFi.softAP(_apSSID, nullptr, channel, hidden);
     }
     _state = Esp8266BaseWiFiState::AP_CONFIG;
+    char apIp[16];
+    _formatIP(WiFi.softAPIP(), apIp, sizeof(apIp));
     ESP8266BASE_LOG_I("WiFi", "config_ap_started ssid=%s ip=%s channel=%d",
-                      _apSSID, WiFi.softAPIP().toString().c_str(), channel);
+                      _apSSID, apIp, channel);
 }
 
 void Esp8266BaseWiFi::_handleConnected() {
     _updateIP();
     _state         = Esp8266BaseWiFiState::CONNECTED;
     _retryCount    = 0;
+    char gateway[16];
+    char dns[16];
+    _formatIP(WiFi.gatewayIP(), gateway, sizeof(gateway));
+    _formatIP(WiFi.dnsIP(), dns, sizeof(dns));
     ESP8266BASE_LOG_I("WiFi", "station_connected ip=%s gateway=%s dns=%s rssi=%d",
-                      _ip,
-                      WiFi.gatewayIP().toString().c_str(),
-                      WiFi.dnsIP().toString().c_str(),
-                      (int)WiFi.RSSI());
+                      _ip, gateway, dns, (int)WiFi.RSSI());
 }
 
 void Esp8266BaseWiFi::_scheduleRetry() {
@@ -230,9 +251,11 @@ void Esp8266BaseWiFi::_scheduleRetry() {
     uint32_t interval = (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT)
         ? ESP8266BASE_WIFI_RETRY_FAST
         : ESP8266BASE_WIFI_RETRY_SLOW;
-    ESP8266BASE_LOG_W("WiFi", "station_reconnect_scheduled attempt=%d retry_in=%lus mode=%s",
+    uint8_t status = (uint8_t)WiFi.status();
+    ESP8266BASE_LOG_W("WiFi", "station_reconnect_scheduled attempt=%d retry_in=%lus mode=%s status=%s status_code=%u rssi=%d",
                       (int)_retryCount, (unsigned long)(interval / 1000),
-                      (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT) ? "fast" : "slow");
+                      (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT) ? "fast" : "slow",
+                      _statusName(status), (unsigned)status, (int)WiFi.RSSI());
     _connectStart = 0;
     _retryAt      = millis() + interval;
 }
@@ -241,4 +264,17 @@ void Esp8266BaseWiFi::_updateIP() {
     IPAddress addr = WiFi.localIP();
     snprintf(_ip, sizeof(_ip), "%d.%d.%d.%d",
              addr[0], addr[1], addr[2], addr[3]);
+}
+
+const char* Esp8266BaseWiFi::_statusName(uint8_t status) {
+    switch (status) {
+        case WL_IDLE_STATUS:     return "WL_IDLE_STATUS";
+        case WL_NO_SSID_AVAIL:   return "WL_NO_SSID_AVAIL";
+        case WL_SCAN_COMPLETED:  return "WL_SCAN_COMPLETED";
+        case WL_CONNECTED:       return "WL_CONNECTED";
+        case WL_CONNECT_FAILED:  return "WL_CONNECT_FAILED";
+        case WL_CONNECTION_LOST: return "WL_CONNECTION_LOST";
+        case WL_DISCONNECTED:    return "WL_DISCONNECTED";
+        default:                 return "WL_UNKNOWN";
+    }
 }

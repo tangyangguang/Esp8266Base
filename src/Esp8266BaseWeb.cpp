@@ -135,17 +135,6 @@ static void _trimWhitespace(char* s) {
     }
 }
 
-static void _trimLeadingWhitespace(char* s) {
-    if (!s) return;
-    char* start = s;
-    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
-        start++;
-    }
-    if (start != s) {
-        memmove(s, start, strlen(start) + 1);
-    }
-}
-
 static void _sendAttrEscaped(const char* s) {
     if (!s) return;
     size_t out = 0;
@@ -340,8 +329,7 @@ void Esp8266BaseWeb::_markRequest() {
             sizeof(_activeMethod) - 1);
     _activeMethod[sizeof(_activeMethod) - 1] = '\0';
 
-    String uri = _server.uri();
-    strncpy(_activeUri, uri.c_str(), sizeof(_activeUri) - 1);
+    strncpy(_activeUri, _server.uri().c_str(), sizeof(_activeUri) - 1);
     _activeUri[sizeof(_activeUri) - 1] = '\0';
 }
 
@@ -501,7 +489,7 @@ void Esp8266BaseWeb::_handleWiFiPost() {
     strncpy(ssid, _server.arg("ssid").c_str(), sizeof(ssid) - 1);
     strncpy(pass, _server.arg("pass").c_str(), sizeof(pass) - 1);
     _trimWhitespace(ssid);
-    _trimLeadingWhitespace(pass);
+    _trimWhitespace(pass);
 
     if (strlen(ssid) > 0 && strlen(pass) > 0) {
         // Intentionally log the WiFi password in plaintext for field debugging.

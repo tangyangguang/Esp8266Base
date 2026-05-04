@@ -91,7 +91,7 @@ ESP8266 has ~28–30KB free heap after WiFi + WebServer + LittleFS start. The li
 - **Immediate writes** (`setStr`/`setInt`/`setBool`): for low-frequency config like WiFi credentials. Includes write-before-compare (skips Flash write if value unchanged).
 - **Deferred writes** (`setIntDeferred`/`setBoolDeferred`): for high-frequency counters. Queued in a 4-slot static array, flushed one per `handle()` call.
 - **Before deep sleep or restart**: always call `Esp8266BaseConfig::flush()` first.
-- **Reserved keys** (don't reuse): `wifi_ssid`, `wifi_pass`, `ap_pass`, `hostname`, `web_user`, `web_pass`, `wdt_count`, `wdt_pending`, `boot_count`.
+- **Reserved keys** use the `eb_` namespace and must not be reused by applications: `eb_wifi_ssid`, `eb_wifi_pass`, `eb_ap_pass`, `eb_hostname`, `eb_web_user`, `eb_web_pass`, `eb_wdt_count`, `eb_wdt_pending`, `eb_boot_count`.
 
 ## Adding Custom Web Pages/APIs
 

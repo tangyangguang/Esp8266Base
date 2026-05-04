@@ -123,7 +123,14 @@ bool Esp8266BaseLog::clearFileSink() {
     if (!_filePath[0]) return false;
     if (!_ensureFileReady()) return false;
     if (LittleFS.exists(_filePath) && !LittleFS.remove(_filePath)) return false;
-    for (uint8_t i = 1; i < 4; i++) {
+    for (uint8_t i = 1; i < _fileRotateFiles; i++) {
+        char path[36];
+        if (_segmentPath(i, path, sizeof(path)) && LittleFS.exists(path) && !LittleFS.remove(path)) {
+            return false;
+        }
+    }
+    // Also remove stale segments left from a previous larger rotateFiles setting.
+    for (uint8_t i = _fileRotateFiles; i < 4; i++) {
         char path[36];
         if (_segmentPath(i, path, sizeof(path)) && LittleFS.exists(path) && !LittleFS.remove(path)) {
             return false;
