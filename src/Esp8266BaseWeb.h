@@ -102,6 +102,8 @@ private:
     static void _handleWiFiGet();
     static void _handleWiFiPost();
     static void _handleOtaGet();   // OTA GET 由此处理，POST 由 Esp8266BaseOTA 注册
+    static void _handleLogsGet();
+    static void _handleLogsClearPost();
     static void _handleRebootGet();
     static void _handleRebootPost();
     static void _handleHealth();

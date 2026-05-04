@@ -164,10 +164,10 @@ struct AppRoute {
 
 ```text
 /
-├── cfg_wifi_ssid    → "IOTHOME"
-├── cfg_wifi_pass    → "secret123"
-├── cfg_wdt_count    → "3"
-├── cfg_wdt_pending  → "0"
+├── cfg_eb_wifi_ssid    → "IOTHOME"
+├── cfg_eb_wifi_pass    → "secret123"
+├── cfg_eb_wdt_count    → "3"
+├── cfg_eb_wdt_pending  → "0"
 └── cfg_<key>        → <value>
 ```
 

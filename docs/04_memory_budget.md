@@ -36,8 +36,8 @@
 
 | 模块 | 预算上限 | 主要来源 |
 |------|---------|----------|
-| Esp8266BaseLog | <= 160B | level(1B) + fn ptr(4B)；格式缓冲 128B 在栈上 |
-| Esp8266BaseConfig | <= 512B | deferred 队列 4×34B=136B + _ready(1B) + _cfgBuf(97B) |
+| Esp8266BaseLog | <= 240B | level/timeFn/hook/file sink path/current size；格式缓冲在栈上 |
+| Esp8266BaseConfig | <= 424B | deferred 队列 + _ready + audit flags |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb（路由表） | <= 512B | AppRoute 4×32+6×32=320B + _authUser/Pass(48B) + _titleBuf(48B) + _activeUri/Method(37B) + 状态 |
 | Esp8266BaseOTA | <= 136B | _inProgress/_rejected/_started/_status |

@@ -167,7 +167,6 @@ build_flags =
 - ESP32 / ESP32-S3 / ESP32-C3
 - HAL 抽象层
 - 事件总线 / 通用 Scheduler
-- 文件日志（FileLog）
 - 复杂 JSON API / 页面模板引擎
 - 多用户权限 / HTTPS / WebSocket / 异步 Web
 - POSIX 时区字符串 / 夏令时

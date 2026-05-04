@@ -186,6 +186,15 @@ void handleFanPage() {
 
 应用代码不要用 `Esp8266BaseWeb::server().on(...)` 直接注册路由。直接注册会绕过静态路由表、请求标记和 RAM 预算统计；页面使用 `addPage()`，API 使用 `addApi()`。
 
+内置日志页：
+
+| 路由 | 方法 | 说明 |
+|---|---|---|
+| `/logs` | GET | 查看文件日志状态、轮转段大小和内容，需 Basic Auth |
+| `/logs/clear` | POST | 清空文件日志，需 Basic Auth |
+
+只有启用 `Esp8266BaseLog::enableFileSink()` 后 `/logs` 才会显示文件内容；未启用时页面显示 disabled。文件日志支持 1-4 段轮转，默认 4 段。页面按最老历史段到当前段的顺序显示，并展示路径、文件等级、单段上限、总上限和每段大小，便于阅读近期连续日志。
+
 ---
 
 ## 七、完整示例

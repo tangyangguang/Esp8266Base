@@ -5,6 +5,7 @@
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWiFi.h"
 #include "Esp8266BaseUtil.h"
+#include <LittleFS.h>
 
 // ----------------------------------------------------------------------------
 // 静态成员定义
@@ -46,6 +47,7 @@ static const char WEB_NAV_BUILTINS[] PROGMEM =
     "<a href='/'>Home</a>"
     "<a href='/wifi'>WiFi</a>"
     "<a href='/ota'>OTA</a>"
+    "<a href='/logs'>Logs</a>"
     "<a href='/reboot'>Reboot</a>";
 
 static const char WEB_NAV_END[]    PROGMEM = "</nav>";
@@ -106,6 +108,12 @@ static const char WEB_REBOOT_CONFIRM[] PROGMEM =
 static const char WEB_REBOOTING[] PROGMEM =
     "<h2>Rebooting...</h2>"
     "<p>Device is restarting. Please wait a few seconds, then <a href='/'>reload</a>.</p>";
+
+static const char WEB_LOGS_PRE[] PROGMEM =
+    "<h2>Logs</h2>"
+    "<form method=post action='/logs/clear' onsubmit=\"return confirm('Clear log file?')&&once(this)\">"
+    "<input type=submit value='Clear Log' style='background:#c33'>"
+    "</form>";
 
 // 内部共享小缓冲（用于 sendContent_P 和动态内容，非重入）
 static char _wb[160];
@@ -175,6 +183,30 @@ static void _sendAttrEscaped(const char* s) {
     }
 }
 
+static void _sendLogFileEscaped(const char* path) {
+    if (!path || !LittleFS.exists(path)) return;
+    File f = LittleFS.open(path, "r");
+    if (!f) return;
+    char buf[96];
+    while (f.available()) {
+        size_t n = f.readBytes(buf, sizeof(buf) - 1);
+        buf[n] = '\0';
+        _sendAttrEscaped(buf);
+        yield();
+    }
+    f.close();
+}
+
+static void _sendLogSection(const char* label, const char* path, uint32_t size) {
+    char sizeBuf[16];
+    char line[96];
+    Esp8266BaseUtil::formatBytes(size, sizeBuf, sizeof(sizeBuf));
+    snprintf(line, sizeof(line), "\n\n----- %s file=%s size=%s -----\n",
+             label, path, sizeBuf);
+    Esp8266BaseWeb::sendChunk(line);
+    _sendLogFileEscaped(path);
+}
+
 static void _redirect(const char* url) {
     Esp8266BaseWeb::server().sendHeader("Location", url);
     Esp8266BaseWeb::server().sendHeader("Cache-Control", "no-store");
@@ -193,6 +225,8 @@ bool Esp8266BaseWeb::begin() {
     _server.on("/wifi",   HTTP_POST, _handleWiFiPost);
     _server.on("/ota",    HTTP_GET,  _handleOtaGet);
     // POST /ota 由 Esp8266BaseOTA::begin() 注册（需要 upload handler）
+    _server.on("/logs",   HTTP_GET,  _handleLogsGet);
+    _server.on("/logs/clear", HTTP_POST, _handleLogsClearPost);
     _server.on("/reboot", HTTP_GET,  _handleRebootGet);
     _server.on("/reboot", HTTP_POST, _handleRebootPost);
     _server.on("/health", HTTP_GET,  _handleHealth);
@@ -200,7 +234,7 @@ bool Esp8266BaseWeb::begin() {
 
     _server.begin();
     _running = true;
-    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=8 app_pages_registered=%d/%d app_apis_registered=%d/%d",
+    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=10 app_pages_registered=%d/%d app_apis_registered=%d/%d",
                       (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES,
                       (int)_apiCount,  ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
@@ -448,8 +482,8 @@ void Esp8266BaseWeb::_handleWiFiGet() {
 
     char ssid[64] = "";
     char pass[64] = "";
-    Esp8266BaseConfig::getStr("wifi_ssid", ssid, sizeof(ssid), "");
-    Esp8266BaseConfig::getStr("wifi_pass", pass, sizeof(pass), "");
+    Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid, sizeof(ssid), "");
+    Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_PASS, pass, sizeof(pass), "");
     sendContent_P(WEB_WIFI_FORM_PRE);
     _sendAttrEscaped(ssid);
     sendContent_P(WEB_WIFI_FORM_MID);
@@ -460,6 +494,7 @@ void Esp8266BaseWeb::_handleWiFiGet() {
 
 void Esp8266BaseWeb::_handleWiFiPost() {
     if (!checkAuth()) return;
+    _markRequest();
 
     char ssid[64] = "";
     char pass[64] = "";
@@ -489,6 +524,64 @@ void Esp8266BaseWeb::_handleOtaGet() {
     sendHeader();
     sendContent_P(WEB_OTA_FORM);
     sendFooter();
+}
+
+void Esp8266BaseWeb::_handleLogsGet() {
+    if (!checkAuth()) return;
+    sendHeader();
+    sendContent_P(WEB_LOGS_PRE);
+
+    if (!Esp8266BaseLog::isFileSinkEnabled()) {
+        sendChunk("<p>File sink: <b>disabled</b></p>");
+        sendFooter();
+        return;
+    }
+
+    char maxBuf[16];
+    char totalBuf[16];
+    Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkMaxBytes(), maxBuf, sizeof(maxBuf));
+    Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkMaxBytes() * Esp8266BaseLog::fileSinkRotateFiles(),
+                                 totalBuf, sizeof(totalBuf));
+    sendChunk("<p>File sink: <b>enabled</b><br>Path: ");
+    sendChunk(Esp8266BaseLog::fileSinkPath());
+    snprintf(_wb, sizeof(_wb), "<br>Rotation files: %u<br>File level: %u",
+             (unsigned)Esp8266BaseLog::fileSinkRotateFiles(),
+             (unsigned)Esp8266BaseLog::fileSinkLevel());
+    sendChunk(_wb);
+    snprintf(_wb, sizeof(_wb), "<br>Max per file: %s<br>Max total: %s",
+             maxBuf, totalBuf);
+    sendChunk(_wb);
+    sendChunk("<br>Segments: ");
+    for (int8_t i = (int8_t)Esp8266BaseLog::fileSinkRotateFiles() - 1; i >= 0; i--) {
+        char segBuf[16];
+        Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkSegmentSize((uint8_t)i),
+                                     segBuf, sizeof(segBuf));
+        snprintf(_wb, sizeof(_wb), "%s%u=%s", i == (int8_t)Esp8266BaseLog::fileSinkRotateFiles() - 1 ? "" : ", ",
+                 (unsigned)i, segBuf);
+        sendChunk(_wb);
+    }
+    sendChunk("</p><pre>");
+
+    for (int8_t i = (int8_t)Esp8266BaseLog::fileSinkRotateFiles() - 1; i >= 1; i--) {
+        char path[36];
+        uint32_t sz = Esp8266BaseLog::fileSinkSegmentSize((uint8_t)i);
+        if (snprintf(path, sizeof(path), "%s.%u", Esp8266BaseLog::fileSinkPath(), (unsigned)i) < (int)sizeof(path)) {
+            snprintf(_wb, sizeof(_wb), "history-%u", (unsigned)i);
+            _sendLogSection(_wb, path, sz);
+        }
+    }
+    uint32_t size = Esp8266BaseLog::fileSinkSize();
+    _sendLogSection("current-0", Esp8266BaseLog::fileSinkPath(), size);
+    sendChunk("</pre>");
+    sendFooter();
+}
+
+void Esp8266BaseWeb::_handleLogsClearPost() {
+    if (!checkAuth()) return;
+    _markRequest();
+    bool ok = Esp8266BaseLog::clearFileSink();
+    ESP8266BASE_LOG_I("Web ", "log_file_clear_requested result=%s", ok ? "success" : "failed");
+    _redirect(ok ? "/logs?cleared=1" : "/logs?error=clear_failed");
 }
 
 void Esp8266BaseWeb::_handleRebootGet() {

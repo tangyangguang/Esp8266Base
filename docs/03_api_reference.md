@@ -100,6 +100,38 @@ static void setTimeProvider(TimeProviderFn fn);
 ```
 注入时间字符串回调。NTP 同步成功后，`Esp8266BaseNTP` 自动调用此函数切换为绝对时间格式。
 
+```cpp
+typedef void (*Esp8266BaseLogHookFn)(uint8_t level,
+                                     const char* tag,
+                                     const char* message,
+                                     const char* timestamp,
+                                     const char* line);
+static void setOutputHook(Esp8266BaseLogHookFn fn);
+static bool enableFileSink(const char* path,
+                           uint32_t maxBytes,
+                           uint8_t fileLevel = ESP8266BASE_LOG_LEVEL,
+                           uint8_t rotateFiles = 4);
+static void disableFileSink();
+static void setFileSinkLevel(uint8_t level);
+static bool isFileSinkEnabled();
+static const char* fileSinkPath();
+static uint32_t fileSinkMaxBytes();
+static uint8_t fileSinkRotateFiles();
+static uint8_t fileSinkLevel();
+static uint32_t fileSinkSize();
+static uint32_t fileSinkSegmentSize(uint8_t index);
+static bool clearFileSink();
+static void beginBootSession(const char* firmware,
+                             const char* version,
+                             const char* resetReason,
+                             uint32_t bootCount,
+                             uint32_t freeHeap);
+static void enableConfigAudit(bool enabled);
+static void enableConfigReadAudit(bool enabled);
+```
+
+默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。`enableFileSink()` 启用 LittleFS 文件日志，例如 `/logs/app.log`。`rotateFiles` 支持 1-4，默认 4；当前文件超过 `maxBytes` 时会轮转为 `/logs/app.log.1`，再逐步后移到 `.2`、`.3`，最多占用约 `maxBytes * rotateFiles`。`fileLevel` 可单独控制文件日志等级，但 WARN/ERROR 在 file sink 启用后始终写入文件，避免关键问题被过滤。不开 file sink 时不长期占用文件日志缓冲。`beginBootSession()` 输出人工可读分割线和启动摘要。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。
+
 ### 日志宏
 
 ```cpp
@@ -192,13 +224,17 @@ static bool flush();
 ```cpp
 static bool clearAll();
 ```
-删除所有 `/cfg_*` 配置文件，用于恢复出厂配置。调用前会先 `flush()`；成功后通常应重启设备。
+删除所有 `/cfg_*` 配置文件，用于恢复出厂配置。函数会先丢弃 deferred 队列，避免恢复出厂前把待写数据重新写回；成功后通常应重启设备。
 
 ```cpp
 static uint8_t pendingCount();
 static bool isReady();
+static void enableConfigAudit(bool enabled);
+static void enableConfigReadAudit(bool enabled);
 ```
 查询 deferred 队列中待写条数，及文件系统是否已就绪。
+
+配置审计默认关闭。启用写审计后，`setStr` / `setInt` / `setBool` / deferred enqueue / flush 会记录 key、old/new、changed/no_change、immediate/deferred、result。启用读审计后，`getStr` / `getInt` / `getBool` 会记录读取结果；读审计默认建议关闭，避免高频页面/API 刷屏。审计日志不做任何敏感 key 特殊处理，所有值直接输出。
 
 ### 约束
 
@@ -210,29 +246,31 @@ static bool isReady();
 
 ### 保留 key
 
-以下 key 由库内部使用，应用代码不得覆盖：
+以下 key 由库内部使用，统一使用 `eb_` 前缀，应用代码不得覆盖：
 
 | Key | 用途 |
 |-----|------|
-| `wifi_ssid` | WiFi STA SSID |
-| `wifi_pass` | WiFi STA 密码 |
-| `ap_pass` | AP 配网密码 |
-| `hostname` | 设备 hostname |
-| `web_user` | Web Auth 用户名 |
-| `web_pass` | Web Auth 密码 |
-| `wdt_count` | WDT 重启累计次数 |
-| `wdt_pending` | 上次是否 WDT 重启 |
-| `boot_count` | 启动次数 |
+| `eb_wifi_ssid` | WiFi STA SSID |
+| `eb_wifi_pass` | WiFi STA 密码 |
+| `eb_ap_pass` | AP 配网密码 |
+| `eb_hostname` | 设备 hostname |
+| `eb_web_user` | Web Auth 用户名 |
+| `eb_web_pass` | Web Auth 密码 |
+| `eb_wdt_count` | WDT 重启累计次数 |
+| `eb_wdt_pending` | 上次是否 WDT 重启 |
+| `eb_boot_count` | 启动次数，无符号十进制字符串，最大 4,294,967,295，达到上限后饱和 |
 
 ### 使用示例
 
 ```cpp
-// 高频写入用 deferred（如启动计数）
-int32_t cnt = Esp8266BaseConfig::getInt("boot_count", 0) + 1;
-Esp8266BaseConfig::setIntDeferred("boot_count", cnt);
+// 应用自己的高频计数用 deferred
+int32_t cnt = Esp8266BaseConfig::getInt("app_counter", 0) + 1;
+Esp8266BaseConfig::setIntDeferred("app_counter", cnt);
+
+// eb_boot_count 是库保留 key，由 Esp8266Base::begin() 自动维护
 
 // 低频配置立即写
-Esp8266BaseConfig::setStr("wifi_ssid", ssid);
+Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid);
 
 // 重启前强制刷盘
 Esp8266BaseConfig::flush();
@@ -292,7 +330,7 @@ static const char* apSSID();
 | 快速重试次数 | 3（`ESP8266BASE_WIFI_RETRY_FAST_COUNT`） |
 | 慢速重试间隔 | 60000ms（`ESP8266BASE_WIFI_RETRY_SLOW`） |
 | AP SSID | `ESP8266-Config-<ChipID后4位>` |
-| AP 密码 | 空（开放），可通过 key `ap_pass` 配置 |
+| AP 密码 | 空（开放），可通过 key `eb_ap_pass` 配置 |
 
 ---
 
@@ -358,6 +396,8 @@ static bool isRunning();
 | `/wifi` | POST | 保存凭证并重连；成功或失败后 `303` 跳回 GET 页面，避免刷新重复提交 |
 | `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度） |
 | `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，强制 Basic Auth） |
+| `/logs` | GET | 查看文件日志状态、大小和内容（需要 Basic Auth） |
+| `/logs/clear` | POST | 清空文件日志（需要 Basic Auth） |
 | `/reboot` | GET | 重启确认页 |
 | `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
@@ -587,7 +627,7 @@ static bool wasWatchdogReset();
 static uint32_t resetCount();
 static void clearResetCount();
 ```
-WDT 重启累计次数查询与清零（从 Config key `wdt_pending` / `wdt_count` 读取）。
+WDT 重启累计次数查询与清零（从 Config key `eb_wdt_pending` / `eb_wdt_count` 读取）。
 
 ### 默认配置
 

@@ -8,10 +8,8 @@
 Esp8266BaseConfig::DeferredEntry
     Esp8266BaseConfig::_deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 bool Esp8266BaseConfig::_ready = false;
-
-// 用于读写的小型临时缓冲（Config 模块私有，非重入）
-// 注意：只在 handle/begin 期间使用，非重入
-static char _cfgBuf[ESP8266BASE_CFG_STR_MAX + 1];
+bool Esp8266BaseConfig::_auditEnabled = false;
+bool Esp8266BaseConfig::_readAuditEnabled = false;
 
 // ----------------------------------------------------------------------------
 // begin
@@ -61,23 +59,93 @@ bool Esp8266BaseConfig::_buildPath(const char* key, char* path, size_t pathLen) 
 }
 
 bool Esp8266BaseConfig::_readRaw(const char* path, char* out, size_t len) {
-    if (!LittleFS.exists(path)) return false;
+    char bak[ESP8266BASE_CFG_KEY_MAX + 11];
+    char tmp[ESP8266BASE_CFG_KEY_MAX + 11];
+    snprintf(bak, sizeof(bak), "%s.bak", path);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+
+    if (!LittleFS.exists(path)) {
+        if (LittleFS.exists(bak)) {
+            LittleFS.rename(bak, path);
+        } else if (LittleFS.exists(tmp)) {
+            LittleFS.rename(tmp, path);
+        } else {
+            return false;
+        }
+    }
     File f = LittleFS.open(path, "r");
     if (!f) return false;
     size_t n = f.readBytes(out, len - 1);
     out[n] = '\0';
     f.close();
+    if (n == 0 && LittleFS.exists(bak)) {
+        LittleFS.remove(path);
+        if (LittleFS.rename(bak, path)) {
+            f = LittleFS.open(path, "r");
+            if (!f) return false;
+            n = f.readBytes(out, len - 1);
+            out[n] = '\0';
+            f.close();
+        }
+    }
     return true;
 }
 
 bool Esp8266BaseConfig::_writeRaw(const char* path, const char* value) {
-    File f = LittleFS.open(path, "w");
+    char tmp[ESP8266BASE_CFG_KEY_MAX + 11];
+    char bak[ESP8266BASE_CFG_KEY_MAX + 11];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    snprintf(bak, sizeof(bak), "%s.bak", path);
+
+    LittleFS.remove(tmp);
+    File f = LittleFS.open(tmp, "w");
     if (!f) {
-        ESP8266BASE_LOG_E("Cfg ", "open failed path=%s", path);
+        ESP8266BASE_LOG_E("Cfg ", "open failed path=%s", tmp);
         return false;
     }
-    f.print(value);
+    size_t expected = strlen(value);
+    size_t written = f.print(value);
+    f.flush();
     f.close();
+    if (written != expected) {
+        LittleFS.remove(tmp);
+        ESP8266BASE_LOG_E("Cfg ", "write failed path=%s written=%u expected=%u",
+                          tmp, (unsigned)written, (unsigned)expected);
+        return false;
+    }
+
+    char verify[ESP8266BASE_CFG_STR_MAX + 1] = "";
+    File vf = LittleFS.open(tmp, "r");
+    if (!vf) {
+        LittleFS.remove(tmp);
+        ESP8266BASE_LOG_E("Cfg ", "verify_open_failed path=%s", tmp);
+        return false;
+    }
+    size_t n = vf.readBytes(verify, sizeof(verify) - 1);
+    verify[n] = '\0';
+    vf.close();
+    if (strcmp(verify, value) != 0) {
+        LittleFS.remove(tmp);
+        ESP8266BASE_LOG_E("Cfg ", "verify_failed path=%s", tmp);
+        return false;
+    }
+
+    LittleFS.remove(bak);
+    bool hadOld = LittleFS.exists(path);
+    if (hadOld && !LittleFS.rename(path, bak)) {
+        LittleFS.remove(tmp);
+        ESP8266BASE_LOG_E("Cfg ", "backup_rename_failed path=%s backup=%s", path, bak);
+        return false;
+    }
+    if (!LittleFS.rename(tmp, path)) {
+        if (hadOld && LittleFS.exists(bak) && !LittleFS.exists(path)) {
+            LittleFS.rename(bak, path);
+        }
+        LittleFS.remove(tmp);
+        ESP8266BASE_LOG_E("Cfg ", "commit_rename_failed tmp=%s path=%s", tmp, path);
+        return false;
+    }
+    LittleFS.remove(bak);
     yield();   // Flash 写入后让出 CPU，给 SDK 喂狗
     return true;
 }
@@ -89,6 +157,11 @@ bool Esp8266BaseConfig::_enqueue(const char* key, int32_t iv, bool bv, uint8_t t
             _deferred[i].intVal  = iv;
             _deferred[i].boolVal = bv;
             _deferred[i].type    = type;
+            if (_auditEnabled) {
+                ESP8266BASE_LOG_I("Cfg ", "config_audit op=deferred_update key=%s type=%s new=%ld mode=deferred",
+                                  key, type == 1 ? "int" : "bool",
+                                  type == 1 ? (long)iv : (long)(bv ? 1 : 0));
+            }
             return true;
         }
     }
@@ -101,6 +174,11 @@ bool Esp8266BaseConfig::_enqueue(const char* key, int32_t iv, bool bv, uint8_t t
             _deferred[i].boolVal = bv;
             _deferred[i].type    = type;
             _deferred[i].used    = true;
+            if (_auditEnabled) {
+                ESP8266BASE_LOG_I("Cfg ", "config_audit op=deferred_enqueue key=%s type=%s new=%ld mode=deferred",
+                                  key, type == 1 ? "int" : "bool",
+                                  type == 1 ? (long)iv : (long)(bv ? 1 : 0));
+            }
             return true;
         }
     }
@@ -111,47 +189,85 @@ bool Esp8266BaseConfig::_enqueue(const char* key, int32_t iv, bool bv, uint8_t t
 void Esp8266BaseConfig::_flushOne() {
     for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
         if (_deferred[i].used) {
+            char key[ESP8266BASE_CFG_KEY_MAX + 1];
+            strncpy(key, _deferred[i].key, sizeof(key) - 1);
+            key[sizeof(key) - 1] = '\0';
+            uint8_t type = _deferred[i].type;
+            int32_t iv = _deferred[i].intVal;
+            bool bv = _deferred[i].boolVal;
+            bool ok = false;
             if (_deferred[i].type == 1) {
-                setInt(_deferred[i].key, _deferred[i].intVal);
+                ok = setInt(_deferred[i].key, _deferred[i].intVal);
             } else if (_deferred[i].type == 2) {
-                setBool(_deferred[i].key, _deferred[i].boolVal);
+                ok = setBool(_deferred[i].key, _deferred[i].boolVal);
             }
             _deferred[i].used = false;
+            if (_auditEnabled) {
+                ESP8266BASE_LOG_I("Cfg ", "config_audit op=flush_one key=%s type=%s value=%ld result=%s",
+                                  key, type == 1 ? "int" : "bool",
+                                  type == 1 ? (long)iv : (long)(bv ? 1 : 0),
+                                  ok ? "success" : "failed");
+            }
             return;  // 每次最多刷 1 条
         }
     }
+}
+
+bool Esp8266BaseConfig::_setStrInternal(const char* op, const char* key, const char* value) {
+    if (!_ready) {
+        ESP8266BASE_LOG_W("Cfg ", "config_write_rejected op=%s key=%s reason=not_ready",
+                          op, key ? key : "(null)");
+        return false;
+    }
+
+    if (!value) {
+        ESP8266BASE_LOG_W("Cfg ", "%s null value key=%s", op, key);
+        return false;
+    }
+    if (strlen(value) > ESP8266BASE_CFG_STR_MAX) {
+        ESP8266BASE_LOG_W("Cfg ", "%s value too long key=%s len=%d",
+                          op, key, strlen(value));
+        return false;
+    }
+
+    char path[ESP8266BASE_CFG_KEY_MAX + 6];  // "/cfg_" + key
+    if (!_buildPath(key, path, sizeof(path))) {
+        ESP8266BASE_LOG_W("Cfg ", "%s invalid key", op);
+        return false;
+    }
+
+    char oldVal[ESP8266BASE_CFG_STR_MAX + 1] = "";
+    bool hadOld = _readRaw(path, oldVal, sizeof(oldVal));
+    bool changed = !hadOld || strcmp(oldVal, value) != 0;
+    if (!changed) {
+        if (_auditEnabled) {
+            ESP8266BASE_LOG_I("Cfg ", "config_audit op=%s key=%s old=%s new=%s changed=no_change mode=immediate result=skipped",
+                              op, key, oldVal, value);
+        }
+        return true;
+    }
+
+    bool ok = _writeRaw(path, value);
+    if (_auditEnabled || !ok) {
+        ESP8266BASE_LOG_I("Cfg ", "config_audit op=%s key=%s old=%s new=%s changed=changed mode=immediate result=%s",
+                          op, key, hadOld ? oldVal : "(none)", value,
+                          ok ? "success" : "failed");
+    }
+    return ok;
+}
+
+void Esp8266BaseConfig::_auditRead(const char* op, const char* key, const char* value, bool found) {
+    if (!_readAuditEnabled) return;
+    ESP8266BASE_LOG_I("Cfg ", "config_audit op=%s key=%s found=%s value=%s",
+                      op, key ? key : "(null)", found ? "yes" : "no",
+                      value ? value : "");
 }
 
 // ----------------------------------------------------------------------------
 // string
 // ----------------------------------------------------------------------------
 bool Esp8266BaseConfig::setStr(const char* key, const char* value) {
-    if (!_ready) return false;
-
-    if (!value) {
-        ESP8266BASE_LOG_W("Cfg ", "setStr null value key=%s", key);
-        return false;
-    }
-    if (strlen(value) > ESP8266BASE_CFG_STR_MAX) {
-        ESP8266BASE_LOG_W("Cfg ", "setStr value too long key=%s len=%d",
-                          key, strlen(value));
-        return false;
-    }
-
-    char path[ESP8266BASE_CFG_KEY_MAX + 6];  // "/cfg_" + key
-    if (!_buildPath(key, path, sizeof(path))) {
-        ESP8266BASE_LOG_W("Cfg ", "setStr invalid key");
-        return false;
-    }
-
-    // 写前比较，值未变则跳过 Flash 写入
-    if (_readRaw(path, _cfgBuf, sizeof(_cfgBuf))) {
-        if (strcmp(_cfgBuf, value) == 0) {
-            return true;  // 无变化，不写 Flash
-        }
-    }
-
-    return _writeRaw(path, value);
+    return _setStrInternal("setStr", key, value);
 }
 
 bool Esp8266BaseConfig::getStr(const char* key, char* out, size_t len, const char* def) {
@@ -163,14 +279,18 @@ bool Esp8266BaseConfig::getStr(const char* key, char* out, size_t len, const cha
         else     { out[0] = '\0'; }
     };
 
-    if (!_ready) { _setDefault(); return false; }
+    if (!_ready) { _setDefault(); _auditRead("getStr", key, out, false); return false; }
 
     char path[ESP8266BASE_CFG_KEY_MAX + 6];
-    if (!_buildPath(key, path, sizeof(path))) { _setDefault(); return false; }
+    if (!_buildPath(key, path, sizeof(path))) { _setDefault(); _auditRead("getStr", key, out, false); return false; }
 
-    if (_readRaw(path, out, len)) return true;
+    if (_readRaw(path, out, len)) {
+        _auditRead("getStr", key, out, true);
+        return true;
+    }
 
     _setDefault();
+    _auditRead("getStr", key, out, false);
     return false;
 }
 
@@ -180,42 +300,76 @@ bool Esp8266BaseConfig::getStr(const char* key, char* out, size_t len, const cha
 bool Esp8266BaseConfig::setInt(const char* key, int32_t value) {
     char buf[12];
     snprintf(buf, sizeof(buf), "%d", (int)value);
-    return setStr(key, buf);
+    return _setStrInternal("setInt", key, buf);
 }
 
 int32_t Esp8266BaseConfig::getInt(const char* key, int32_t def) {
     char buf[12] = "";
-    if (!getStr(key, buf, sizeof(buf), nullptr)) return def;
-    if (buf[0] == '\0') return def;
-    return (int32_t)atol(buf);
+    bool found = getStr(key, buf, sizeof(buf), nullptr);
+    if (!found || buf[0] == '\0') {
+        if (_readAuditEnabled) {
+            ESP8266BASE_LOG_I("Cfg ", "config_audit op=getInt key=%s found=no value=%ld",
+                              key ? key : "(null)", (long)def);
+        }
+        return def;
+    }
+    int32_t v = (int32_t)atol(buf);
+    if (_readAuditEnabled) {
+        ESP8266BASE_LOG_I("Cfg ", "config_audit op=getInt key=%s found=yes value=%ld",
+                          key ? key : "(null)", (long)v);
+    }
+    return v;
 }
 
 // ----------------------------------------------------------------------------
 // bool
 // ----------------------------------------------------------------------------
 bool Esp8266BaseConfig::setBool(const char* key, bool value) {
-    return setStr(key, value ? "1" : "0");
+    return _setStrInternal("setBool", key, value ? "1" : "0");
 }
 
 bool Esp8266BaseConfig::getBool(const char* key, bool def) {
     char buf[4] = "";
-    if (!getStr(key, buf, sizeof(buf), nullptr)) return def;
-    if (buf[0] == '\0') return def;
-    return (buf[0] == '1');
+    bool found = getStr(key, buf, sizeof(buf), nullptr);
+    if (!found || buf[0] == '\0') {
+        if (_readAuditEnabled) {
+            ESP8266BASE_LOG_I("Cfg ", "config_audit op=getBool key=%s found=no value=%s",
+                              key ? key : "(null)", def ? "true" : "false");
+        }
+        return def;
+    }
+    bool v = (buf[0] == '1');
+    if (_readAuditEnabled) {
+        ESP8266BASE_LOG_I("Cfg ", "config_audit op=getBool key=%s found=yes value=%s",
+                          key ? key : "(null)", v ? "true" : "false");
+    }
+    return v;
 }
 
 // ----------------------------------------------------------------------------
 // deferred
 // ----------------------------------------------------------------------------
 bool Esp8266BaseConfig::setIntDeferred(const char* key, int32_t value) {
-    if (!_ready) return false;
-    if (!key || strlen(key) == 0 || strlen(key) > ESP8266BASE_CFG_KEY_MAX) return false;
+    if (!_ready) {
+        ESP8266BASE_LOG_W("Cfg ", "deferred_write_rejected key=%s reason=not_ready", key ? key : "(null)");
+        return false;
+    }
+    if (!key || strlen(key) == 0 || strlen(key) > ESP8266BASE_CFG_KEY_MAX) {
+        ESP8266BASE_LOG_W("Cfg ", "deferred_write_rejected key=%s reason=invalid_key", key ? key : "(null)");
+        return false;
+    }
     return _enqueue(key, value, false, 1);
 }
 
 bool Esp8266BaseConfig::setBoolDeferred(const char* key, bool value) {
-    if (!_ready) return false;
-    if (!key || strlen(key) == 0 || strlen(key) > ESP8266BASE_CFG_KEY_MAX) return false;
+    if (!_ready) {
+        ESP8266BASE_LOG_W("Cfg ", "deferred_write_rejected key=%s reason=not_ready", key ? key : "(null)");
+        return false;
+    }
+    if (!key || strlen(key) == 0 || strlen(key) > ESP8266BASE_CFG_KEY_MAX) {
+        ESP8266BASE_LOG_W("Cfg ", "deferred_write_rejected key=%s reason=invalid_key", key ? key : "(null)");
+        return false;
+    }
     return _enqueue(key, 0, value, 2);
 }
 
@@ -231,8 +385,13 @@ bool Esp8266BaseConfig::flush() {
     if (!_ready) return false;
     for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
         if (_deferred[i].used) {
-            if (_deferred[i].type == 1) setInt(_deferred[i].key, _deferred[i].intVal);
-            else if (_deferred[i].type == 2) setBool(_deferred[i].key, _deferred[i].boolVal);
+            bool ok = false;
+            if (_deferred[i].type == 1) ok = setInt(_deferred[i].key, _deferred[i].intVal);
+            else if (_deferred[i].type == 2) ok = setBool(_deferred[i].key, _deferred[i].boolVal);
+            if (_auditEnabled || !ok) {
+                ESP8266BASE_LOG_I("Cfg ", "config_audit op=flush key=%s result=%s",
+                                  _deferred[i].key, ok ? "success" : "failed");
+            }
             _deferred[i].used = false;
         }
     }
@@ -275,4 +434,22 @@ uint8_t Esp8266BaseConfig::pendingCount() {
 
 bool Esp8266BaseConfig::isReady() {
     return _ready;
+}
+
+void Esp8266BaseConfig::enableConfigAudit(bool enabled) {
+    _auditEnabled = enabled;
+    ESP8266BASE_LOG_I("Cfg ", "config_audit_write enabled=%s", enabled ? "yes" : "no");
+}
+
+void Esp8266BaseConfig::enableConfigReadAudit(bool enabled) {
+    _readAuditEnabled = enabled;
+    ESP8266BASE_LOG_I("Cfg ", "config_audit_read enabled=%s", enabled ? "yes" : "no");
+}
+
+bool Esp8266BaseConfig::isConfigAuditEnabled() {
+    return _auditEnabled;
+}
+
+bool Esp8266BaseConfig::isConfigReadAuditEnabled() {
+    return _readAuditEnabled;
 }

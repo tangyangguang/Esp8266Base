@@ -161,13 +161,22 @@ OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Bas
 
 日志策略：WiFi 相关日志会有意输出 SSID 和密码明文，并同时输出 `password_length`。这是为了现场观察和调试连接问题的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
 
+可选文件日志和配置审计：
+
+```cpp
+Esp8266BaseLog::enableFileSink("/logs/app.log", 16384, ESP8266BASE_LOG_LEVEL, 4);
+Esp8266BaseLog::enableConfigAudit(true);
+Esp8266BaseLog::enableConfigReadAudit(false);
+```
+
+默认不开文件日志和配置审计，仍然只输出 Serial。启用文件日志后，启动会话、WARN/ERROR 和普通日志都会写入 LittleFS 文件。文件 sink 支持 1-4 段轮转，默认 4 段；当前文件超过 `maxBytes` 时依次轮转为 `path.1`、`path.2`、`path.3`，新的当前文件继续写入。最多占用约 `maxBytes * rotateFiles`。目录只在启用后首次写文件时准备一次，当前文件大小用内存计数缓存，避免每条日志反复 open/size/close。`fileLevel` 可单独控制文件日志等级，但 WARN/ERROR 在 file sink 启用后始终写入文件。`full_demo` 使用 4×16KB，最多约 64KB。内置 Web 提供 `/logs` 查看各段日志，也支持清空日志，清空操作需要 Basic Auth。配置审计直接输出 key/value，不做任何敏感 key 特殊处理，方便现场调试。
+
 ---
 
 ## 明确不支持
 
 - ESP32 / ESP32-S3 / ESP32-C3
 - HAL 抽象、事件总线、通用 Scheduler
-- 文件日志（FileLog）
 - 复杂 JSON API、异步 Web（ESPAsyncWebServer）、HTTPS
 - `std::function`、STL 容器
 - 多用户权限、WebSocket

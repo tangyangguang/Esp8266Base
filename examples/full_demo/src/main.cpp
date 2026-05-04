@@ -32,7 +32,7 @@ static const uint8_t  BOARD_BUTTON_PIN = 0;
 static const uint8_t  BOARD_LED_PIN    = 2;
 static const uint32_t CLEAR_HOLD_MS    = 1000;
 
-// 启动计数（从 Config 读取后加一）
+// full_demo 自定义启动计数（库级 eb_boot_count 由 Esp8266Base 自动维护）
 static int32_t g_bootCount = 0;
 static uint32_t g_buttonDownAt = 0;
 static bool     g_clearFired   = false;
@@ -403,6 +403,10 @@ void setup() {
     Serial.begin(115200);
     delay(100);
 
+    Esp8266BaseLog::enableFileSink("/logs/app.log", 16384, ESP8266BASE_LOG_LEVEL, 4);
+    Esp8266BaseLog::enableConfigAudit(true);
+    Esp8266BaseLog::enableConfigReadAudit(false);
+
     pinMode(BOARD_BUTTON_PIN, INPUT_PULLUP);
     pinMode(BOARD_LED_PIN, OUTPUT);
     setBoardLed(false);
@@ -412,7 +416,7 @@ void setup() {
 
     Esp8266Base::begin();
 
-    // Config 演示：读取 + 递增启动计数（deferred 写，不阻塞启动）
+    // Config 演示：读取 + 递增 demo_boot（deferred 写，不阻塞启动）
     g_bootCount = Esp8266BaseConfig::getInt(KEY_BOOT, 0) + 1;
     Esp8266BaseConfig::setIntDeferred(KEY_BOOT, g_bootCount);
     ESP8266BASE_LOG_I("App ", "config_deferred_save key=%s value=%ld",

@@ -29,10 +29,10 @@ bool Esp8266BaseWiFi::begin() {
     WiFi.setAutoReconnect(false);
 
     // 读取凭证并缓存，后续重连直接使用缓存，避免重复读 Flash
-    Esp8266BaseConfig::getStr("wifi_ssid", _staSSID, sizeof(_staSSID), "");
+    Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_SSID, _staSSID, sizeof(_staSSID), "");
 
     if (strlen(_staSSID) > 0) {
-        Esp8266BaseConfig::getStr("wifi_pass", _staPass, sizeof(_staPass), "");
+        Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_PASS, _staPass, sizeof(_staPass), "");
         // Intentionally log the WiFi password in plaintext for field debugging.
         // This project treats plaintext WiFi credential logs as an observability feature.
         ESP8266BASE_LOG_I("WiFi", "loaded_saved_wifi_credentials ssid=%s password=%s password_length=%u",
@@ -109,8 +109,8 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
     }
 
     const char* safePass = pass ? pass : "";
-    bool ssidSaved = Esp8266BaseConfig::setStr("wifi_ssid", ssid);
-    bool passSaved = Esp8266BaseConfig::setStr("wifi_pass", safePass);
+    bool ssidSaved = Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid);
+    bool passSaved = Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_PASS, safePass);
     // Intentionally log the WiFi password in plaintext for field debugging.
     ESP8266BASE_LOG_I("WiFi", "saving_wifi_credentials ssid=%s password=%s password_length=%u ssid_saved=%s password_saved=%s",
                       ssid, safePass, (unsigned)strlen(safePass),
@@ -140,8 +140,8 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
 // clearCredentials
 // ----------------------------------------------------------------------------
 bool Esp8266BaseWiFi::clearCredentials() {
-    Esp8266BaseConfig::setStr("wifi_ssid", "");
-    Esp8266BaseConfig::setStr("wifi_pass", "");
+    Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_SSID, "");
+    Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_PASS, "");
     ESP8266BASE_LOG_I("WiFi", "saved_wifi_credentials_cleared");
     return true;
 }
@@ -192,7 +192,7 @@ void Esp8266BaseWiFi::_startSTA(const char* ssid, const char* pass, bool keepAP)
 
 void Esp8266BaseWiFi::_startAP() {
     char apPass[32] = "";
-    Esp8266BaseConfig::getStr("ap_pass", apPass, sizeof(apPass), "");
+    Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_AP_PASS, apPass, sizeof(apPass), "");
 
     // Clean state before switching to AP
     WiFi.disconnect(true);

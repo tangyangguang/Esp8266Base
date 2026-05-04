@@ -25,8 +25,8 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     _timeoutMs = timeoutMs;
 
     // 读取累计重启记录
-    _resetCount  = (uint32_t)Esp8266BaseConfig::getInt("wdt_count");
-    int pending  = Esp8266BaseConfig::getInt("wdt_pending");
+    _resetCount  = (uint32_t)Esp8266BaseConfig::getInt(ESP8266BASE_CFG_KEY_WDT_COUNT);
+    int pending  = Esp8266BaseConfig::getInt(ESP8266BASE_CFG_KEY_WDT_PENDING);
 
     rst_info* ri = ESP.getResetInfoPtr();
     bool resetReasonIsWdt = ri && (ri->reason == REASON_SOFT_WDT_RST || ri->reason == REASON_WDT_RST);
@@ -34,12 +34,12 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     if (pending && resetReasonIsWdt) {
         _wasWdtReset = true;
         // 清除 pending 标志，避免下次误判
-        Esp8266BaseConfig::setInt("wdt_pending", 0);
+        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 0);
         ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u", (unsigned)_resetCount);
     } else {
         _wasWdtReset = false;
         if (pending) {
-            Esp8266BaseConfig::setInt("wdt_pending", 0);
+            Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 0);
             ESP8266BASE_LOG_W("WDT ", "stale_watchdog_pending_cleared reset_reason=%u reset_count=%u",
                               ri ? (unsigned)ri->reason : 0, (unsigned)_resetCount);
         }
@@ -63,8 +63,8 @@ void Esp8266BaseWatchdog::handle() {
     if (elapsed >= _timeoutMs) {
         // 超时：保存状态后重启
         _resetCount++;
-        Esp8266BaseConfig::setInt("wdt_count",   (int)_resetCount);
-        Esp8266BaseConfig::setInt("wdt_pending",  1);
+        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   (int)_resetCount);
+        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 1);
         Esp8266BaseConfig::flush();
 
         ESP8266BASE_LOG_E("WDT ", "watchdog_timeout elapsed=%ums reset_count=%u action=restart",
@@ -118,8 +118,8 @@ uint32_t Esp8266BaseWatchdog::resetCount() {
 
 void Esp8266BaseWatchdog::clearResetCount() {
     _resetCount = 0;
-    Esp8266BaseConfig::setInt("wdt_count",   0);
-    Esp8266BaseConfig::setInt("wdt_pending", 0);
+    Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   0);
+    Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 0);
     ESP8266BASE_LOG_I("WDT ", "watchdog_reset_count_cleared");
 }
 #endif

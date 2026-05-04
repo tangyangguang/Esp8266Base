@@ -1,5 +1,34 @@
 #include "Esp8266Base.h"
 
+static uint32_t _loadAndIncrementBootCount() {
+    if (!Esp8266BaseConfig::isReady()) return 0;
+
+    char raw[16] = "";
+    uint32_t count = 0;
+    bool found = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_BOOT_COUNT, raw, sizeof(raw), "");
+    bool valid = found && raw[0] != '\0';
+    for (size_t i = 0; valid && raw[i]; i++) {
+        if (raw[i] < '0' || raw[i] > '9') valid = false;
+    }
+
+    if (valid) {
+        count = (uint32_t)strtoul(raw, nullptr, 10);
+    } else if (found) {
+        ESP8266BASE_LOG_W("Boot", "boot_count_invalid value=%s action=reset_to_1", raw);
+    }
+
+    if (count < 0xFFFFFFFFUL) {
+        count++;
+    } else {
+        ESP8266BASE_LOG_W("Boot", "boot_count_saturated value=%lu", (unsigned long)count);
+    }
+
+    char next[11];
+    snprintf(next, sizeof(next), "%lu", (unsigned long)count);
+    Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_BOOT_COUNT, next);
+    return count;
+}
+
 // ----------------------------------------------------------------------------
 // 静态成员定义
 // ----------------------------------------------------------------------------
@@ -47,6 +76,21 @@ bool Esp8266Base::begin() {
     if (!Esp8266BaseConfig::begin()) {
         ok = false;  // 继续运行，但配置读写不可用
     }
+
+    uint32_t bootCount = 0;
+    bootCount = _loadAndIncrementBootCount();
+
+    Esp8266BaseLog::beginBootSession(
+        _fwName,
+        _fwVersion,
+#if ESP8266BASE_USE_SLEEP
+        Esp8266BaseSleep::wakeReason(),
+#else
+        "unknown",
+#endif
+        bootCount,
+        ESP.getFreeHeap()
+    );
 
     // 4. WiFi — 读取凭证，启动状态机（非阻塞）
     Esp8266BaseWiFi::begin();
@@ -166,7 +210,7 @@ void Esp8266Base::logDiagnostics() {
 
     {
         char ssid[64] = "";
-        Esp8266BaseConfig::getStr("wifi_ssid", ssid, sizeof(ssid), "(none)");
+        Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid, sizeof(ssid), "(none)");
         ESP8266BASE_LOG_I("WiFi", "saved_station_ssid=%s default_config_ap_ssid=%s",
                           ssid, Esp8266BaseWiFi::apSSID());
     }

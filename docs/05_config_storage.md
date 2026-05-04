@@ -22,10 +22,10 @@
 
 ```text
 /
-├── cfg_wifi_ssid    → "IOTHOME"
-├── cfg_wifi_pass    → "secret123"
-├── cfg_wdt_count    → "5"
-├── cfg_wdt_pending  → "0"
+├── cfg_eb_wifi_ssid    → "IOTHOME"
+├── cfg_eb_wifi_pass    → "secret123"
+├── cfg_eb_wdt_count    → "5"
+├── cfg_eb_wdt_pending  → "0"
 └── cfg_<key>        → <value>
 ```
 
@@ -56,15 +56,17 @@
 调用流程：
 ```
 setStr("key", "value")
-  → 读旧值比较（_cfgBuf 97B 临时缓冲）
+  → 用栈上小缓冲读旧值比较
   → 相同：直接返回 true，不写 Flash
-  → 不同：LittleFS.open → write → close → yield()
+  → 不同：写入 /cfg_<key>.tmp → 读回校验
+  → 旧文件改名为 .bak，tmp 提交为正式文件
+  → 提交成功后删除 .bak → yield()
 ```
 
 ### Deferred 写入
 
 `setIntDeferred / setBoolDeferred` 先入内存队列，由 `handle()` 分批写入。适用于：
-- 高频更新的计数器（如 WDT 重启计数、启动计数）
+- 高频更新的应用计数器
 - 不需要立即持久化的运行状态
 
 队列结构（静态，4 条）：
@@ -86,19 +88,19 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 
 ## 五、内置配置 Key 约定
 
-以下 key 由库内部使用，应用代码不得覆盖：
+以下 key 由库内部使用，统一使用 `eb_` 前缀，应用代码不得覆盖：
 
 | Key | 类型 | 用途 | 写入方式 |
 |-----|------|------|----------|
-| `wifi_ssid` | string | WiFi STA SSID | 立即 |
-| `wifi_pass` | string | WiFi STA 密码 | 立即 |
-| `ap_pass` | string | AP 配网密码 | 立即 |
-| `hostname` | string | 设备 hostname | 立即 |
-| `web_user` | string | Web Auth 用户名 | 立即 |
-| `web_pass` | string | Web Auth 密码 | 立即 |
-| `wdt_count` | int32 | WDT 重启累计次数 | deferred |
-| `wdt_pending` | bool | 上次是否 WDT 重启 | 立即 |
-| `boot_count` | int32 | 启动次数 | deferred |
+| `eb_wifi_ssid` | string | WiFi STA SSID | 立即 |
+| `eb_wifi_pass` | string | WiFi STA 密码 | 立即 |
+| `eb_ap_pass` | string | AP 配网密码 | 立即 |
+| `eb_hostname` | string | 设备 hostname | 立即 |
+| `eb_web_user` | string | Web Auth 用户名 | 立即 |
+| `eb_web_pass` | string | Web Auth 密码 | 立即 |
+| `eb_wdt_count` | int32 | WDT 重启累计次数 | deferred |
+| `eb_wdt_pending` | bool | 上次是否 WDT 重启 | 立即 |
+| `eb_boot_count` | uint32 string | 启动次数，库自动维护，达到 4,294,967,295 后饱和 | immediate |
 
 ---
 
@@ -133,19 +135,21 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 
 ## 八、典型使用场景
 
-### 启动计数（deferred 写入）
+### 应用自定义计数（deferred 写入）
 
 ```cpp
-int32_t cnt = Esp8266BaseConfig::getInt("boot_count", 0) + 1;
-Esp8266BaseConfig::setIntDeferred("boot_count", cnt);
+int32_t cnt = Esp8266BaseConfig::getInt("app_counter", 0) + 1;
+Esp8266BaseConfig::setIntDeferred("app_counter", cnt);
 // handle() 会在后续 loop() 中自动刷盘
 ```
+
+`eb_boot_count` 是库保留 key，由 `Esp8266Base::begin()` 自动读取、递增并立即写入。内部用无符号十进制字符串保存，避免 `int32_t` 溢出；应用代码不要复用这个 key。
 
 ### WiFi 配网保存凭证（立即写入）
 
 ```cpp
-Esp8266BaseConfig::setStr("wifi_ssid", ssid);
-Esp8266BaseConfig::setStr("wifi_pass", pass);
+Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid);
+Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_PASS, pass);
 ```
 
 ### Deep sleep 前强制刷盘
@@ -171,6 +175,6 @@ ESP.restart();
 | 内容 | 大小 |
 |------|------|
 | deferred 队列（4条 × 34B） | 136B |
-| _cfgBuf（读写临时缓冲，97B） | 97B |
 | _ready 标志 | 1B |
-| **小计** | **~234B** |
+| audit 标志 | 2B |
+| **小计** | **~139B + padding** |

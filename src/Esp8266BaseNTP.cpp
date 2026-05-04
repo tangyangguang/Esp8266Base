@@ -240,7 +240,8 @@ bool Esp8266BaseNTP::formatTo(char* out, size_t len, const char* fmt) {
 
 // ----------------------------------------------------------------------------
 // Log 时间回调（静态，注入 Esp8266BaseLog::setTimeProvider）
-// 返回指向静态缓冲的指针（非重入，适合串口单线程环境）
+// 返回指向静态缓冲的指针（非重入，适合 ESP8266 Arduino 单线程日志路径）。
+// Log hook 若需要异步保存 timestamp，必须在回调内立即复制字符串。
 // ----------------------------------------------------------------------------
 const char* Esp8266BaseNTP::_timeStr() {
     static char buf[20];  // "YYYY-MM-DD HH:MM:SS\0" = 20 字节

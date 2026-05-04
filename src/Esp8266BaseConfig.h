@@ -5,7 +5,7 @@
 // Esp8266BaseConfig — LittleFS KV 配置存储
 //
 // 特性：
-//   - 每个 key 对应 /cfg_<key> 文件
+//   - 每个 key 对应 /cfg_<key> 文件；库保留 key 使用 eb_ 前缀
 //   - 支持 string / int32 / bool 三种类型
 //   - 写前比较旧值，无变化不写 Flash
 //   - 高频更新使用 setXxxDeferred，由 handle() 分批写入
@@ -29,6 +29,17 @@
 #ifndef ESP8266BASE_CFG_FORMAT_ON_FAIL
 #define ESP8266BASE_CFG_FORMAT_ON_FAIL 0
 #endif
+
+// 库保留配置 key 统一使用 eb_ 前缀，业务项目不要复用。
+#define ESP8266BASE_CFG_KEY_WIFI_SSID    "eb_wifi_ssid"
+#define ESP8266BASE_CFG_KEY_WIFI_PASS    "eb_wifi_pass"
+#define ESP8266BASE_CFG_KEY_AP_PASS      "eb_ap_pass"
+#define ESP8266BASE_CFG_KEY_HOSTNAME     "eb_hostname"
+#define ESP8266BASE_CFG_KEY_WEB_USER     "eb_web_user"
+#define ESP8266BASE_CFG_KEY_WEB_PASS     "eb_web_pass"
+#define ESP8266BASE_CFG_KEY_WDT_COUNT    "eb_wdt_count"
+#define ESP8266BASE_CFG_KEY_WDT_PENDING  "eb_wdt_pending"
+#define ESP8266BASE_CFG_KEY_BOOT_COUNT   "eb_boot_count"
 
 class Esp8266BaseConfig {
 public:
@@ -69,6 +80,12 @@ public:
     // 是否就绪
     static bool isReady();
 
+    // 配置审计日志。写审计默认关闭；读审计单独开关，避免刷屏。
+    static void enableConfigAudit(bool enabled);
+    static void enableConfigReadAudit(bool enabled);
+    static bool isConfigAuditEnabled();
+    static bool isConfigReadAuditEnabled();
+
 private:
     // deferred 队列条目
     struct DeferredEntry {
@@ -82,6 +99,8 @@ private:
 
     static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE]; // 128B
     static bool _ready;                                             // 1B
+    static bool _auditEnabled;                                      // 1B
+    static bool _readAuditEnabled;                                  // 1B
 
     // 内部辅助
     static bool _buildPath(const char* key, char* path, size_t pathLen);
@@ -89,4 +108,6 @@ private:
     static bool _readRaw(const char* path, char* out, size_t len);
     static bool _enqueue(const char* key, int32_t iv, bool bv, uint8_t type);
     static void _flushOne();
+    static bool _setStrInternal(const char* op, const char* key, const char* value);
+    static void _auditRead(const char* op, const char* key, const char* value, bool found);
 };
