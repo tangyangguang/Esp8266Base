@@ -196,13 +196,18 @@ bool Esp8266BaseLog::_ensureFileReady() {
     return true;
 }
 
+bool Esp8266BaseLog::_truncateCurrentFile() {
+    if (!_fileEnabled || !_filePath[0]) return false;
+    File nf = LittleFS.open(_filePath, "w");
+    if (!nf) return false;
+    nf.close();
+    _fileCurrentBytes = 0;
+    return true;
+}
+
 bool Esp8266BaseLog::_rotateFile() {
     if (_fileRotateFiles <= 1) {
-        File nf = LittleFS.open(_filePath, "w");
-        if (!nf) return false;
-        nf.close();
-        _fileCurrentBytes = 0;
-        return true;
+        return _truncateCurrentFile();
     } else {
         char oldest[36];
         if (_segmentPath(_fileRotateFiles - 1, oldest, sizeof(oldest)) && LittleFS.exists(oldest)) {
@@ -221,11 +226,7 @@ bool Esp8266BaseLog::_rotateFile() {
         }
     }
 
-    File nf = LittleFS.open(_filePath, "w");
-    if (!nf) return false;
-    nf.close();
-    _fileCurrentBytes = 0;
-    return true;
+    return _truncateCurrentFile();
 }
 
 bool Esp8266BaseLog::_writeFileLine(const char* line) {
@@ -234,11 +235,15 @@ bool Esp8266BaseLog::_writeFileLine(const char* line) {
 
     size_t lineLen = strlen(line) + 1;  // newline
     if (_fileCurrentBytes + lineLen > _fileMaxBytes) {
-        if (!_rotateFile()) return false;
+        if (!_rotateFile() && !_truncateCurrentFile()) return false;
     }
 
     File f = LittleFS.open(_filePath, "a");
-    if (!f) return false;
+    if (!f) {
+        if (!_truncateCurrentFile()) return false;
+        f = LittleFS.open(_filePath, "a");
+        if (!f) return false;
+    }
     size_t written = f.print(line);
     written += f.print('\n');
     f.close();

@@ -26,12 +26,18 @@ Esp8266Base/
 ├── library.json                   # PlatformIO 库描述
 ├── README.md                      # 快速上手
 ├── docs/
+│   ├── 00_user_guide.md           # 使用者主线指南
 │   ├── 01_overview.md             # 本文件：项目总览
 │   ├── 02_architecture.md         # 模块架构与依赖关系
 │   ├── 03_api_reference.md        # 完整 API 参考
 │   ├── 04_memory_budget.md        # RAM 预算与控制规则
 │   ├── 05_config_storage.md       # 配置存储设计
-│   └── 06_web_extension.md        # Web 扩展开发指南
+│   ├── 06_web_ota.md              # Web 与 OTA
+│   ├── 07_observability.md        # 日志、审计与时间映射
+│   ├── 08_networking.md           # WiFi、NTP 与 mDNS
+│   ├── 09_power_watchdog.md       # Sleep 与 Watchdog
+│   ├── 10_troubleshooting.md      # 故障排查
+│   └── 11_maintainer_guide.md     # 维护者指南
 ├── examples/
 │   ├── basic_wifi/                # WiFi STA/AP 配网示例
 │   ├── wifi_config_ota/           # Web 配网 + OTA 示例

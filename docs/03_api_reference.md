@@ -5,6 +5,8 @@
 > 前缀：`Esp8266Base` / `ESP8266BASE_`  
 > 所有模块均为静态类，无需实例化。
 
+本文件用于查 API 签名和约束。使用流程见 `docs/00_user_guide.md`；能力域细节见 Web/OTA、观测、网络、低功耗等专题文档。
+
 ---
 
 ## 目录
@@ -130,7 +132,7 @@ static void enableConfigAudit(bool enabled);
 static void enableConfigReadAudit(bool enabled);
 ```
 
-默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。`enableFileSink()` 启用 LittleFS 文件日志，例如 `/logs/app.log`。`rotateFiles` 支持 1-4，默认 4；当前文件超过 `maxBytes` 时会轮转为 `/logs/app.log.1`，再逐步后移到 `.2`、`.3`，最多占用约 `maxBytes * rotateFiles`。`fileLevel` 可单独控制文件日志等级，但 WARN/ERROR 在 file sink 启用后始终写入文件，避免关键问题被过滤。不开 file sink 时不长期占用文件日志缓冲。`beginBootSession()` 输出人工可读分割线和启动摘要。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。
+默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。`enableFileSink()` 启用 LittleFS 文件日志，例如 `/logs/app.log`。`rotateFiles` 支持 1-4，默认 4；当前文件超过 `maxBytes` 时会轮转为 `/logs/app.log.1`，再逐步后移到 `.2`、`.3`，最多占用约 `maxBytes * rotateFiles`。轮转或追加打开异常时优先截断当前文件恢复写入，允许极端情况下丢少量日志，但避免日志功能长期失效。`fileLevel` 可单独控制文件日志等级，但 WARN/ERROR 在 file sink 启用后始终写入文件，避免关键问题被过滤。不开 file sink 时不长期占用文件日志缓冲。`beginBootSession()` 输出人工可读分割线和启动摘要。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。完整说明见 `docs/07_observability.md`。
 
 ### 日志宏
 
@@ -233,6 +235,8 @@ static void enableConfigAudit(bool enabled);
 static void enableConfigReadAudit(bool enabled);
 ```
 查询 deferred 队列中待写条数，及文件系统是否已就绪。
+
+配置存储设计见 `docs/05_config_storage.md`。
 
 配置审计默认关闭。启用写审计后，`setStr` / `setInt` / `setBool` / deferred enqueue / flush 会记录 key、old/new、changed/no_change、immediate/deferred、result。启用读审计后，`getStr` / `getInt` / `getBool` 会记录读取结果；读审计默认建议关闭，避免高频页面/API 刷屏。审计日志不做任何敏感 key 特殊处理，所有值直接输出。
 
@@ -401,6 +405,8 @@ static bool isRunning();
 | `/reboot` | GET | 重启确认页 |
 | `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
+
+Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
 `/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 

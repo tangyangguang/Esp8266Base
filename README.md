@@ -76,12 +76,18 @@ Esp8266Base/
 ├── README.md
 ├── library.json
 ├── docs/
+│   ├── 00_user_guide.md           # 使用者主线指南
 │   ├── 01_overview.md              # 项目总览
 │   ├── 02_architecture.md          # 架构与模块依赖
 │   ├── 03_api_reference.md         # 完整 API 参考
 │   ├── 04_memory_budget.md         # RAM 预算与控制规则
 │   ├── 05_config_storage.md        # 配置存储设计
-│   └── 06_web_extension.md         # Web 扩展开发指南
+│   ├── 06_web_ota.md               # Web 与 OTA
+│   ├── 07_observability.md         # 日志、审计与时间映射
+│   ├── 08_networking.md            # WiFi、NTP 与 mDNS
+│   ├── 09_power_watchdog.md        # Sleep 与 Watchdog
+│   ├── 10_troubleshooting.md       # 故障排查
+│   └── 11_maintainer_guide.md      # 维护者指南
 ├── src/
 │   ├── Esp8266Base.h / .cpp        # 主入口
 │   ├── Esp8266BaseLog.h / .cpp     # 日志
@@ -169,7 +175,7 @@ Esp8266BaseLog::enableConfigAudit(true);
 Esp8266BaseLog::enableConfigReadAudit(false);
 ```
 
-默认不开文件日志和配置审计，仍然只输出 Serial。启用文件日志后，启动会话、WARN/ERROR 和普通日志都会写入 LittleFS 文件。文件 sink 支持 1-4 段轮转，默认 4 段；当前文件超过 `maxBytes` 时依次轮转为 `path.1`、`path.2`、`path.3`，新的当前文件继续写入。最多占用约 `maxBytes * rotateFiles`。目录只在启用后首次写文件时准备一次，当前文件大小用内存计数缓存，避免每条日志反复 open/size/close。`fileLevel` 可单独控制文件日志等级，但 WARN/ERROR 在 file sink 启用后始终写入文件。`full_demo` 使用 4×16KB，最多约 64KB。内置 Web 提供 `/logs` 查看各段日志，也支持清空日志，清空操作需要 Basic Auth。配置审计直接输出 key/value，不做任何敏感 key 特殊处理，方便现场调试。
+默认不开文件日志和配置审计，仍然只输出 Serial。启用文件日志后，启动会话、WARN/ERROR 和普通日志都会写入 LittleFS 文件。文件 sink 默认 4 段轮转；轮转或追加异常时优先恢复写入能力，允许极端情况下丢少量日志，但避免日志功能长期失效。`full_demo` 使用 4×16KB。完整逻辑见 `docs/07_observability.md`。
 
 ---
 
@@ -185,9 +191,17 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 
 ## 文档阅读顺序
 
-1. `docs/01_overview.md` — 整体定位，先读此文
+使用者建议顺序：
+
+1. `docs/00_user_guide.md` — 从零接入、配网、OTA、日志和 full_demo
+2. `docs/07_observability.md` — 日志、审计、文件轮转和时间映射
+3. `docs/10_troubleshooting.md` — 按现象排查问题
+
+维护者建议顺序：
+
+1. `docs/01_overview.md` — 项目定位
 2. `docs/02_architecture.md` — 模块关系与初始化顺序
-3. `docs/03_api_reference.md` — 开发时查阅
-4. `docs/04_memory_budget.md` — RAM 约束，写代码前必读
-5. `docs/05_config_storage.md` — Config 模块细节
-6. `docs/06_web_extension.md` — 添加自定义页面时查阅
+3. `docs/04_memory_budget.md` — RAM 约束，写代码前必读
+4. `docs/11_maintainer_guide.md` — 维护规则与发布检查
+
+查接口：`docs/03_api_reference.md`。专题细节：`docs/05_config_storage.md`、`docs/06_web_ota.md`、`docs/08_networking.md`、`docs/09_power_watchdog.md`。

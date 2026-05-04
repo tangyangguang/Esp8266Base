@@ -85,6 +85,7 @@ private:
     static const char* _timestamp(char* buf, size_t len);
     static bool _segmentPath(uint8_t index, char* out, size_t len);
     static bool _ensureFileReady();
+    static bool _truncateCurrentFile();
     static bool _rotateFile();
     static bool _writeFileLine(const char* line);
 };
