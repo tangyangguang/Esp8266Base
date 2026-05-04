@@ -138,7 +138,7 @@ http://<device-ip>/ota
 默认只输出 Serial，不写文件。full_demo 使用：
 
 ```cpp
-Esp8266BaseLog::enableFileSink("/logs/app.log", 16384, ESP8266BASE_LOG_LEVEL, 4);
+Esp8266BaseLog::enableFileSink("/logs/app.log", 16384);
 Esp8266BaseLog::enableConfigAudit(true);
 Esp8266BaseLog::enableConfigReadAudit(false);
 ```

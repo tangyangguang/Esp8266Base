@@ -69,6 +69,7 @@ void Esp8266BaseWatchdog::handle() {
 
         ESP8266BASE_LOG_E("WDT ", "watchdog_timeout elapsed=%ums reset_count=%u action=restart",
                           (unsigned)elapsed, (unsigned)_resetCount);
+        Esp8266BaseLog::flushFileSink();
 
         // 给串口缓冲区时间输出
         delay(50);

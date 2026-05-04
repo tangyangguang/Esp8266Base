@@ -17,6 +17,26 @@
 #define ESP8266BASE_LOG_LEVEL 1   // 0=D 1=I 2=W 3=E 4=Off
 #endif
 
+#ifndef ESP8266BASE_LOG_FILE_LEVEL
+#define ESP8266BASE_LOG_FILE_LEVEL 2   // file sink default: WARN
+#endif
+
+#ifndef ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS
+#define ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS 2000
+#endif
+
+#ifndef ESP8266BASE_LOG_FILE_BUFFER_SIZE
+#if ESP8266BASE_LOG_FILE_LEVEL < 2
+#define ESP8266BASE_LOG_FILE_BUFFER_SIZE 512
+#else
+#define ESP8266BASE_LOG_FILE_BUFFER_SIZE 0
+#endif
+#endif
+
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 512
+#error "ESP8266BASE_LOG_FILE_BUFFER_SIZE must be <= 512"
+#endif
+
 // 时间字符串回调函数类型
 typedef const char* (*Esp8266BaseTimeProviderFn)();
 typedef void (*Esp8266BaseLogHookFn)(uint8_t level,
@@ -42,7 +62,7 @@ public:
     // 可选 LittleFS 文件日志。默认关闭，不影响 Serial-only 轻量路径。
     static bool enableFileSink(const char* path,
                                uint32_t maxBytes,
-                               uint8_t fileLevel = ESP8266BASE_LOG_LEVEL,
+                               uint8_t fileLevel = ESP8266BASE_LOG_FILE_LEVEL,
                                uint8_t rotateFiles = 4);
     static void disableFileSink();
     static void setFileSinkLevel(uint8_t level);
@@ -51,9 +71,16 @@ public:
     static uint32_t fileSinkMaxBytes();
     static uint8_t fileSinkRotateFiles();
     static uint8_t fileSinkLevel();
+    static const char* fileSinkLevelName();
     static uint32_t fileSinkSize();
     static uint32_t fileSinkSegmentSize(uint8_t index);
+    static bool fileSinkBufferEnabled();
+    static uint16_t fileSinkBufferSize();
+    static uint16_t fileSinkBufferUsed();
+    static uint32_t fileSinkFlushIntervalMs();
+    static bool flushFileSink();
     static bool clearFileSink();
+    static void handle();
 
     // 启动会话分割线，建议 Config 挂载后调用
     static void beginBootSession(const char* firmware,
@@ -80,14 +107,22 @@ private:
     static uint32_t                  _fileMaxBytes; // 4B
     static uint32_t                  _fileCurrentBytes; // 4B
     static char                      _filePath[32]; // 32B
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    static char                      _fileBuffer[ESP8266BASE_LOG_FILE_BUFFER_SIZE];
+    static uint16_t                  _fileBufferUsed;
+    static uint32_t                  _fileLastFlushMs;
+#endif
     // 格式缓冲 128B 在 log() 栈上分配，不存此处
 
+    static const char* _levelName(uint8_t level);
     static const char* _timestamp(char* buf, size_t len);
     static bool _segmentPath(uint8_t index, char* out, size_t len);
     static bool _ensureFileReady();
     static bool _truncateCurrentFile();
     static bool _rotateFile();
+    static bool _writeFileBytes(const char* data, size_t len);
     static bool _writeFileLine(const char* line);
+    static bool _writeFileBuffered(const char* line);
 };
 
 // ----------------------------------------------------------------------------

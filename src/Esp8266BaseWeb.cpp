@@ -524,6 +524,7 @@ void Esp8266BaseWeb::_handleLogsGet() {
         sendFooter();
         return;
     }
+    Esp8266BaseLog::flushFileSink();
 
     char maxBuf[16];
     char totalBuf[16];
@@ -532,10 +533,28 @@ void Esp8266BaseWeb::_handleLogsGet() {
                                  totalBuf, sizeof(totalBuf));
     sendChunk("<p>File sink: <b>enabled</b><br>Path: ");
     sendChunk(Esp8266BaseLog::fileSinkPath());
-    snprintf(_wb, sizeof(_wb), "<br>Rotation files: %u<br>File level: %u",
+    snprintf(_wb, sizeof(_wb), "<br>Rotation files: %u<br>File level: %s (%u)",
              (unsigned)Esp8266BaseLog::fileSinkRotateFiles(),
+             Esp8266BaseLog::fileSinkLevelName(),
              (unsigned)Esp8266BaseLog::fileSinkLevel());
     sendChunk(_wb);
+    if (Esp8266BaseLog::fileSinkLevel() < 2) {
+        if (Esp8266BaseLog::fileSinkBufferEnabled()) {
+            char usedBuf[16];
+            char sizeBuf[16];
+            Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkBufferUsed(), usedBuf, sizeof(usedBuf));
+            Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkBufferSize(), sizeBuf, sizeof(sizeBuf));
+            snprintf(_wb, sizeof(_wb),
+                     "<br>Low-priority buffer: enabled<br>Buffer: %s / %s<br>Flush interval: %lus<br>Buffered levels: DEBUG/INFO",
+                     usedBuf, sizeBuf,
+                     (unsigned long)(Esp8266BaseLog::fileSinkFlushIntervalMs() / 1000UL));
+            sendChunk(_wb);
+        } else {
+            sendChunk("<br>Low-priority buffer: disabled<br>Reason: compiled buffer size is 0");
+        }
+    } else {
+        sendChunk("<br>Low-priority buffer: disabled<br>Reason: file level is WARN or higher; no buffer RAM reserved");
+    }
     snprintf(_wb, sizeof(_wb), "<br>Max per file: %s<br>Max total: %s",
              maxBuf, totalBuf);
     sendChunk(_wb);
@@ -587,6 +606,7 @@ void Esp8266BaseWeb::_handleRebootPost() {
     _server.client().stop();
     ESP8266BASE_LOG_I("Web ", "reboot_requested source=web");
     Esp8266BaseConfig::flush();
+    Esp8266BaseLog::flushFileSink();
     delay(500);
     ESP.restart();
 }

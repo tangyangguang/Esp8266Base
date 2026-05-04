@@ -67,6 +67,7 @@ void Esp8266BaseOTA::_handleUploadComplete() {
         Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
         ESP8266BASE_LOG_I("OTA ", "upload_success free_heap=%s action=reboot", heapBuf);
         Esp8266BaseConfig::flush();
+        Esp8266BaseLog::flushFileSink();
         delay(500);
         ESP.restart();
     } else {

@@ -111,7 +111,7 @@ typedef void (*Esp8266BaseLogHookFn)(uint8_t level,
 static void setOutputHook(Esp8266BaseLogHookFn fn);
 static bool enableFileSink(const char* path,
                            uint32_t maxBytes,
-                           uint8_t fileLevel = ESP8266BASE_LOG_LEVEL,
+                           uint8_t fileLevel = ESP8266BASE_LOG_FILE_LEVEL,
                            uint8_t rotateFiles = 4);
 static void disableFileSink();
 static void setFileSinkLevel(uint8_t level);
@@ -120,9 +120,16 @@ static const char* fileSinkPath();
 static uint32_t fileSinkMaxBytes();
 static uint8_t fileSinkRotateFiles();
 static uint8_t fileSinkLevel();
+static const char* fileSinkLevelName();
 static uint32_t fileSinkSize();
 static uint32_t fileSinkSegmentSize(uint8_t index);
+static bool fileSinkBufferEnabled();
+static uint16_t fileSinkBufferSize();
+static uint16_t fileSinkBufferUsed();
+static uint32_t fileSinkFlushIntervalMs();
+static bool flushFileSink();
 static bool clearFileSink();
+static void handle();
 static void beginBootSession(const char* firmware,
                              const char* version,
                              const char* resetReason,
@@ -132,7 +139,7 @@ static void enableConfigAudit(bool enabled);
 static void enableConfigReadAudit(bool enabled);
 ```
 
-默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。`enableFileSink()` 启用 LittleFS 文件日志，例如 `/logs/app.log`。`rotateFiles` 支持 1-4，默认 4；当前文件超过 `maxBytes` 时会轮转为 `/logs/app.log.1`，再逐步后移到 `.2`、`.3`，最多占用约 `maxBytes * rotateFiles`。轮转或追加打开异常时优先截断当前文件恢复写入，允许极端情况下丢少量日志，但避免日志功能长期失效。`fileLevel` 可单独控制文件日志等级，但 WARN/ERROR 在 file sink 启用后始终写入文件，避免关键问题被过滤。不开 file sink 时不长期占用文件日志缓冲。`beginBootSession()` 输出人工可读分割线和启动摘要。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。完整说明见 `docs/07_observability.md`。
+默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。`enableFileSink()` 启用 LittleFS 文件日志，例如 `/logs/app.log`。`rotateFiles` 支持 1-4，默认 4；当前文件超过 `maxBytes` 时会轮转为 `/logs/app.log.1`，再逐步后移到 `.2`、`.3`，最多占用约 `maxBytes * rotateFiles`。`fileLevel` 默认 `ESP8266BASE_LOG_FILE_LEVEL`，库默认 WARN；WARN/ERROR 在 file sink 启用后始终写入文件，避免关键问题被过滤。编译期 `ESP8266BASE_LOG_FILE_BUFFER_SIZE>0` 且文件等级低于 WARN 时，DEBUG/INFO 会进入低优先级缓存，达到间隔或容量后刷盘；WARN/ERROR 立即刷盘。`flushFileSink()` 用于页面读取、重启、deep sleep、OTA 成功前强制落盘。不开 file sink 时不长期占用文件日志状态；默认 WARN 时也不编译低优先级缓存。`beginBootSession()` 输出人工可读分割线和启动摘要。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。完整说明见 `docs/07_observability.md`。
 
 ### 日志宏
 
@@ -677,6 +684,9 @@ void loop() {
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 日志等级：0=D, 1=I, 2=W, 3=E, 4=关闭 |
+| `ESP8266BASE_LOG_FILE_LEVEL` | `2` | 文件日志默认等级，默认 WARN |
+| `ESP8266BASE_LOG_FILE_BUFFER_SIZE` | `WARN 以下为 512，否则 0` | DEBUG/INFO 文件日志低优先级缓存；最大 512B |
+| `ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |

@@ -391,6 +391,7 @@ static void handleBoardButton() {
         ESP8266BASE_LOG_W("Btn ", "button_long_press_detected pin=GPIO0 duration=1s action=clear_all_config_and_restart");
         Esp8266BaseWatchdog::pause();
         Esp8266BaseConfig::clearAll();
+        Esp8266BaseLog::flushFileSink();
         delay(300);
         ESP.restart();
     }
@@ -403,7 +404,7 @@ void setup() {
     Serial.begin(115200);
     delay(100);
 
-    Esp8266BaseLog::enableFileSink("/logs/app.log", 16384, ESP8266BASE_LOG_LEVEL, 4);
+    Esp8266BaseLog::enableFileSink("/logs/app.log", 16384, ESP8266BASE_LOG_FILE_LEVEL, 4);
     Esp8266BaseLog::enableConfigAudit(true);
     Esp8266BaseLog::enableConfigReadAudit(false);
 

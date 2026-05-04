@@ -125,6 +125,7 @@ bool Esp8266Base::begin() {
 void Esp8266Base::handle() {
     // 1. Config deferred 刷新
     Esp8266BaseConfig::handle();
+    Esp8266BaseLog::handle();
 
     // 2. WiFi 状态机
     Esp8266BaseWiFi::handle();

@@ -28,7 +28,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/wifi` | POST | Basic Auth | 保存 WiFi 凭证，提交后 303 回 GET |
 | `/ota` | GET | Basic Auth | OTA 上传页，带进度显示 |
 | `/ota` | POST | Basic Auth | 固件上传，由 OTA 模块处理 |
-| `/logs` | GET | Basic Auth | 查看文件日志状态和内容 |
+| `/logs` | GET | Basic Auth | 查看文件日志状态、文件等级、低优先级缓存状态和日志内容 |
 | `/logs/clear` | POST | Basic Auth | 清空文件日志 |
 | `/reboot` | GET | Basic Auth | 重启确认页 |
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |

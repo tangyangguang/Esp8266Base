@@ -10,12 +10,17 @@ uint8_t                   Esp8266BaseLog::_level  = ESP8266BASE_LOG_LEVEL;
 Esp8266BaseTimeProviderFn Esp8266BaseLog::_timeFn  = nullptr;
 Esp8266BaseLogHookFn      Esp8266BaseLog::_hook    = nullptr;
 bool                      Esp8266BaseLog::_fileEnabled = false;
-uint8_t                   Esp8266BaseLog::_fileLevel = ESP8266BASE_LOG_LEVEL;
+uint8_t                   Esp8266BaseLog::_fileLevel = ESP8266BASE_LOG_FILE_LEVEL;
 uint8_t                   Esp8266BaseLog::_fileRotateFiles = 4;
 bool                      Esp8266BaseLog::_fileDirReady = false;
 uint32_t                  Esp8266BaseLog::_fileMaxBytes = 0;
 uint32_t                  Esp8266BaseLog::_fileCurrentBytes = 0;
 char                      Esp8266BaseLog::_filePath[32] = "";
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+char                      Esp8266BaseLog::_fileBuffer[ESP8266BASE_LOG_FILE_BUFFER_SIZE];
+uint16_t                  Esp8266BaseLog::_fileBufferUsed = 0;
+uint32_t                  Esp8266BaseLog::_fileLastFlushMs = 0;
+#endif
 
 // ----------------------------------------------------------------------------
 // 内部常量
@@ -62,21 +67,36 @@ bool Esp8266BaseLog::enableFileSink(const char* path,
     _fileRotateFiles = rotateFiles;
     _fileDirReady = false;
     _fileCurrentBytes = 0;
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    _fileBufferUsed = 0;
+    _fileLastFlushMs = 0;
+#endif
 
     _fileEnabled = true;
-    log(1, "Log ", "file_sink_enabled path=%s max_bytes=%lu rotate_files=%u file_level=%u",
+    log(1, "Log ", "file_sink_enabled path=%s max_bytes=%lu rotate_files=%u file_level=%s(%u) low_priority_buffer=%s buffer_size=%u flush_interval_ms=%lu",
         _filePath, (unsigned long)_fileMaxBytes,
-        (unsigned)_fileRotateFiles, (unsigned)_fileLevel);
+        (unsigned)_fileRotateFiles, _levelName(_fileLevel), (unsigned)_fileLevel,
+        fileSinkBufferEnabled() ? "enabled" : "disabled",
+        (unsigned)fileSinkBufferSize(),
+        (unsigned long)fileSinkFlushIntervalMs());
     return true;
 }
 
 void Esp8266BaseLog::disableFileSink() {
+    flushFileSink();
     _fileEnabled = false;
     _fileDirReady = false;
     _fileCurrentBytes = 0;
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    _fileBufferUsed = 0;
+    _fileLastFlushMs = 0;
+#endif
 }
 
 void Esp8266BaseLog::setFileSinkLevel(uint8_t level) {
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    if (level >= 2) flushFileSink();
+#endif
     _fileLevel = level;
 }
 
@@ -100,6 +120,10 @@ uint8_t Esp8266BaseLog::fileSinkLevel() {
     return _fileLevel;
 }
 
+const char* Esp8266BaseLog::fileSinkLevelName() {
+    return _levelName(_fileLevel);
+}
+
 uint32_t Esp8266BaseLog::fileSinkSize() {
     if (!_fileEnabled || !_filePath[0] || !LittleFS.exists(_filePath)) return 0;
     File f = LittleFS.open(_filePath, "r");
@@ -119,8 +143,58 @@ uint32_t Esp8266BaseLog::fileSinkSegmentSize(uint8_t index) {
     return sz;
 }
 
+bool Esp8266BaseLog::fileSinkBufferEnabled() {
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    return _fileEnabled && _fileLevel < 2;
+#else
+    return false;
+#endif
+}
+
+uint16_t Esp8266BaseLog::fileSinkBufferSize() {
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    return ESP8266BASE_LOG_FILE_BUFFER_SIZE;
+#else
+    return 0;
+#endif
+}
+
+uint16_t Esp8266BaseLog::fileSinkBufferUsed() {
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    return _fileBufferUsed;
+#else
+    return 0;
+#endif
+}
+
+uint32_t Esp8266BaseLog::fileSinkFlushIntervalMs() {
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    return ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS;
+#else
+    return 0;
+#endif
+}
+
+bool Esp8266BaseLog::flushFileSink() {
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    if (_fileBufferUsed == 0) return true;
+    bool ok = _writeFileBytes(_fileBuffer, _fileBufferUsed);
+    if (ok) {
+        _fileBufferUsed = 0;
+        _fileLastFlushMs = 0;
+    }
+    return ok;
+#else
+    return true;
+#endif
+}
+
 bool Esp8266BaseLog::clearFileSink() {
     if (!_filePath[0]) return false;
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    _fileBufferUsed = 0;
+    _fileLastFlushMs = 0;
+#endif
     if (!_ensureFileReady()) return false;
     if (LittleFS.exists(_filePath) && !LittleFS.remove(_filePath)) return false;
     for (uint8_t i = 1; i < _fileRotateFiles; i++) {
@@ -142,6 +216,26 @@ bool Esp8266BaseLog::clearFileSink() {
     _fileCurrentBytes = 0;
     log(1, "Log ", "file_sink_cleared path=%s", _filePath);
     return true;
+}
+
+void Esp8266BaseLog::handle() {
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    if (_fileBufferUsed > 0 &&
+        (uint32_t)(millis() - _fileLastFlushMs) >= ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS) {
+        flushFileSink();
+    }
+#endif
+}
+
+const char* Esp8266BaseLog::_levelName(uint8_t level) {
+    switch (level) {
+        case 0: return "DEBUG";
+        case 1: return "INFO";
+        case 2: return "WARN";
+        case 3: return "ERROR";
+        case 4: return "OFF";
+        default: return "UNKNOWN";
+    }
 }
 
 void Esp8266BaseLog::beginBootSession(const char* firmware,
@@ -236,6 +330,40 @@ bool Esp8266BaseLog::_rotateFile() {
     return _truncateCurrentFile();
 }
 
+bool Esp8266BaseLog::_writeFileBytes(const char* data, size_t len) {
+    if (!_fileEnabled || !_filePath[0] || !_fileMaxBytes || !data) return false;
+    if (!_ensureFileReady()) return false;
+
+    size_t offset = 0;
+    while (offset < len) {
+        if (_fileCurrentBytes >= _fileMaxBytes) {
+            if (!_rotateFile() && !_truncateCurrentFile()) return false;
+        }
+
+        uint32_t room = _fileMaxBytes - _fileCurrentBytes;
+        size_t chunk = len - offset;
+        if (chunk > room) chunk = room;
+        if (chunk == 0) continue;
+
+        File f = LittleFS.open(_filePath, "a");
+        if (!f) {
+            if (!_truncateCurrentFile()) return false;
+            f = LittleFS.open(_filePath, "a");
+            if (!f) return false;
+        }
+        size_t written = f.write((const uint8_t*)data + offset, chunk);
+        f.close();
+        if (written != chunk) {
+            _fileCurrentBytes = fileSinkSize();
+            return false;
+        }
+        _fileCurrentBytes += (uint32_t)written;
+        offset += written;
+        yield();
+    }
+    return true;
+}
+
 bool Esp8266BaseLog::_writeFileLine(const char* line) {
     if (!_fileEnabled || !_filePath[0] || !_fileMaxBytes || !line) return false;
     if (!_ensureFileReady()) return false;
@@ -261,6 +389,45 @@ bool Esp8266BaseLog::_writeFileLine(const char* line) {
     _fileCurrentBytes += lineLen;
     yield();
     return true;
+}
+
+bool Esp8266BaseLog::_writeFileBuffered(const char* line) {
+#if ESP8266BASE_LOG_FILE_BUFFER_SIZE > 0
+    if (!line) return false;
+    if (!fileSinkBufferEnabled()) return _writeFileLine(line);
+
+    uint32_t now = millis();
+    if (_fileBufferUsed > 0 &&
+        (uint32_t)(now - _fileLastFlushMs) >= ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS) {
+        flushFileSink();
+    }
+
+    size_t lineLen = strlen(line);
+    size_t needed = lineLen + 1;  // newline
+    if (needed > ESP8266BASE_LOG_FILE_BUFFER_SIZE) {
+        flushFileSink();
+        return _writeFileLine(line);
+    }
+
+    if (_fileBufferUsed + needed > ESP8266BASE_LOG_FILE_BUFFER_SIZE) {
+        flushFileSink();
+    }
+
+    if (_fileBufferUsed == 0) {
+        _fileLastFlushMs = now;
+    }
+    memcpy(_fileBuffer + _fileBufferUsed, line, lineLen);
+    _fileBufferUsed += (uint16_t)lineLen;
+    _fileBuffer[_fileBufferUsed++] = '\n';
+
+    if (_fileBufferUsed >= ESP8266BASE_LOG_FILE_BUFFER_SIZE ||
+        (uint32_t)(millis() - _fileLastFlushMs) >= ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS) {
+        return flushFileSink();
+    }
+    return true;
+#else
+    return _writeFileLine(line);
+#endif
 }
 
 void Esp8266BaseLog::log(uint8_t level, const char* tag, const char* fmt, ...) {
@@ -292,5 +459,12 @@ void Esp8266BaseLog::log(uint8_t level, const char* tag, const char* fmt, ...) {
     if (_hook) {
         _hook(level, tagBuf, msg, ts, line);
     }
-    if (fileEnabled) _writeFileLine(line);
+    if (fileEnabled) {
+        if (level >= 2) {
+            flushFileSink();
+            _writeFileLine(line);
+        } else {
+            _writeFileBuffered(line);
+        }
+    }
 }

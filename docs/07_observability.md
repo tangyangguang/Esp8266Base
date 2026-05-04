@@ -40,7 +40,11 @@
 示例：
 
 ```cpp
-Esp8266BaseLog::enableFileSink("/logs/app.log", 16 * 1024, ESP8266BASE_LOG_LEVEL, 4);
+// 正式固件推荐：文件日志默认 WARN，不占用低优先级缓存 RAM。
+Esp8266BaseLog::enableFileSink("/logs/app.log", 16 * 1024);
+
+// 调试样例可把文件日志调到 INFO，记录更多上下文。
+Esp8266BaseLog::enableFileSink("/logs/app.log", 16 * 1024, 1, 4);
 ```
 
 参数：
@@ -49,10 +53,20 @@ Esp8266BaseLog::enableFileSink("/logs/app.log", 16 * 1024, ESP8266BASE_LOG_LEVEL
 |---|---|
 | `path` | 当前日志文件路径，必须以 `/` 开头 |
 | `maxBytes` | 单段最大字节数，最小 256 |
-| `fileLevel` | 写入文件的最低等级 |
+| `fileLevel` | 写入文件的最低等级，默认 `ESP8266BASE_LOG_FILE_LEVEL`，库默认 WARN |
 | `rotateFiles` | 轮转段数，1-4，默认 4 |
 
 即使 `fileLevel` 设置较高，WARN/ERROR 在 file sink 启用后也始终写入文件。
+
+当编译期 `ESP8266BASE_LOG_FILE_BUFFER_SIZE>0` 且运行时 `fileLevel < WARN` 时，DEBUG/INFO 属于低优先级文件日志，会先进入小缓存，达到 `ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS` 或缓存满后再写入 LittleFS。默认策略是：
+
+| 场景 | 默认行为 |
+|---|---|
+| `ESP8266BASE_LOG_FILE_LEVEL >= WARN` | 不编译低优先级缓存，无 512B RAM 占用 |
+| `ESP8266BASE_LOG_FILE_LEVEL < WARN` | 编译 512B 缓存，默认 2s 或满缓存刷盘 |
+| WARN/ERROR | 始终立即写入文件，写入前先刷出已有低优先级缓存 |
+| `/logs` 页面读取 | 读取文件前先调用 `flushFileSink()` |
+| OTA 成功、Web 重启、deep sleep、看门狗重启 | 重启/休眠前调用 `flushFileSink()` |
 
 ---
 
@@ -221,7 +235,9 @@ http://<device-ip>/logs
 - file sink 是否启用
 - 路径
 - 轮转段数
-- 文件等级
+- 文件等级，例如 `WARN (2)`
+- 低优先级缓存状态
+- 缓存已用/总大小和刷盘间隔（仅文件等级低于 WARN 且缓存编译启用时）
 - 单段上限
 - 总上限
 - 每段大小
@@ -234,7 +250,7 @@ http://<device-ip>/logs
 ESP8266 推荐：
 
 ```cpp
-Esp8266BaseLog::enableFileSink("/logs/app.log", 16 * 1024, ESP8266BASE_LOG_LEVEL, 4);
+Esp8266BaseLog::enableFileSink("/logs/app.log", 16 * 1024);
 ```
 
-4×16KB 通常足够定位现场问题，同时不会让 `/logs` 页面过慢。日志特别多时可以调高单段大小，但会增加 LittleFS 占用和页面读取时间。
+4×16KB 通常足够定位现场问题，同时不会让 `/logs` 页面过慢。正式固件建议文件日志保持默认 WARN，磨损和页面读取成本都低；调试样例可使用 INFO，并启用 512B/2s 低优先级缓存减少 DEBUG/INFO 的小写入次数。日志特别多时可以调高单段大小，但会增加 LittleFS 占用和页面读取时间。

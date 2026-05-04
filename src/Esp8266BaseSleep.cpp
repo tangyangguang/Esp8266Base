@@ -86,6 +86,7 @@ void Esp8266BaseSleep::deepSleep(uint32_t sleepSec) {
 
     // 预飞：flush Config（确保待写数据落盘）
     Esp8266BaseConfig::flush();
+    Esp8266BaseLog::flushFileSink();
 
     // 预飞：断开 WiFi
     WiFi.disconnect(true);

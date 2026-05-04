@@ -140,6 +140,9 @@ build_flags =
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 0=D 1=I 2=W 3=E 4=关闭 |
+| `ESP8266BASE_LOG_FILE_LEVEL` | `2` | 文件日志默认等级，默认 WARN |
+| `ESP8266BASE_LOG_FILE_BUFFER_SIZE` | `WARN 以下为 512，否则 0` | DEBUG/INFO 文件日志低优先级缓存 |
+| `ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
@@ -170,12 +173,12 @@ OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Bas
 可选文件日志和配置审计：
 
 ```cpp
-Esp8266BaseLog::enableFileSink("/logs/app.log", 16384, ESP8266BASE_LOG_LEVEL, 4);
+Esp8266BaseLog::enableFileSink("/logs/app.log", 16384);
 Esp8266BaseLog::enableConfigAudit(true);
 Esp8266BaseLog::enableConfigReadAudit(false);
 ```
 
-默认不开文件日志和配置审计，仍然只输出 Serial。启用文件日志后，启动会话、WARN/ERROR 和普通日志都会写入 LittleFS 文件。文件 sink 默认 4 段轮转；轮转或追加异常时优先恢复写入能力，允许极端情况下丢少量日志，但避免日志功能长期失效。`full_demo` 使用 4×16KB。完整逻辑见 `docs/07_observability.md`。
+默认不开文件日志和配置审计，仍然只输出 Serial。启用文件日志后，文件等级默认 WARN；WARN/ERROR 始终立即写入 LittleFS 文件。文件等级低于 WARN 且编译期启用缓存时，DEBUG/INFO 会先进入低优先级缓存，默认 512B 或 2s 刷盘；默认 WARN 不编译该缓存，无额外 512B RAM 占用。文件 sink 默认 4 段轮转；轮转或追加异常时优先恢复写入能力，允许极端情况下丢少量日志，但避免日志功能长期失效。`full_demo` 使用 INFO 文件日志和 4×16KB，用于调试演示。完整逻辑见 `docs/07_observability.md`。
 
 ---
 
