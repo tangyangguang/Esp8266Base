@@ -26,6 +26,10 @@
 #define ESP8266BASE_CFG_STR_MAX 96
 #endif
 
+#ifndef ESP8266BASE_CFG_FORMAT_ON_FAIL
+#define ESP8266BASE_CFG_FORMAT_ON_FAIL 0
+#endif
+
 class Esp8266BaseConfig {
 public:
     // 挂载 LittleFS，初始化 deferred 队列

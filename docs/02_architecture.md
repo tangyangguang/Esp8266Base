@@ -69,7 +69,7 @@ Esp8266Base（主入口）
 ```text
 1. Esp8266BaseLog::begin()          — 最先，保证后续日志可输出
 2. Esp8266BaseSleep::begin()        — 读取唤醒原因（须在 Config 前）
-3. Esp8266BaseConfig::begin()       — 挂载 LittleFS；首次挂载失败时自动 format 后重试
+3. Esp8266BaseConfig::begin()       — 挂载 LittleFS；默认不自动格式化
 4. Esp8266BaseWiFi::begin()         — 读取凭证并缓存，启动状态机（非阻塞）
 5. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
 6. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）
@@ -135,7 +135,7 @@ ESP8266WebServer（端口 80）
   │     GET  /wifi
   │     POST /wifi
   │     GET  /ota
-  │     POST /ota        ──► Esp8266BaseOTA 处理（页面登录后上传，不额外校验）
+  │     POST /ota        ──► Esp8266BaseOTA 处理（强制 Basic Auth）
   │     GET  /reboot      ──► 确认页
   │     POST /reboot      ──► flush Config 后重启
   │     GET  /health

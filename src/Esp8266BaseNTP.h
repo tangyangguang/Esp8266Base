@@ -19,6 +19,18 @@
 #define ESP8266BASE_NTP_SYNC_INTERVAL 3600  // 秒
 #endif
 
+#ifndef ESP8266BASE_NTP_SERVER_1
+#define ESP8266BASE_NTP_SERVER_1 "ntp.aliyun.com"
+#endif
+
+#ifndef ESP8266BASE_NTP_SERVER_2
+#define ESP8266BASE_NTP_SERVER_2 "ntp.tencent.com"
+#endif
+
+#ifndef ESP8266BASE_NTP_SERVER_3
+#define ESP8266BASE_NTP_SERVER_3 "cn.pool.ntp.org"
+#endif
+
 class Esp8266BaseNTP {
 public:
     // 配置 NTP 并启动 SNTP 客户端（WiFi 连接后自动同步）
@@ -26,6 +38,9 @@ public:
 
     // 每轮检查同步状态，成功后切换 Log 时间格式（仅执行一次切换）
     static void handle();
+
+    // WiFi 断开时调用，释放 UDP 并让下次连接重新 begin()
+    static void reset();
 
     static bool     isSynced();
     static uint32_t timestamp();                                   // Unix 时间戳，未同步返回 0

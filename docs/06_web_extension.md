@@ -182,7 +182,9 @@ void handleFanPage() {
 
 公开接口（如健康检查）可不调用 `checkAuth()`。
 
-`verifyAuth()` 仅验证不发 401，供需要在接收数据前检测认证的场景使用。内置 OTA 上传 POST 不做额外认证，认证只发生在 `/ota` 页面 GET。
+`verifyAuth()` 仅验证不发 401，供需要在接收数据前检测认证的场景使用。内置 OTA 上传 POST 会在上传开始时调用它；未认证请求返回 `401 Unauthorized`。
+
+应用代码不要用 `Esp8266BaseWeb::server().on(...)` 直接注册路由。直接注册会绕过静态路由表、请求标记和 RAM 预算统计；页面使用 `addPage()`，API 使用 `addApi()`。
 
 ---
 

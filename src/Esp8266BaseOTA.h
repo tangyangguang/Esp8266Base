@@ -7,9 +7,9 @@
 // 依赖 Esp8266BaseWeb 已通过 begin() 启动
 // 注册 POST /ota 路由（与 GET /ota 由 Web 模块处理的页面配合）
 // 上传期间自动 pause/resume Watchdog，每块后调用 yield()
-// /ota 页面复用 Esp8266BaseWeb 的 Basic Auth；上传 POST 不做额外认证
+// /ota 页面和上传 POST 都使用 Esp8266BaseWeb 的 Basic Auth
 //
-// RAM 预算：<= 128B
+// RAM 预算：<= 136B
 // ----------------------------------------------------------------------------
 
 class Esp8266BaseOTA {
@@ -23,6 +23,9 @@ public:
 
 private:
     static bool _inProgress;  // 1B
+    static bool _rejected;    // 1B：认证或 Update 初始化失败后拒绝后续块
+    static bool _started;     // 1B：本次 POST 是否收到固件起始块
+    static uint16_t _status;  // 2B：上传完成时返回的 HTTP 状态码
 
     // 静态回调函数（注册给 ESP8266WebServer，无捕获，无 std::function 驻留堆）
     static void _handleUploadComplete();

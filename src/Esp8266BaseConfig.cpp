@@ -9,7 +9,7 @@ Esp8266BaseConfig::DeferredEntry
     Esp8266BaseConfig::_deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 bool Esp8266BaseConfig::_ready = false;
 
-// 用于读写的共享临时缓冲（与 Web 模块共用，不重复计入预算）
+// 用于读写的小型临时缓冲（Config 模块私有，非重入）
 // 注意：只在 handle/begin 期间使用，非重入
 static char _cfgBuf[ESP8266BASE_CFG_STR_MAX + 1];
 
@@ -23,15 +23,24 @@ bool Esp8266BaseConfig::begin() {
     }
 
     if (!LittleFS.begin()) {
-        // First boot or corrupted FS: format and retry
-        ESP8266BASE_LOG_W("Cfg ", "LittleFS mount failed, formatting...");
+        ESP8266BASE_LOG_W("Cfg ", "littlefs_mount_failed retrying");
+        delay(50);
+        if (!LittleFS.begin()) {
+#if ESP8266BASE_CFG_FORMAT_ON_FAIL
+        ESP8266BASE_LOG_W("Cfg ", "littlefs_mount_failed formatting_enabled=yes");
         LittleFS.format();
         if (!LittleFS.begin()) {
-            ESP8266BASE_LOG_E("Cfg ", "LittleFS mount failed after format");
+            ESP8266BASE_LOG_E("Cfg ", "littlefs_mount_failed_after_format");
             _ready = false;
             return false;
         }
-        ESP8266BASE_LOG_I("Cfg ", "LittleFS formatted OK");
+        ESP8266BASE_LOG_I("Cfg ", "littlefs_formatted result=success");
+#else
+            ESP8266BASE_LOG_E("Cfg ", "littlefs_mount_failed formatting_enabled=no config_disabled=yes");
+            _ready = false;
+            return false;
+#endif
+        }
     }
 
     _ready = true;
@@ -232,13 +241,15 @@ bool Esp8266BaseConfig::flush() {
 
 bool Esp8266BaseConfig::clearAll() {
     if (!_ready) return false;
-    flush();
+    for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
+        _deferred[i].used = false;
+    }
 
     bool ok = true;
     Dir dir = LittleFS.openDir("/");
     while (dir.next()) {
         String name = dir.fileName();
-        if (name.startsWith("/cfg_")) {
+        if (name.startsWith("/cfg_") || name.startsWith("cfg_")) {
             if (!LittleFS.remove(name)) {
                 ok = false;
                 ESP8266BASE_LOG_W("Cfg ", "remove failed path=%s", name.c_str());
@@ -247,9 +258,6 @@ bool Esp8266BaseConfig::clearAll() {
         }
     }
 
-    for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
-        _deferred[i].used = false;
-    }
     ESP8266BASE_LOG_I("Cfg ", "clear_all_config_files result=%s", ok ? "success" : "partial_failure");
     return ok;
 }

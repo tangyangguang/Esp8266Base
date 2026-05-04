@@ -93,6 +93,9 @@ void Esp8266Base::handle() {
     if (!_ntpWasTriggered && wifiNow) {
         Esp8266BaseNTP::begin();
         _ntpWasTriggered = true;
+    } else if (_ntpWasTriggered && !wifiNow) {
+        Esp8266BaseNTP::reset();
+        _ntpWasTriggered = false;
     }
 #endif
 #if ESP8266BASE_USE_MDNS

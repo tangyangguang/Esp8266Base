@@ -15,7 +15,7 @@
 // ----------------------------------------------------------------------------
 
 #ifndef ESP8266BASE_WDT_TIMEOUT_MS
-#define ESP8266BASE_WDT_TIMEOUT_MS 2000   // 默认 2 秒
+#define ESP8266BASE_WDT_TIMEOUT_MS 2500   // 默认 2.5 秒
 #endif
 
 class Esp8266BaseWatchdog {

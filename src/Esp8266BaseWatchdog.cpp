@@ -3,6 +3,7 @@
 #include "Esp8266BaseWatchdog.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseLog.h"
+#include <user_interface.h>
 
 // ----------------------------------------------------------------------------
 // 静态成员定义
@@ -27,13 +28,21 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     _resetCount  = (uint32_t)Esp8266BaseConfig::getInt("wdt_count");
     int pending  = Esp8266BaseConfig::getInt("wdt_pending");
 
-    if (pending) {
+    rst_info* ri = ESP.getResetInfoPtr();
+    bool resetReasonIsWdt = ri && (ri->reason == REASON_SOFT_WDT_RST || ri->reason == REASON_WDT_RST);
+
+    if (pending && resetReasonIsWdt) {
         _wasWdtReset = true;
         // 清除 pending 标志，避免下次误判
         Esp8266BaseConfig::setInt("wdt_pending", 0);
         ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u", (unsigned)_resetCount);
     } else {
         _wasWdtReset = false;
+        if (pending) {
+            Esp8266BaseConfig::setInt("wdt_pending", 0);
+            ESP8266BASE_LOG_W("WDT ", "stale_watchdog_pending_cleared reset_reason=%u reset_count=%u",
+                              ri ? (unsigned)ri->reason : 0, (unsigned)_resetCount);
+        }
     }
 
     _lastFeedMs = millis();

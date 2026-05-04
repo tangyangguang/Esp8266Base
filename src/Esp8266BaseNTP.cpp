@@ -28,10 +28,11 @@ static const uint16_t NTP_LOCAL_PORT = 2390;
 static const uint32_t NTP_EPOCH_DELTA = 2208988800UL;
 
 // NTP 服务器列表（全部在 Flash）
-static const char NTP_S1[] PROGMEM = "ntp.aliyun.com";
-static const char NTP_S2[] PROGMEM = "ntp.tencent.com";
-static const char NTP_S3[] PROGMEM = "cn.pool.ntp.org";
+static const char NTP_S1[] PROGMEM = ESP8266BASE_NTP_SERVER_1;
+static const char NTP_S2[] PROGMEM = ESP8266BASE_NTP_SERVER_2;
+static const char NTP_S3[] PROGMEM = ESP8266BASE_NTP_SERVER_3;
 static const char* const NTP_SERVERS[] PROGMEM = { NTP_S1, NTP_S2, NTP_S3 };
+static const uint8_t NTP_SERVER_COUNT = sizeof(NTP_SERVERS) / sizeof(NTP_SERVERS[0]);
 
 // ----------------------------------------------------------------------------
 // begin
@@ -101,6 +102,19 @@ void Esp8266BaseNTP::handle() {
     }
 }
 
+void Esp8266BaseNTP::reset() {
+    _ntpUdp.stop();
+    _synced = false;
+    _lastCheckMs = 0;
+    _lastPendingLogMs = 0;
+    _startedMs = 0;
+    _nextManualMs = 0;
+    _manualSentMs = 0;
+    _manualServer = 0;
+    _manualWaiting = false;
+    ESP8266BASE_LOG_I("NTP ", "ntp_client_reset reason=wifi_disconnected");
+}
+
 bool Esp8266BaseNTP::_pollManual(uint32_t now) {
     int packetSize = _ntpUdp.parsePacket();
     if (packetSize >= 48) {
@@ -132,7 +146,7 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
         ESP8266BASE_LOG_W("NTP ", "manual_ntp_timeout server_index=%u ip=%s timeout=3s",
                           (unsigned)_manualServer, _manualIp.toString().c_str());
         _manualWaiting = false;
-        _manualServer = (_manualServer + 1) % 3;
+        _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
         _nextManualMs = now + 2000UL;
     }
     return false;
@@ -147,7 +161,7 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
 
     if (WiFi.hostByName(server, _manualIp) != 1 || !_manualIp.isSet()) {
         ESP8266BASE_LOG_W("NTP ", "manual_ntp_dns_failed server=%s", server);
-        _manualServer = (_manualServer + 1) % 3;
+        _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
         _nextManualMs = now + 5000UL;
         return;
     }
@@ -166,7 +180,7 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
     } else {
         ESP8266BASE_LOG_W("NTP ", "manual_ntp_send_failed server=%s ip=%s",
                           server, _manualIp.toString().c_str());
-        _manualServer = (_manualServer + 1) % 3;
+        _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
         _nextManualMs = now + 5000UL;
     }
 }
@@ -190,6 +204,10 @@ void Esp8266BaseNTP::_finishSync(time_t t) {
 
     ESP8266BASE_LOG_I("NTP ", "time_synchronized actual_time=%s uptime_ms=%lu boot_time=%s",
                       nowBuf, (unsigned long)uptimeMs, bootBuf);
+    ESP8266BASE_LOG_I("NTP ", "time_mapping boot_millis=0 actual_time=%s current_millis=%lu current_time=%s",
+                      bootBuf, (unsigned long)uptimeMs, nowBuf);
+    _ntpUdp.stop();
+    _manualWaiting = false;
 
     if (!_logSwitched) {
         _logSwitched = true;

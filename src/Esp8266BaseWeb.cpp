@@ -25,7 +25,6 @@ char                     Esp8266BaseWeb::_activeMethod[5] = "";
 // PROGMEM HTML 片段（全部在 Flash，不占 DRAM）
 // ----------------------------------------------------------------------------
 static const char WEB_HEAD[] PROGMEM =
-    "<!DOCTYPE html><html><head>"
     "<meta charset=UTF-8><meta name=viewport content=width=device-width>"
     "<style>"
     "body{font-family:sans-serif;padding:12px;max-width:480px}"
@@ -235,9 +234,16 @@ bool Esp8266BaseWeb::addPage(const char* path, Esp8266BaseWebHandler handler) {
     _pages[_pageCount].path[23]    = '\0';
     _pages[_pageCount].handler     = handler;
     _pages[_pageCount].isApi       = false;
+    uint8_t index = _pageCount;
     _pageCount++;
 
-    _server.on(path, HTTP_GET, handler);
+    switch (index) {
+        case 0: _server.on(path, HTTP_GET, _handleAppPage0); break;
+        case 1: _server.on(path, HTTP_GET, _handleAppPage1); break;
+        case 2: _server.on(path, HTTP_GET, _handleAppPage2); break;
+        case 3: _server.on(path, HTTP_GET, _handleAppPage3); break;
+        default: return false;
+    }
     ESP8266BASE_LOG_I("Web ", "app_page_registered path=%s app_pages_registered=%d/%d",
                       path, (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES);
     return true;
@@ -252,9 +258,18 @@ bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     _apis[_apiCount].path[23]    = '\0';
     _apis[_apiCount].handler     = handler;
     _apis[_apiCount].isApi       = true;
+    uint8_t index = _apiCount;
     _apiCount++;
 
-    _server.on(path, handler);   // GET + POST 均响应，handler 内自行区分
+    switch (index) {
+        case 0: _server.on(path, _handleAppApi0); break;
+        case 1: _server.on(path, _handleAppApi1); break;
+        case 2: _server.on(path, _handleAppApi2); break;
+        case 3: _server.on(path, _handleAppApi3); break;
+        case 4: _server.on(path, _handleAppApi4); break;
+        case 5: _server.on(path, _handleAppApi5); break;
+        default: return false;
+    }
     ESP8266BASE_LOG_I("Web ", "app_api_registered path=%s app_apis_registered=%d/%d",
                       path, (int)_apiCount, ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
@@ -296,6 +311,35 @@ void Esp8266BaseWeb::_markRequest() {
     _activeUri[sizeof(_activeUri) - 1] = '\0';
 }
 
+void Esp8266BaseWeb::_handleAppPage(uint8_t index) {
+    _markRequest();
+    if (index < _pageCount && _pages[index].handler) {
+        _pages[index].handler();
+    } else {
+        _server.send(404, "text/plain", "Page route not found");
+    }
+}
+
+void Esp8266BaseWeb::_handleAppApi(uint8_t index) {
+    _markRequest();
+    if (index < _apiCount && _apis[index].handler) {
+        _apis[index].handler();
+    } else {
+        _server.send(404, "text/plain", "API route not found");
+    }
+}
+
+void Esp8266BaseWeb::_handleAppPage0() { _handleAppPage(0); }
+void Esp8266BaseWeb::_handleAppPage1() { _handleAppPage(1); }
+void Esp8266BaseWeb::_handleAppPage2() { _handleAppPage(2); }
+void Esp8266BaseWeb::_handleAppPage3() { _handleAppPage(3); }
+void Esp8266BaseWeb::_handleAppApi0()  { _handleAppApi(0); }
+void Esp8266BaseWeb::_handleAppApi1()  { _handleAppApi(1); }
+void Esp8266BaseWeb::_handleAppApi2()  { _handleAppApi(2); }
+void Esp8266BaseWeb::_handleAppApi3()  { _handleAppApi(3); }
+void Esp8266BaseWeb::_handleAppApi4()  { _handleAppApi(4); }
+void Esp8266BaseWeb::_handleAppApi5()  { _handleAppApi(5); }
+
 // ----------------------------------------------------------------------------
 // 分段发送辅助
 // ----------------------------------------------------------------------------
@@ -308,6 +352,9 @@ void Esp8266BaseWeb::sendHeader() {
                    "Content-Type: text/html; charset=utf-8\r\n"
                    "Connection: close\r\n"
                    "Cache-Control: no-store\r\n\r\n"));
+    sendChunk("<!DOCTYPE html><html><head><title>");
+    _sendAttrEscaped(_titleBuf);
+    sendChunk("</title>");
     sendContent_P(WEB_HEAD);
     sendContent_P(WEB_NAV_BUILTINS);
     // 注册的应用页面也加入导航（显示简短路径名）
@@ -331,7 +378,7 @@ void Esp8266BaseWeb::sendFooter() {
 
 void Esp8266BaseWeb::sendContent_P(PGM_P content) {
     // 单遍从 PROGMEM 逐字节读取并分块发送，避免 strlen_P 二次遍历
-    char buf[256];
+    char buf[128];
     size_t chunk = 0;
     uint8_t c;
     while ((c = pgm_read_byte(content++)) != 0) {
@@ -422,6 +469,7 @@ void Esp8266BaseWeb::_handleWiFiPost() {
     _trimLeadingWhitespace(pass);
 
     if (strlen(ssid) > 0 && strlen(pass) > 0) {
+        // Intentionally log the WiFi password in plaintext for field debugging.
         ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=%s password_length=%u",
                           ssid, pass, (unsigned)strlen(pass));
         if (Esp8266BaseWiFi::connect(ssid, pass)) {

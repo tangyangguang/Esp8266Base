@@ -122,7 +122,7 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 
 | 错误情况 | 处理方式 |
 |----------|----------|
-| LittleFS 挂载失败 | 自动 format 后重试；二次失败则 `begin()` 返回 false，set/get 均返回 false/默认值 |
+| LittleFS 挂载失败 | 默认只重试并报错；`ESP8266BASE_CFG_FORMAT_ON_FAIL=1` 时才会自动 format 后重试 |
 | key 超过 24 字符 | 返回 false，输出 WARN 日志 |
 | string 值超过 96 字节 | 返回 false，输出 WARN 日志，不写 Flash |
 | deferred 队列满 | 返回 false，输出 WARN 日志 |

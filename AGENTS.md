@@ -126,14 +126,16 @@ Handlers must be plain functions or captureless lambdas (lambdas with captures c
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | Deferred write queue depth |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | Watchdog timeout |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | UTC offset in seconds (UTC+8) |
-| `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `15000` | ms before switching to AP mode |
+| `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | ms for one STA connection attempt before scheduling retry |
 
 Log macros (`ESP8266BASE_LOG_D/I/W/E`) are compiled out entirely when the level is below the threshold — zero runtime cost.
+
+WiFi credential logs intentionally include plaintext passwords for field debugging. Do not classify this as a bug in this project unless the product policy changes.
 
 ## WiFi Behavior
 
 - No saved credentials → immediately enters AP config mode (SSID: `ESP8266-<hostname>`)
-- Credentials saved but connection fails after timeout → falls back to AP config mode
+- Credentials saved but connection fails after timeout → stays in STA mode and retries forever with backoff
 - Reconnect intervals: 15s fast retry, then 60s slow retry
 - mDNS and NTP only activate after WiFi STA connects
 
@@ -149,4 +151,4 @@ The script only defines `MEMORY` regions and filesystem `PROVIDE` symbols, then 
 
 ## LittleFS First Boot
 
-`Esp8266BaseConfig::begin()` calls `LittleFS.format()` then retries mount on first failure. This handles fresh chips where the filesystem has never been formatted. The framework's `LittleFS.begin()` takes no arguments (unlike ESP32).
+`Esp8266BaseConfig::begin()` retries `LittleFS.begin()` once and does not format by default. Automatic format is allowed only when `ESP8266BASE_CFG_FORMAT_ON_FAIL=1` is explicitly set. The framework's `LittleFS.begin()` takes no arguments (unlike ESP32).

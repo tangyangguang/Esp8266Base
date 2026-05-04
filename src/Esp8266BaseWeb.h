@@ -21,6 +21,14 @@
 #define ESP8266BASE_WEB_MAX_APP_APIS 6
 #endif
 
+#if ESP8266BASE_WEB_MAX_APP_PAGES > 4
+#error "ESP8266BASE_WEB_MAX_APP_PAGES cannot exceed 4"
+#endif
+
+#if ESP8266BASE_WEB_MAX_APP_APIS > 6
+#error "ESP8266BASE_WEB_MAX_APP_APIS cannot exceed 6"
+#endif
+
 #ifndef ESP8266BASE_WEB_AUTH_USER
 #define ESP8266BASE_WEB_AUTH_USER "admin"
 #endif
@@ -78,6 +86,18 @@ private:
 
     // 内置路由处理函数（静态，无捕获）
     static void _markRequest();
+    static void _handleAppPage(uint8_t index);
+    static void _handleAppApi(uint8_t index);
+    static void _handleAppPage0();
+    static void _handleAppPage1();
+    static void _handleAppPage2();
+    static void _handleAppPage3();
+    static void _handleAppApi0();
+    static void _handleAppApi1();
+    static void _handleAppApi2();
+    static void _handleAppApi3();
+    static void _handleAppApi4();
+    static void _handleAppApi5();
     static void _handleRoot();
     static void _handleWiFiGet();
     static void _handleWiFiPost();

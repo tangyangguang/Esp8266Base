@@ -142,14 +142,24 @@ build_flags =
 | `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面上限 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 上限 |
+| `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 用户名 |
+| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 密码，正式固件应覆盖 |
+| `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化；正式固件建议保持关闭 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时 ms |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
+| `ESP8266BASE_NTP_SERVER_1..3` | 阿里云/腾讯云/cn.pool | NTP 服务器 |
 | `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST` | `5000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数，之后进入慢速重试 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
 
 根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为默认构建入口；各示例目录提供独立的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
+
+WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。需要重新进入 AP 配网时，先清除 WiFi 凭证再重启。
+
+OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
+
+日志策略：WiFi 相关日志会有意输出 SSID 和密码明文，并同时输出 `password_length`。这是为了现场观察和调试连接问题的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
 
 ---
 

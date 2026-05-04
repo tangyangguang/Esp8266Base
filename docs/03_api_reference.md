@@ -153,7 +153,7 @@ ESP8266BASE_LOG_E("Cfg ", "Failed to save key=%s", key);
 ```cpp
 static bool begin();
 ```
-挂载 LittleFS。首次挂载失败时自动 format 后重试。返回 `false` 表示文件系统不可用。
+挂载 LittleFS。默认不会在挂载失败时自动格式化，避免损坏或临时异常时误删配置；若编译时设置 `ESP8266BASE_CFG_FORMAT_ON_FAIL=1`，挂载重试失败后会格式化并再次挂载。返回 `false` 表示文件系统不可用。
 
 ```cpp
 static bool setStr(const char* key, const char* value);
@@ -340,7 +340,7 @@ static bool checkAuth();
 ```cpp
 static bool verifyAuth();
 ```
-仅验证 Basic Auth，不发送 401 响应。OTA 上传不再调用此函数做二次认证。
+仅验证 Basic Auth，不发送 401 响应。OTA 上传在接收固件前会调用此函数；未通过认证时返回 `401 Unauthorized`。
 
 ```cpp
 static void setAuth(const char* user, const char* pass);
@@ -357,7 +357,7 @@ static bool isRunning();
 | `/wifi` | GET | WiFi 设置表单 |
 | `/wifi` | POST | 保存凭证并重连；成功或失败后 `303` 跳回 GET 页面，避免刷新重复提交 |
 | `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度） |
-| `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，不额外校验 Basic Auth） |
+| `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，强制 Basic Auth） |
 | `/reboot` | GET | 重启确认页 |
 | `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
@@ -404,7 +404,7 @@ OTA 上传是否正在进行。
 ### OTA 行为
 
 1. GET /ota 页面使用 Web Basic Auth；页面内用 XMLHttpRequest 上传并显示进度
-2. POST /ota 不做额外 Basic Auth 校验，避免 multipart upload 被二次认证拒绝
+2. POST /ota 在上传开始时强制验证 Basic Auth；未认证请求返回 `401 Unauthorized`
 3. 上传开始：`Esp8266BaseWatchdog::pause()`，调用 `Update.begin(ESP.getFreeSketchSpace())`
 4. 上传期间：分块写入固件，每块后 `yield()`
 5. 上传完成：`Esp8266BaseWatchdog::resume()`，延迟 500ms 后 `ESP.restart()`
@@ -428,6 +428,7 @@ static bool begin();
 ```cpp
 static void handle();
 ```
+WiFi 断开后主入口会调用 `reset()` 释放 UDP socket；WiFi 重连后会重新 `begin()`。对时成功后日志会输出当前实际时间，并输出 `boot_millis=0` 对应的估算实际启动时间，方便把对时前的 `[millis]` 日志换算为实际日期时间。
 检查同步状态。系统 SNTP 或库内主动 UDP NTP 任一路径成功后，都会设置系统时间，并自动调用 `Esp8266BaseLog::setTimeProvider()` 切换日志时间格式。首次同步会记录实际时间、启动后毫秒数和推算出的本次启动时间，便于换算同步前的日志。
 
 ```cpp
@@ -640,8 +641,10 @@ void loop() {
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大注册数 |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 用户名 |
 | `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 密码 |
+| `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化 |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8 = 8×3600） |
 | `ESP8266BASE_NTP_SYNC_INTERVAL` | `3600` | NTP 重新同步间隔（秒） |
+| `ESP8266BASE_NTP_SERVER_1..3` | 中国镜像服务器 | NTP 服务器 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
 | `ESP8266BASE_CFG_KEY_MAX` | `24` | Config key 最大字符数 |
