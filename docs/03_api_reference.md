@@ -245,7 +245,7 @@ static void enableConfigReadAudit(bool enabled);
 
 配置存储设计见 `docs/05_config_storage.md`。
 
-配置审计默认关闭。启用写审计后，`setStr` / `setInt` / `setBool` / deferred enqueue / flush 会记录 key、old/new、changed/no_change、immediate/deferred、result。启用读审计后，`getStr` / `getInt` / `getBool` 会记录读取结果；读审计默认建议关闭，避免高频页面/API 刷屏。审计日志不做任何敏感 key 特殊处理，所有值直接输出。
+配置审计默认关闭。启用写审计后，`setStr` / `setInt` / `setBool` / deferred enqueue / flush 会记录 key、old/new、changed/no_change、immediate/deferred、result。启用读审计后，`getStr` / `getInt` / `getBool` 会记录读取结果；读审计默认日志等级是 DEBUG，可用 `ESP8266BASE_CFG_READ_AUDIT_LEVEL` 调整。普通 INFO 构建不会输出大量读审计日志，避免启动和页面/API 高频读取变慢。审计日志不做任何敏感 key 特殊处理，所有值直接输出。
 
 ### 约束
 
@@ -687,6 +687,7 @@ void loop() {
 | `ESP8266BASE_LOG_FILE_LEVEL` | `2` | 文件日志默认等级，默认 WARN |
 | `ESP8266BASE_LOG_FILE_BUFFER_SIZE` | `WARN 以下为 512，否则 0` | DEBUG/INFO 文件日志低优先级缓存；最大 512B |
 | `ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
+| `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |

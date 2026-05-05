@@ -30,6 +30,10 @@
 #define ESP8266BASE_CFG_FORMAT_ON_FAIL 0
 #endif
 
+#ifndef ESP8266BASE_CFG_READ_AUDIT_LEVEL
+#define ESP8266BASE_CFG_READ_AUDIT_LEVEL 0   // DEBUG by default
+#endif
+
 // 库保留配置 key 统一使用 eb_ 前缀，业务项目不要复用。
 #define ESP8266BASE_CFG_KEY_WIFI_SSID    "eb_wifi_ssid"
 #define ESP8266BASE_CFG_KEY_WIFI_PASS    "eb_wifi_pass"
@@ -109,5 +113,6 @@ private:
     static bool _enqueue(const char* key, int32_t iv, bool bv, uint8_t type);
     static void _flushOne();
     static bool _setStrInternal(const char* op, const char* key, const char* value);
+    static bool _getStrInternal(const char* key, char* out, size_t len, const char* def, bool audit);
     static void _auditRead(const char* op, const char* key, const char* value, bool found);
 };

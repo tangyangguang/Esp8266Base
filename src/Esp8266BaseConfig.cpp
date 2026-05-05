@@ -258,9 +258,13 @@ bool Esp8266BaseConfig::_setStrInternal(const char* op, const char* key, const c
 
 void Esp8266BaseConfig::_auditRead(const char* op, const char* key, const char* value, bool found) {
     if (!_readAuditEnabled) return;
-    ESP8266BASE_LOG_I("Cfg ", "config_audit op=%s key=%s found=%s value=%s",
-                      op, key ? key : "(null)", found ? "yes" : "no",
-                      value ? value : "");
+#if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_CFG_READ_AUDIT_LEVEL
+    Esp8266BaseLog::log(ESP8266BASE_CFG_READ_AUDIT_LEVEL,
+                        "Cfg ",
+                        "config_audit op=%s key=%s found=%s value=%s",
+                        op, key ? key : "(null)", found ? "yes" : "no",
+                        value ? value : "");
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -270,7 +274,7 @@ bool Esp8266BaseConfig::setStr(const char* key, const char* value) {
     return _setStrInternal("setStr", key, value);
 }
 
-bool Esp8266BaseConfig::getStr(const char* key, char* out, size_t len, const char* def) {
+bool Esp8266BaseConfig::_getStrInternal(const char* key, char* out, size_t len, const char* def, bool audit) {
     if (!out || len == 0) return false;
 
     // 无论成功与否都要保证 out 有合法字符串
@@ -279,19 +283,27 @@ bool Esp8266BaseConfig::getStr(const char* key, char* out, size_t len, const cha
         else     { out[0] = '\0'; }
     };
 
-    if (!_ready) { _setDefault(); _auditRead("getStr", key, out, false); return false; }
+    if (!_ready) { _setDefault(); if (audit) _auditRead("getStr", key, out, false); return false; }
 
     char path[ESP8266BASE_CFG_KEY_MAX + 6];
-    if (!_buildPath(key, path, sizeof(path))) { _setDefault(); _auditRead("getStr", key, out, false); return false; }
+    if (!_buildPath(key, path, sizeof(path))) {
+        _setDefault();
+        if (audit) _auditRead("getStr", key, out, false);
+        return false;
+    }
 
     if (_readRaw(path, out, len)) {
-        _auditRead("getStr", key, out, true);
+        if (audit) _auditRead("getStr", key, out, true);
         return true;
     }
 
     _setDefault();
-    _auditRead("getStr", key, out, false);
+    if (audit) _auditRead("getStr", key, out, false);
     return false;
+}
+
+bool Esp8266BaseConfig::getStr(const char* key, char* out, size_t len, const char* def) {
+    return _getStrInternal(key, out, len, def, true);
 }
 
 // ----------------------------------------------------------------------------
@@ -305,19 +317,17 @@ bool Esp8266BaseConfig::setInt(const char* key, int32_t value) {
 
 int32_t Esp8266BaseConfig::getInt(const char* key, int32_t def) {
     char buf[12] = "";
-    bool found = getStr(key, buf, sizeof(buf), nullptr);
+    bool found = _getStrInternal(key, buf, sizeof(buf), nullptr, false);
     if (!found || buf[0] == '\0') {
-        if (_readAuditEnabled) {
-            ESP8266BASE_LOG_I("Cfg ", "config_audit op=getInt key=%s found=no value=%ld",
-                              key ? key : "(null)", (long)def);
-        }
+        char val[12];
+        snprintf(val, sizeof(val), "%ld", (long)def);
+        _auditRead("getInt", key, val, false);
         return def;
     }
     int32_t v = (int32_t)atol(buf);
-    if (_readAuditEnabled) {
-        ESP8266BASE_LOG_I("Cfg ", "config_audit op=getInt key=%s found=yes value=%ld",
-                          key ? key : "(null)", (long)v);
-    }
+    char val[12];
+    snprintf(val, sizeof(val), "%ld", (long)v);
+    _auditRead("getInt", key, val, true);
     return v;
 }
 
@@ -330,19 +340,13 @@ bool Esp8266BaseConfig::setBool(const char* key, bool value) {
 
 bool Esp8266BaseConfig::getBool(const char* key, bool def) {
     char buf[4] = "";
-    bool found = getStr(key, buf, sizeof(buf), nullptr);
+    bool found = _getStrInternal(key, buf, sizeof(buf), nullptr, false);
     if (!found || buf[0] == '\0') {
-        if (_readAuditEnabled) {
-            ESP8266BASE_LOG_I("Cfg ", "config_audit op=getBool key=%s found=no value=%s",
-                              key ? key : "(null)", def ? "true" : "false");
-        }
+        _auditRead("getBool", key, def ? "true" : "false", false);
         return def;
     }
     bool v = (buf[0] == '1');
-    if (_readAuditEnabled) {
-        ESP8266BASE_LOG_I("Cfg ", "config_audit op=getBool key=%s found=yes value=%s",
-                          key ? key : "(null)", v ? "true" : "false");
-    }
+    _auditRead("getBool", key, v ? "true" : "false", true);
     return v;
 }
 
