@@ -82,7 +82,7 @@ struct DeferredEntry {
 static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 ```
 
-`handle()` 每轮最多写 1 条；同一 key 重复写入只保留最新值（覆盖队列中已有条目）。
+`handle()` 到达 `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` 间隔后最多写 1 条；同一 key 重复写入只保留最新值（覆盖队列中已有条目）。默认间隔为 5000ms，用于避免业务计数器每轮变化时持续刷写 Flash。
 
 ---
 
@@ -96,8 +96,8 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | `eb_wifi_pass` | string | WiFi STA 密码 | 立即 |
 | `eb_ap_pass` | string | AP 配网密码 | 立即 |
 | `eb_hostname` | string | 设备 hostname | 立即 |
-| `eb_web_user` | string | Web Auth 用户名 | 立即 |
-| `eb_web_pass` | string | Web Auth 密码 | 立即 |
+| `eb_web_user` | string | Web Auth 持久化用户名，覆盖默认用户名 | 立即 |
+| `eb_web_pass` | string | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 | 立即 |
 | `eb_wdt_count` | int32 | WDT 重启累计次数 | deferred |
 | `eb_wdt_pending` | bool | 上次是否 WDT 重启 | 立即 |
 | `eb_boot_count` | uint32 string | 启动次数，库自动维护，达到 4,294,967,295 后饱和 | immediate |
@@ -112,8 +112,8 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 **规则 2：写后 yield**  
 每次 Flash 写入完成后，立即调用 `yield()`，给 SDK 喂狗和处理 WiFi 事件留出时间。
 
-**规则 3：分散写入**  
-`handle()` 每轮最多处理 1 条 deferred，不在单次 handle 中批量写多条。
+**规则 3：分散写入和节流**
+`handle()` 到达 deferred flush 间隔后最多处理 1 条 deferred，不在单次 handle 中批量写多条。业务每轮更新同一个 deferred key 时，只覆盖内存 pending 值，不会每轮写 Flash。
 
 **规则 4：深睡/重启前 flush**  
 进入 deep sleep 或调用 `ESP.restart()` 前，必须调用 `Esp8266BaseConfig::flush()` 写完所有 pending。

@@ -69,7 +69,8 @@ Config 正式配置写入必须使用安全策略：
 - 表单必须使用 `once(form)` 防重复提交。
 - 危险操作必须有 `confirm()`。
 - POST 成功后优先 `303 See Other` 回 GET。
-- 自定义页面通过 `addPage()`，API 通过 `addApi()`。
+- 自定义页面通过 `addPage(path, title, handler)`，API 通过 `addApi()`。
+- 业务主界面用 `setHomePath()` / `setHomeMode()` 配置；不要让业务项目手写根路径重定向或隐藏基础库导航。
 - 不直接使用 `server().on()` 注册业务路由。
 
 ---
@@ -80,7 +81,7 @@ Config 正式配置写入必须使用安全策略：
 - 配置审计不脱敏，直接输出 key/value。
 - WARN/ERROR 在 file sink 启用后必须进入文件。
 - NTP 同步后必须输出实际时间和 boot time 映射。
-- 启动会话必须有分割线、boot_count、reset reason、firmware、version、free heap。
+- 启动会话必须有分割线、boot_count、`boot_reason`、中文 `boot_desc`、firmware、version、人性化 free heap。
 
 ---
 
@@ -103,10 +104,10 @@ Config 正式配置写入必须使用安全策略：
 构建：
 
 ```bash
-pio run -e esp12f
-cd examples/full_demo && pio run -e esp12f
-git diff --check
+tools/test_all.sh
 ```
+
+`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、静态一致性检查、轻量逻辑检查、根项目 `esp12f` 编译和全部示例 `esp12f` 编译。需要额外验证非发布板型时运行 `tools/test_all.sh --all-envs`。
 
 硬件：
 

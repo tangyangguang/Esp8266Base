@@ -10,10 +10,11 @@
  *   - POST 请求参数解析示例
  *
  * 访问方式（设备连上 WiFi 后）：
+ *   http://esp-sensor.local/             业务首页（传感器页面）
  *   http://esp-sensor.local/sensor       传感器页面
+ *   http://esp-sensor.local/esp8266base  基础库系统首页
  *   http://esp-sensor.local/api/sensor   JSON 数据接口
  *   http://esp-sensor.local/api/control  控制接口（POST ?value=1）
- *   http://esp-sensor.local/             内置控制台（WiFi / OTA / 重启）
  *
  * 烧录方法（PlatformIO）：
  *   pio run -e esp12f -t upload
@@ -113,11 +114,19 @@ void setup() {
 
     Esp8266Base::setFirmwareInfo("custom-web", "0.2.0");
     Esp8266Base::setHostname("esp-sensor");
+    Esp8266BaseWeb::setDeviceName("Sensor Node");
+    Esp8266BaseWeb::setHomePath("/sensor");
+    Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);
+    Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode::FOOTER_COMPACT);
+    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "System");
+    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::WIFI, "Network");
+    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::OTA, "Update");
+    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Restart");
 
     Esp8266Base::begin();
 
     // 注册自定义路由（必须在 begin() 之后）
-    Esp8266BaseWeb::addPage("/sensor",      handleSensorPage);
+    Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
     Esp8266BaseWeb::addApi ("/api/sensor",  handleSensorApi);
     Esp8266BaseWeb::addApi ("/api/control", handleControlApi);
 }

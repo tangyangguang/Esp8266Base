@@ -117,7 +117,7 @@ Esp8266Base（主入口）
                                            ▼
                                      ┌────────────┐
                                      │ CONNECTING │
-                                     │ 前 3 次 5s  │
+                                     │ 前 3 次 2s  │
                                      │ 之后 60s    │
                                      └────────────┘
 ```
@@ -132,10 +132,15 @@ Esp8266Base（主入口）
 ESP8266WebServer（端口 80）
   ├── 内置路由（固定）
   │     GET  /
+  │     GET  /esp8266base
   │     GET  /wifi
   │     POST /wifi
+  │     GET  /auth
+  │     POST /auth       ──► 校验当前密码并保存 eb_web_pass
   │     GET  /ota
   │     POST /ota        ──► Esp8266BaseOTA 处理（强制 Basic Auth）
+  │     GET  /logs
+  │     POST /logs/clear ──► 清空文件日志
   │     GET  /reboot      ──► 确认页
   │     POST /reboot      ──► flush Config 后重启
   │     GET  /health
@@ -150,10 +155,12 @@ ESP8266WebServer（端口 80）
 ```cpp
 struct AppRoute {
     char                  path[24];   // 24B
+    char                  title[18];  // 18B
     Esp8266BaseWebHandler handler;    // 4B
-    bool                  isApi;      // 1B（+ 3B padding）
-};                                    // 32B per entry
-// 总计：4×32 + 6×32 = 320B
+    bool                  isApi;      // 1B
+    bool                  showInNav;  // 1B
+};                                    // 48B per entry
+// 总计：4×48 + 6×48 = 480B
 ```
 
 ---
@@ -186,7 +193,7 @@ struct DeferredEntry {
 static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 ```
 
-`handle()` 每轮最多写 1 条；`flush()` 强制写完所有 pending（deep sleep / restart 前调用）。
+`handle()` 到达 `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` 后最多写 1 条；同 key 高频更新只覆盖内存 pending 值。`flush()` 强制写完所有 pending（deep sleep / restart 前调用）。
 
 ---
 
@@ -195,9 +202,9 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | 模块 | 静态 RAM 预算 | 包含内容 |
 |------|--------------|----------|
 | Esp8266BaseLog | <= 160B | level(1B) + fn ptr(4B)；格式缓冲 128B 在栈上 |
-| Esp8266BaseConfig | <= 512B | deferred 队列 4×34B + 状态标志 + 读写缓冲 97B |
+| Esp8266BaseConfig | <= 512B | deferred 队列 4×34B + 状态标志 + deferred flush 计时器 + 读写缓冲 97B |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器 + _apSSID(28B) + _ip(16B) + _staSSID/Pass(128B) |
-| Esp8266BaseWeb（路由表） | <= 512B | AppRoute 数组 320B + auth(48B) + title(48B) + request trace(37B) + 状态 |
+| Esp8266BaseWeb（路由表） | <= 800B | AppRoute 数组 480B + auth(48B) + device/home/title(96B) + labels(96B) + request trace(37B) + 状态 |
 | Esp8266BaseOTA | <= 128B | _inProgress(1B) |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |

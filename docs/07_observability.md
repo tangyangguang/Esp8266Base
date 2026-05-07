@@ -192,9 +192,23 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 
 ```text
 [925][I][Boot] ============================================================
-[1055][I][Boot] BOOT SESSION START boot_count=1 reset_reason=power-on firmware=full-demo version=1.0.0 free_heap=40816
+[1055][I][Boot] boot_session_start boot_count=1
+[1062][I][Boot] boot_reason=power-on boot_desc=上电或外部复位
+[1070][I][Boot] firmware=full-demo version=1.0.0 free_heap=39.8 KB
 [1188][I][Boot] ============================================================
 ```
+
+`boot_reason` 是 ESP8266 SDK reset info 的归类结果，不输出 ESP32 风格的 `wake_reason`。当前映射：
+
+| boot_reason | boot_desc |
+|---|---|
+| `power-on` | 上电或外部复位 |
+| `deep-sleep` | 深度睡眠唤醒 |
+| `soft-restart` | 软件重启 |
+| `wdt-reset` | 看门狗重启 |
+| `unknown` | 未知启动原因 |
+
+无法识别的值统一输出 `unknown boot_desc=未知启动原因`，不会输出 `undefined`。
 
 `eb_boot_count` 使用无符号十进制字符串保存，达到 `4,294,967,295` 后饱和。
 
@@ -243,7 +257,10 @@ http://<device-ip>/logs
 - 单段上限
 - 总上限
 - 每段大小
-- history/current 内容
+- 文件标签：`current-0`、`history-1`、`history-2`、`history-3`
+- 当前选中日志段内容
+
+`/logs` 默认显示最新的 `current-0`，不会一次输出所有轮转段，避免 4 段都有内容时页面过大。点击顶部文件标签会访问 `/logs?seg=1`、`/logs?seg=2` 等，只切换当前展示的单个文件。
 
 ---
 

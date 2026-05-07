@@ -10,6 +10,7 @@ Esp8266BaseConfig::DeferredEntry
 bool Esp8266BaseConfig::_ready = false;
 bool Esp8266BaseConfig::_auditEnabled = false;
 bool Esp8266BaseConfig::_readAuditEnabled = false;
+uint32_t Esp8266BaseConfig::_lastDeferredFlushMs = 0;
 
 // ----------------------------------------------------------------------------
 // begin
@@ -19,6 +20,7 @@ bool Esp8266BaseConfig::begin() {
     for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
         _deferred[i].used = false;
     }
+    _lastDeferredFlushMs = millis();
 
     if (!LittleFS.begin()) {
         ESP8266BASE_LOG_W("Cfg ", "littlefs_mount_failed retrying");
@@ -42,7 +44,9 @@ bool Esp8266BaseConfig::begin() {
     }
 
     _ready = true;
-    ESP8266BASE_LOG_I("Cfg ", "config_storage_ready pending_writes=0/%d", ESP8266BASE_CFG_DEFERRED_SIZE);
+    ESP8266BASE_LOG_I("Cfg ", "config_storage_ready pending_writes=0/%d deferred_flush_interval=%lums",
+                      ESP8266BASE_CFG_DEFERRED_SIZE,
+                      (unsigned long)ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS);
     return true;
 }
 
@@ -202,6 +206,7 @@ void Esp8266BaseConfig::_flushOne() {
                 ok = setBool(_deferred[i].key, _deferred[i].boolVal);
             }
             _deferred[i].used = false;
+            _lastDeferredFlushMs = millis();
             if (_auditEnabled) {
                 ESP8266BASE_LOG_I("Cfg ", "config_audit op=flush_one key=%s type=%s value=%ld result=%s",
                                   key, type == 1 ? "int" : "bool",
@@ -382,6 +387,10 @@ bool Esp8266BaseConfig::setBoolDeferred(const char* key, bool value) {
 // ----------------------------------------------------------------------------
 void Esp8266BaseConfig::handle() {
     if (!_ready) return;
+    if (ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS > 0 &&
+        (uint32_t)(millis() - _lastDeferredFlushMs) < ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS) {
+        return;
+    }
     _flushOne();
 }
 
@@ -397,6 +406,7 @@ bool Esp8266BaseConfig::flush() {
                                   _deferred[i].key, ok ? "success" : "failed");
             }
             _deferred[i].used = false;
+            _lastDeferredFlushMs = millis();
         }
     }
     return true;

@@ -36,11 +36,15 @@ void setup() {
 
     Esp8266Base::setFirmwareInfo("my-device", "1.0.0");
     Esp8266Base::setHostname("esp-device");  // 访问 http://esp-device.local/
+    Esp8266BaseWeb::setDeviceName("Sensor Node");
+    Esp8266BaseWeb::setHomePath("/sensor");
+    Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);
+    Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode::FOOTER_COMPACT);
 
     Esp8266Base::begin();
 
     // 注册自定义页面（begin() 之后调用）
-    Esp8266BaseWeb::addPage("/sensor", handleSensorPage);
+    Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
 }
 
 void loop() {
@@ -49,6 +53,8 @@ void loop() {
 ```
 
 首次使用：设备以 AP 模式启动，SSID `ESP8266-Config-XXXX`，连接后访问 `http://192.168.4.1/` 配置 WiFi 凭证。
+
+业务项目可以把 `/` 配置为业务首页，基础库系统首页保留在 `/esp8266base`。未配置业务首页时，`/` 仍是 Esp8266Base 默认首页，保持开箱即用行为。
 
 ---
 
@@ -60,7 +66,7 @@ void loop() {
 | 日志 | `Esp8266BaseLog` | 串口日志、编译期等级、时间戳 |
 | 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
-| Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、应用扩展 |
+| Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
 | OTA | `Esp8266BaseOTA` | Web OTA 上传、进度显示、WDT 联动 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
@@ -74,6 +80,7 @@ void loop() {
 ```
 Esp8266Base/
 ├── README.md
+├── CHANGELOG.md                    # 面向业务项目的能力变化记录
 ├── library.json
 ├── docs/
 │   ├── 00_user_guide.md           # 使用者主线指南
@@ -105,6 +112,10 @@ Esp8266Base/
 │   ├── custom_web/                 # 自定义 Web 页面示例
 │   ├── sleep_watchdog/             # Sleep + Watchdog 示例
 │   └── full_demo/                  # 全模块演示（参考实现）
+├── tools/
+│   ├── test_all.sh                 # 必要自动化测试入口
+│   ├── check_static.sh             # 静态一致性检查
+│   └── check_logic.py              # 轻量逻辑检查
 └── partitions/
     └── esp8266-4mb-2mfs.ld         # 4MB Flash 分区脚本（2MB固件+2MB LittleFS）
 ```
@@ -152,13 +163,15 @@ build_flags =
 | `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面上限 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 上限 |
-| `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 用户名 |
-| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 密码，正式固件应覆盖 |
+| `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
+| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 编译期默认密码，正式固件应覆盖 |
 | `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化；正式固件建议保持关闭 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时 ms |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
 | `ESP8266BASE_NTP_SERVER_1..3` | 阿里云/腾讯云/cn.pool | NTP 服务器 |
+| `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` | `5000` | deferred 写入最小刷盘间隔 ms；设为 0 可每轮最多刷 1 条 |
 | `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
+| `ESP8266BASE_WIFI_STA_SETTLE_MS` | `150` | 切换 STA/断开旧状态后，调用 `WiFi.begin()` 前的稳定等待 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST` | `5000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数，之后进入慢速重试 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
@@ -166,6 +179,8 @@ build_flags =
 根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为默认构建入口；各示例目录提供独立的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
 
 WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。需要重新进入 AP 配网时，先清除 WiFi 凭证再重启。
+
+Web Auth 策略：认证默认值按 `ESP8266BASE_WEB_AUTH_USER/PASS` → `Esp8266BaseWeb::setDefaultAuth()` 的顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。内置 `/auth` 页面可修改密码，保存后立即使用新密码，`clearAll()` 后恢复默认值。
 
 OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
 
@@ -183,6 +198,24 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 
 ---
 
+## 自动化测试
+
+日常开发运行：
+
+```bash
+tools/test_all.sh
+```
+
+默认测试不烧录、不访问串口、不要求 ESP12F 在线。它会执行格式检查、静态一致性检查、轻量逻辑检查，并编译根项目和 5 个示例的 `esp12f` 环境。需要额外验证 `nodemcuv2` 编译时运行：
+
+```bash
+tools/test_all.sh --all-envs
+```
+
+硬件烧录、WiFi 配网、OTA、deep sleep、GPIO 按钮等仍属于人工验收，不纳入默认自动化测试。
+
+---
+
 ## 明确不支持
 
 - ESP32 / ESP32-S3 / ESP32-C3
@@ -197,9 +230,10 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 
 使用者建议顺序：
 
-1. `docs/00_user_guide.md` — 从零接入、配网、OTA、日志和 full_demo
-2. `docs/07_observability.md` — 日志、审计、文件轮转和时间映射
-3. `docs/10_troubleshooting.md` — 按现象排查问题
+1. `CHANGELOG.md` — 了解从 2026-05-06 起新增能力、行为变化和使用建议
+2. `docs/00_user_guide.md` — 从零接入、配网、OTA、日志和 full_demo
+3. `docs/07_observability.md` — 日志、审计、文件轮转和时间映射
+4. `docs/10_troubleshooting.md` — 按现象排查问题
 
 维护者建议顺序：
 

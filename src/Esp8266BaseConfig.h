@@ -18,6 +18,10 @@
 #define ESP8266BASE_CFG_DEFERRED_SIZE 4
 #endif
 
+#ifndef ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS
+#define ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS 5000
+#endif
+
 #ifndef ESP8266BASE_CFG_KEY_MAX
 #define ESP8266BASE_CFG_KEY_MAX 24
 #endif
@@ -69,7 +73,7 @@ public:
     static bool setIntDeferred(const char* key, int32_t value);
     static bool setBoolDeferred(const char* key, bool value);
 
-    // 每轮 loop 调用，最多写 1 条 pending 到 Flash
+    // 每轮 loop 调用，到达间隔后最多写 1 条 pending 到 Flash
     static void handle();
 
     // 强制写完所有 pending（deep sleep / 重启前调用）
@@ -105,6 +109,7 @@ private:
     static bool _ready;                                             // 1B
     static bool _auditEnabled;                                      // 1B
     static bool _readAuditEnabled;                                  // 1B
+    static uint32_t _lastDeferredFlushMs;                           // 4B
 
     // 内部辅助
     static bool _buildPath(const char* key, char* path, size_t pathLen);

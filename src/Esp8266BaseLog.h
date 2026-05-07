@@ -85,7 +85,7 @@ public:
     // 启动会话分割线，建议 Config 挂载后调用
     static void beginBootSession(const char* firmware,
                                  const char* version,
-                                 const char* resetReason,
+                                 const char* bootReason,
                                  uint32_t bootCount,
                                  uint32_t freeHeap);
 
@@ -115,6 +115,7 @@ private:
     // 格式缓冲 128B 在 log() 栈上分配，不存此处
 
     static const char* _levelName(uint8_t level);
+    static const char* _bootReasonDesc(const char* bootReason);
     static const char* _timestamp(char* buf, size_t len);
     static bool _segmentPath(uint8_t index, char* out, size_t len);
     static bool _ensureFileReady();

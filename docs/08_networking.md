@@ -62,8 +62,10 @@ station_connecting ssid=IOTHOME password=... password_length=11 keep_config_ap=n
 连接超时和重试会输出更完整的诊断字段：
 
 ```text
+station_connect_stuck_restarting ssid=IOTHOME status=WL_DISCONNECTED status_code=7 elapsed=7000ms restart_count=1 rssi=31
+station_connect_stuck_retrying ssid=IOTHOME status=WL_DISCONNECTED status_code=7 elapsed=7000ms restart_count=1 rssi=-72
 station_connect_timeout ssid=IOTHOME status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
-station_reconnect_scheduled attempt=1 retry_in=5s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
+station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
 ```
 
 `status` 是 `WiFi.status()` 的可读名称，`status_code` 是原始数值。常见值包括 `WL_NO_SSID_AVAIL`、`WL_CONNECT_FAILED`、`WL_CONNECTION_LOST`、`WL_DISCONNECTED`。
@@ -72,10 +74,12 @@ station_reconnect_scheduled attempt=1 retry_in=5s mode=fast status=WL_DISCONNECT
 
 | 阶段 | 间隔 |
 |---|---|
-| 前几次快速重试 | `ESP8266BASE_WIFI_RETRY_FAST`，默认 5s |
+| 前几次快速重试 | `ESP8266BASE_WIFI_RETRY_FAST`，默认 2s |
 | 超过快速次数后 | `ESP8266BASE_WIFI_RETRY_SLOW`，默认 60s |
 
-单次连接观察窗口为 `ESP8266BASE_WIFI_CONNECT_TIMEOUT`，默认 20s。
+单次连接观察窗口为 `ESP8266BASE_WIFI_CONNECT_TIMEOUT`，默认 20s。每次切换到 STA 并断开旧状态后，会等待 `ESP8266BASE_WIFI_STA_SETTLE_MS`，默认 150ms，再调用 `WiFi.begin()`；这用于降低 ESP8266 上电后首轮连接停在 `WL_DISCONNECTED` 的概率。
+
+如果连接开始后持续停在 `WL_DISCONNECTED` 且超过 `ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS`，默认 7s，本库会记录 `station_connect_stuck_restarting` 并提前重启本轮 `WiFi.begin()`，避免 ESP8266 WiFi SDK 卡住时白等完整 20s。每个连接 attempt 最多做 1 次 stuck restart；如果重启后仍然卡住，会记录 `station_connect_stuck_retrying` 并进入快速重试，不再继续等满 20s。
 
 ---
 
@@ -151,7 +155,7 @@ log_timestamp_mode=absolute_datetime
 | 现象 | 重点日志 |
 |---|---|
 | 进入 AP | `no_saved_wifi_credentials` |
-| 有凭证但没连上 | `station_connect_timeout`、`station_reconnect_scheduled` |
+| 有凭证但没连上 | `station_connect_stuck_restarting`、`station_connect_stuck_retrying`、`station_connect_timeout`、`station_reconnect_scheduled` |
 | 密码错误 | 明文 password 日志、路由器认证日志 |
 | mDNS 访问慢 | `mdns_started`、改用 IP 验证 |
 | NTP 不同步 | `ntp_sync_pending`、DNS/网关/UDP 123 |

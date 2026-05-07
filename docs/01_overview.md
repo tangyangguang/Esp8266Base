@@ -81,7 +81,7 @@ Esp8266Base/
 | 日志 | `Esp8266BaseLog` | 串口日志、编译期等级、时间戳 |
 | 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
-| Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、应用扩展 |
+| Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
 | OTA | `Esp8266BaseOTA` | Web OTA 上传、进度显示、WDT 联动 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
@@ -139,17 +139,21 @@ build_flags =
 | `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大数量 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大数量 |
-| `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 用户名 |
-| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 密码 |
+| `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
+| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 编译期默认密码 |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
+| `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` | `5000` | deferred 写入最小刷盘间隔 ms |
 | `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
-| `ESP8266BASE_WIFI_RETRY_FAST` | `5000` | WiFi 快速重试间隔 ms |
+| `ESP8266BASE_WIFI_STA_SETTLE_MS` | `150` | STA 切换后调用 `WiFi.begin()` 前的稳定等待 ms |
+| `ESP8266BASE_WIFI_RETRY_FAST` | `2000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
 
 根目录配置使用 `full_demo` 作为默认构建入口；单独编译示例时进入 `examples/<name>` 目录运行 `pio run -e esp12f`。上传统一使用 `460800` baud。
+
+必要自动化测试入口是 `tools/test_all.sh`。默认测试只做静态检查、轻量逻辑检查和 `esp12f` 编译矩阵，不烧录、不访问串口、不依赖硬件；`tools/test_all.sh --all-envs` 会额外编译 `nodemcuv2` 环境。
 
 ---
 

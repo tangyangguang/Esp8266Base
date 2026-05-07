@@ -132,14 +132,14 @@ static bool clearFileSink();
 static void handle();
 static void beginBootSession(const char* firmware,
                              const char* version,
-                             const char* resetReason,
+                             const char* bootReason,
                              uint32_t bootCount,
                              uint32_t freeHeap);
 static void enableConfigAudit(bool enabled);
 static void enableConfigReadAudit(bool enabled);
 ```
 
-默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。`enableFileSink()` 启用 LittleFS 文件日志，例如 `/logs/app.log`。`rotateFiles` 支持 1-4，默认 4；当前文件超过 `maxBytes` 时会轮转为 `/logs/app.log.1`，再逐步后移到 `.2`、`.3`，最多占用约 `maxBytes * rotateFiles`。`fileLevel` 默认 `ESP8266BASE_LOG_FILE_LEVEL`，库默认 WARN；WARN/ERROR 在 file sink 启用后始终写入文件，避免关键问题被过滤。编译期 `ESP8266BASE_LOG_FILE_BUFFER_SIZE>0` 且文件等级低于 WARN 时，DEBUG/INFO 会进入低优先级缓存，达到间隔或容量后刷盘；WARN/ERROR 立即刷盘。`flushFileSink()` 用于页面读取、重启、deep sleep、OTA 成功前强制落盘。不开 file sink 时不长期占用文件日志状态；默认 WARN 时也不编译低优先级缓存。`beginBootSession()` 输出人工可读分割线和启动摘要。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。完整说明见 `docs/07_observability.md`。
+默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。`enableFileSink()` 启用 LittleFS 文件日志，例如 `/logs/app.log`。`rotateFiles` 支持 1-4，默认 4；当前文件超过 `maxBytes` 时会轮转为 `/logs/app.log.1`，再逐步后移到 `.2`、`.3`，最多占用约 `maxBytes * rotateFiles`。`fileLevel` 默认 `ESP8266BASE_LOG_FILE_LEVEL`，库默认 WARN；WARN/ERROR 在 file sink 启用后始终写入文件，避免关键问题被过滤。编译期 `ESP8266BASE_LOG_FILE_BUFFER_SIZE>0` 且文件等级低于 WARN 时，DEBUG/INFO 会进入低优先级缓存，达到间隔或容量后刷盘；WARN/ERROR 立即刷盘。`flushFileSink()` 用于页面读取、重启、deep sleep、OTA 成功前强制落盘。不开 file sink 时不长期占用文件日志状态；默认 WARN 时也不编译低优先级缓存。`beginBootSession()` 输出多行启动会话摘要，`bootReason` 是 ESP8266 SDK reset info 的归类结果，日志字段为 `boot_reason` 和 `boot_desc`；无法识别时输出 `unknown` / `未知启动原因`，不会输出 `undefined`。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。完整说明见 `docs/07_observability.md`。
 
 ### 日志宏
 
@@ -223,7 +223,7 @@ static bool setBoolDeferred(const char* key, bool value);
 ```cpp
 static void handle();
 ```
-每轮最多刷 1 条 pending 写入。通过 `Esp8266Base::handle()` 自动调用。
+到达 `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` 间隔后最多刷 1 条 pending 写入。通过 `Esp8266Base::handle()` 自动调用。默认间隔 5000ms；设为 0 可恢复每轮最多刷 1 条的旧行为。
 
 ```cpp
 static bool flush();
@@ -252,6 +252,7 @@ static void enableConfigReadAudit(bool enabled);
 - key 最长 24 字符
 - string 值最长 96 字符
 - deferred 队列 4 条，满则拒绝新写入
+- deferred 默认每 5000ms 最多刷 1 条；同 key 高频更新只保留最新 pending 值
 - 每次写入后自动 `yield()`
 - OTA 期间不触发新的 deferred 写入
 
@@ -265,8 +266,8 @@ static void enableConfigReadAudit(bool enabled);
 | `eb_wifi_pass` | WiFi STA 密码 |
 | `eb_ap_pass` | AP 配网密码 |
 | `eb_hostname` | 设备 hostname |
-| `eb_web_user` | Web Auth 用户名 |
-| `eb_web_pass` | Web Auth 密码 |
+| `eb_web_user` | Web Auth 持久化用户名，覆盖默认用户名 |
+| `eb_web_pass` | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 |
 | `eb_wdt_count` | WDT 重启累计次数 |
 | `eb_wdt_pending` | 上次是否 WDT 重启 |
 | `eb_boot_count` | 启动次数，无符号十进制字符串，最大 4,294,967,295，达到上限后饱和 |
@@ -337,7 +338,9 @@ static const char* apSSID();
 | 参数 | 默认值 |
 |------|--------|
 | STA 连接观察窗口 | 20000ms（`ESP8266BASE_WIFI_CONNECT_TIMEOUT`） |
-| 快速重试间隔 | 5000ms（`ESP8266BASE_WIFI_RETRY_FAST`） |
+| STA 稳定等待 | 150ms（`ESP8266BASE_WIFI_STA_SETTLE_MS`） |
+| `WL_DISCONNECTED` 卡住恢复 | 7000ms（`ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS`） |
+| 快速重试间隔 | 2000ms（`ESP8266BASE_WIFI_RETRY_FAST`） |
 | 快速重试次数 | 3（`ESP8266BASE_WIFI_RETRY_FAST_COUNT`） |
 | 慢速重试间隔 | 60000ms（`ESP8266BASE_WIFI_RETRY_SLOW`） |
 | AP SSID | `ESP8266-Config-<ChipID后4位>` |
@@ -353,6 +356,27 @@ static const char* apSSID();
 
 ```cpp
 typedef void (*Esp8266BaseWebHandler)();
+
+enum class Esp8266BaseWebHomeMode : uint8_t {
+    DEFAULT_SYSTEM_HOME,
+    APP_HOME_FIRST,
+    FUSED_HOME
+};
+
+enum class Esp8266BaseWebSystemNavMode : uint8_t {
+    TOP_NAV,
+    BOTTOM_NAV,
+    FOOTER_COMPACT
+};
+
+enum class Esp8266BaseWebBuiltinLabel : uint8_t {
+    HOME,
+    WIFI,
+    OTA,
+    LOGS,
+    AUTH,
+    REBOOT
+};
 ```
 
 ### 函数
@@ -369,9 +393,36 @@ static void handle();
 
 ```cpp
 static bool addPage(const char* path, Esp8266BaseWebHandler handler);
+static bool addPage(const char* path, const char* title, Esp8266BaseWebHandler handler);
 static bool addApi (const char* path, Esp8266BaseWebHandler handler);
+static bool addNavItem(const char* path, const char* title);
 ```
-注册应用路由。必须在 `Esp8266Base::begin()` 之后调用。`addPage` 注册 GET，`addApi` 同时响应 GET 和 POST。路径最长 24 字符，上限分别 4 / 6 个。
+注册应用路由。必须在 `Esp8266Base::begin()` 之后调用。`addPage` 注册 GET 并默认加入业务导航；带 `title` 的重载用于设置导航标签。`addNavItem` 用于覆盖已注册页面的导航标签。`addApi` 同时响应 GET 和 POST。路径最长 24 字符，上限分别 4 / 6 个。
+
+```cpp
+static void setDeviceName(const char* name);
+static void setHomePath(const char* path);
+static void setHomeMode(Esp8266BaseWebHomeMode mode);
+static void setSystemNavMode(Esp8266BaseWebSystemNavMode mode);
+static void setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const char* title);
+```
+配置 Web 信息架构，通常在 `Esp8266Base::begin()` 前调用。`setDeviceName` 设置导航品牌显示名。`setHomePath` 设置业务首页路径。`setBuiltinLabel` 可覆盖 `Home/WiFi/OTA/Logs/Auth/Reboot` 的导航标签，便于中文本地化。
+
+首页模式：
+
+| 模式 | `/` 行为 | `/esp8266base` 行为 |
+|------|----------|---------------------|
+| `DEFAULT_SYSTEM_HOME` | Esp8266Base 默认系统首页 | Esp8266Base 默认系统首页 |
+| `APP_HOME_FIRST` | `303` 跳转到业务首页 | `303` 跳转到业务首页 |
+| `FUSED_HOME` | `303` 跳转到业务首页 | 保留为融合/系统首页 |
+
+系统导航位置：
+
+| 模式 | 行为 |
+|------|------|
+| `TOP_NAV` | 基础功能入口显示在顶部导航，默认行为 |
+| `BOTTOM_NAV` | 基础功能入口显示在页面内容下方 |
+| `FOOTER_COMPACT` | 基础功能入口以小字号轻量链接显示在 footer，与 `Free heap` 同区 |
 
 ```cpp
 static void sendHeader();
@@ -392,19 +443,32 @@ static bool verifyAuth();
 仅验证 Basic Auth，不发送 401 响应。OTA 上传在接收固件前会调用此函数；未通过认证时返回 `401 Unauthorized`。
 
 ```cpp
-static void setAuth(const char* user, const char* pass);
+static void setDefaultAuth(const char* user, const char* pass);
 static void setTitle(const char* hostname, const char* fw, const char* ver);
 static ESP8266WebServer& server();
 static bool isRunning();
 ```
 
+`setDefaultAuth()` 只设置 Web Basic Auth 默认值，必须在 `Esp8266Base::begin()` 前调用；Web 已启动后调用会被忽略。认证优先级为：
+
+| 优先级 | 来源 | 说明 |
+|---:|---|---|
+| 1 | `ESP8266BASE_WEB_AUTH_USER/PASS` | 编译期默认值 |
+| 2 | `setDefaultAuth(user, pass)` | 业务代码默认值，覆盖编译期默认值 |
+| 3 | `eb_web_user` / `eb_web_pass` | 设备持久化值，覆盖所有默认值 |
+
+内置 `/auth` 页面当前只修改 `eb_web_pass`，不修改用户名。保存成功后运行时立即使用新密码；`clearAll()` 删除配置后恢复为 `setDefaultAuth()` 或编译期默认值。
+
 ### 内置路由
 
 | 路由 | 方法 | 功能 |
 |------|------|------|
-| `/` | GET | 首页（WiFi 状态 + 功能链接） |
+| `/` | GET | 首页；可按 `setHomeMode()` 进入业务首页 |
+| `/esp8266base` | GET | 基础库系统首页；融合模式下保留为系统入口 |
 | `/wifi` | GET | WiFi 设置表单 |
 | `/wifi` | POST | 保存凭证并重连；成功或失败后 `303` 跳回 GET 页面，避免刷新重复提交 |
+| `/auth` | GET | 修改 Web Basic Auth 密码页面（需要 Basic Auth） |
+| `/auth` | POST | 校验当前密码并保存 `eb_web_pass`，成功后 `303` 回 `/auth?saved=1` |
 | `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度） |
 | `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，强制 Basic Auth） |
 | `/logs` | GET | 查看文件日志状态、大小和内容（需要 Basic Auth） |
@@ -696,18 +760,21 @@ void loop() {
 | `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大注册数 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大注册数 |
-| `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 用户名 |
-| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 密码 |
+| `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
+| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 编译期默认密码 |
 | `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化 |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8 = 8×3600） |
 | `ESP8266BASE_NTP_SYNC_INTERVAL` | `3600` | NTP 重新同步间隔（秒） |
 | `ESP8266BASE_NTP_SERVER_1..3` | 中国镜像服务器 | NTP 服务器 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
+| `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` | `5000` | deferred 写入最小刷盘间隔 ms |
 | `ESP8266BASE_CFG_KEY_MAX` | `24` | Config key 最大字符数 |
 | `ESP8266BASE_CFG_STR_MAX` | `96` | Config string value 最大字节数 |
 | `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
-| `ESP8266BASE_WIFI_RETRY_FAST` | `5000` | WiFi 快速重试间隔 ms |
+| `ESP8266BASE_WIFI_STA_SETTLE_MS` | `150` | 切换 STA/断开旧状态后，调用 `WiFi.begin()` 前的稳定等待 ms |
+| `ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS` | `7000` | STA 连接中持续 `WL_DISCONNECTED` 无进展时，提前重启本轮连接 |
+| `ESP8266BASE_WIFI_RETRY_FAST` | `2000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
 | `ESP8266BASE_SLEEP_MAX_DEEP_SEC` | `3600` | deepSleep 最大秒数上限 |

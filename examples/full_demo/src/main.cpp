@@ -414,6 +414,12 @@ void setup() {
 
     Esp8266Base::setFirmwareInfo("full-demo", "1.0.0");
     Esp8266Base::setHostname("esp-demo");
+    Esp8266BaseWeb::setDeviceName("Full Demo");
+    Esp8266BaseWeb::setHomePath("/demo");
+    Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);
+    Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode::FOOTER_COMPACT);
+    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "System");
+    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Restart");
 
     Esp8266Base::begin();
 
@@ -438,8 +444,8 @@ void setup() {
 
     // 注册路由（必须在 begin() 之后）
     // 2 页面 + 2 API，均在 4/6 上限内
-    Esp8266BaseWeb::addPage("/demo",     handleDemoPage);
-    Esp8266BaseWeb::addPage("/ctrl",     handleCtrlPage);
+    Esp8266BaseWeb::addPage("/demo",     "Demo",    handleDemoPage);
+    Esp8266BaseWeb::addPage("/ctrl",     "Control", handleCtrlPage);
     Esp8266BaseWeb::addApi("/api/demo",  handleDemoApi);
     Esp8266BaseWeb::addApi("/api/ctrl",  handleCtrlApi);
 

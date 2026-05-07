@@ -7,7 +7,7 @@
 
 ## 一、能力范围
 
-Web 模块提供轻量管理页面、Basic Auth、自定义页面/API 注册和流式 HTML 输出。OTA 模块基于 Web 模块注册 `POST /ota`，提供浏览器固件上传。
+Web 模块提供轻量管理页面、Basic Auth、内置改密、自定义页面/API 注册、业务导航/首页配置和流式 HTML 输出。OTA 模块基于 Web 模块注册 `POST /ota`，提供浏览器固件上传。
 
 ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
@@ -23,12 +23,15 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
 | 路由 | 方法 | 认证 | 说明 |
 |---|---|---|---|
-| `/` | GET | Basic Auth | 首页 |
+| `/` | GET | Basic Auth | 首页；可配置为跳转业务首页 |
+| `/esp8266base` | GET | Basic Auth | 基础库系统首页；融合模式下作为系统入口保留 |
 | `/wifi` | GET | Basic Auth | WiFi 配置页，回显 SSID/密码 |
 | `/wifi` | POST | Basic Auth | 保存 WiFi 凭证，提交后 303 回 GET |
+| `/auth` | GET | Basic Auth | 修改 Web Basic Auth 密码 |
+| `/auth` | POST | Basic Auth | 校验当前密码并保存 `eb_web_pass`，提交后 303 回 GET |
 | `/ota` | GET | Basic Auth | OTA 上传页，带进度显示 |
 | `/ota` | POST | Basic Auth | 固件上传，由 OTA 模块处理 |
-| `/logs` | GET | Basic Auth | 查看文件日志状态、文件等级、低优先级缓存状态和日志内容 |
+| `/logs` | GET | Basic Auth | 查看文件日志状态、文件等级、缓存状态和单个日志段内容 |
 | `/logs/clear` | POST | Basic Auth | 清空文件日志 |
 | `/reboot` | GET | Basic Auth | 重启确认页 |
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
@@ -38,7 +41,66 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
 ---
 
-## 三、表单防重复提交
+## 三、业务首页与导航
+
+默认不配置时，`/` 和 `/esp8266base` 都显示 Esp8266Base 系统首页，顶部导航包含内置系统页和应用页面。
+
+业务项目希望业务页面成为主界面时，在 `Esp8266Base::begin()` 前配置首页和导航模型，在 `begin()` 后注册页面：
+
+```cpp
+Esp8266BaseWeb::setDeviceName("Sensor Node");
+Esp8266BaseWeb::setHomePath("/sensor");
+Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);
+Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode::FOOTER_COMPACT);
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "System");
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::WIFI, "Network");
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::OTA, "Update");
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::AUTH, "Password");
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Restart");
+
+Esp8266Base::begin();
+Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
+```
+
+首页模式：
+
+| 模式 | `/` | `/esp8266base` |
+|---|---|---|
+| `DEFAULT_SYSTEM_HOME` | 系统首页 | 系统首页 |
+| `APP_HOME_FIRST` | `303` 到业务首页 | `303` 到业务首页 |
+| `FUSED_HOME` | `303` 到业务首页 | 系统首页 |
+
+系统导航模式：
+
+| 模式 | 说明 |
+|---|---|
+| `TOP_NAV` | 基础功能入口在顶部导航，适合基础库独立使用 |
+| `BOTTOM_NAV` | 基础功能入口在页面内容下方，降低视觉层级 |
+| `FOOTER_COMPACT` | 基础功能入口在 footer 中与 `Free heap` 同区，小字号、可换行，适合业务应用主界面 |
+
+`FOOTER_COMPACT` 不输出 “System Tools” 标题，不使用 `details/summary`，也不显示展开图标。桌面端系统入口和 `Free heap` 尽量同一行；窄屏下自然换行，避免横向滚动。
+
+---
+
+## 四、Web Auth 默认值与改密
+
+认证配置分三层：
+
+| 优先级 | 来源 | 说明 |
+|---:|---|---|
+| 1 | `ESP8266BASE_WEB_AUTH_USER/PASS` | 编译期默认用户名和密码 |
+| 2 | `Esp8266BaseWeb::setDefaultAuth(user, pass)` | 业务代码默认值，必须在 `Esp8266Base::begin()` 前设置 |
+| 3 | `eb_web_user` / `eb_web_pass` | 设备持久化值，优先级最高 |
+
+`setDefaultAuth()` 不是强制覆盖用户保存的密码。设备上已经保存 `eb_web_pass` 时，启动后会优先使用保存值。Web 已启动后再调用 `setDefaultAuth()` 会被忽略。
+
+`/auth` 页面用于修改密码，不修改用户名。页面字段包含当前密码、新密码、确认新密码；新密码不能为空，最长 23 字符，确认必须一致。保存成功后立即更新运行时密码并写入 `eb_web_pass`，随后 `303` 回 `/auth?saved=1`。浏览器如果仍缓存旧 Basic Auth，可能会在跳转后重新弹出认证框，这是预期行为。
+
+`clearAll()` 删除所有 `/cfg_*` 配置后，Web Auth 恢复为 `setDefaultAuth()` 设置的默认值；如果业务代码没有设置，则恢复为编译期宏默认值。
+
+---
+
+## 五、表单防重复提交
 
 `sendHeader()` 内置轻量 JS：
 
@@ -56,7 +118,7 @@ function once(f) {
 
 ---
 
-## 四、自定义页面/API
+## 六、自定义页面/API
 
 必须在 `Esp8266Base::begin()` 后注册：
 
@@ -70,7 +132,7 @@ void handlePage() {
 
 void setup() {
     Esp8266Base::begin();
-    Esp8266BaseWeb::addPage("/page", handlePage);
+    Esp8266BaseWeb::addPage("/page", "Page", handlePage);
 }
 ```
 
@@ -78,7 +140,7 @@ Handler 必须是普通函数或无捕获 lambda。不要直接调用 `server().
 
 ---
 
-## 五、RAM 安全写法
+## 七、RAM 安全写法
 
 规则：
 
@@ -110,7 +172,7 @@ void handleCtrlPage() {
 
 ---
 
-## 六、OTA 行为
+## 八、OTA 行为
 
 启用条件：
 
@@ -138,7 +200,7 @@ http://<device-ip>/ota
 
 ---
 
-## 七、失败模式
+## 九、失败模式
 
 | 现象 | 常见原因 | 处理 |
 |---|---|---|
@@ -150,7 +212,7 @@ http://<device-ip>/ota
 
 ---
 
-## 八、相关文档
+## 十、相关文档
 
 - 使用主线：`docs/00_user_guide.md`
 - API：`docs/03_api_reference.md`

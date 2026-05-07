@@ -18,9 +18,16 @@ uint8_t                  Esp8266BaseWeb::_apiCount  = 0;
 bool                     Esp8266BaseWeb::_running   = false;
 char                     Esp8266BaseWeb::_authUser[24] = ESP8266BASE_WEB_AUTH_USER;
 char                     Esp8266BaseWeb::_authPass[24] = ESP8266BASE_WEB_AUTH_PASS;
+char                     Esp8266BaseWeb::_deviceName[24] = "";
+char                     Esp8266BaseWeb::_homePath[24] = "";
 char                     Esp8266BaseWeb::_titleBuf[48] = "ESP8266";
 char                     Esp8266BaseWeb::_activeUri[32] = "";
 char                     Esp8266BaseWeb::_activeMethod[5] = "";
+char                     Esp8266BaseWeb::_builtinLabels[6][16] = {
+    "Home", "WiFi", "OTA", "Logs", "Auth", "Reboot"
+};
+Esp8266BaseWebHomeMode Esp8266BaseWeb::_homeMode = Esp8266BaseWebHomeMode::DEFAULT_SYSTEM_HOME;
+Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSystemNavMode::TOP_NAV;
 
 // ----------------------------------------------------------------------------
 // PROGMEM HTML 片段（全部在 Flash，不占 DRAM）
@@ -28,31 +35,34 @@ char                     Esp8266BaseWeb::_activeMethod[5] = "";
 static const char WEB_HEAD[] PROGMEM =
     "<meta charset=UTF-8><meta name=viewport content=width=device-width>"
     "<style>"
-    "body{font-family:sans-serif;padding:12px;max-width:480px}"
+    "body{font-family:sans-serif;padding:12px;max-width:560px}"
     "h2{margin:0 0 10px}"
     "a,input[type=submit]{background:#2678c8;color:#fff;padding:7px 12px;"
     "text-decoration:none;border:none;border-radius:3px;cursor:pointer;margin:2px 2px 2px 0}"
     "input:not([type=submit]){width:100%;padding:7px;margin:4px 0 12px;"
     "border:1px solid #ccc;border-radius:3px;box-sizing:border-box}"
-    "nav{margin-bottom:14px;border-bottom:1px solid #eee;padding-bottom:8px}"
-    "nav a{font-size:.88em}.ok{color:green}.err{color:red}"
-    ".info{color:#999;font-size:.8em;margin-top:16px}"
+    "nav{margin-bottom:14px;border-bottom:1px solid #eee;padding-bottom:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
+    "nav a{font-size:.88em}.brand{background:transparent;color:#222;font-weight:bold;padding-left:0}"
+    ".sysnav{margin-top:14px;padding-top:8px;border-top:1px solid #eee;display:flex;flex-wrap:wrap;gap:4px}"
+    ".tabs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
+    ".tabs a,.tabs b{background:#f4f4f4;color:#333;padding:4px 7px;border-radius:3px;"
+    "font-size:.85em;text-decoration:none;margin:0;font-weight:normal;white-space:nowrap}"
+    ".tabs b{background:#333;color:#fff}"
+    ".ok{color:green}.err{color:red}"
+    "footer{color:#999;font-size:.8em;margin-top:16px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}"
+    "footer .tools{flex:1 1 auto;display:flex;flex-wrap:wrap;gap:4px}"
+    "footer a{font-size:1em;background:#f4f4f4;color:#666;padding:3px 6px;border-radius:3px}"
+    "footer .heap{white-space:nowrap;margin-left:auto}"
     "</style>"
     "<script>"
     "function once(f){if(f.dataset.busy)return false;f.dataset.busy=1;"
     "var b=f.querySelector('[type=submit]');if(b)b.disabled=true;return true;}"
     "</script></head><body><nav>";
 
-static const char WEB_NAV_BUILTINS[] PROGMEM =
-    "<a href='/'>Home</a>"
-    "<a href='/wifi'>WiFi</a>"
-    "<a href='/ota'>OTA</a>"
-    "<a href='/logs'>Logs</a>"
-    "<a href='/reboot'>Reboot</a>";
-
 static const char WEB_NAV_END[]    PROGMEM = "</nav>";
-static const char WEB_FOOT_PRE[]   PROGMEM = "<div class=info>Free heap: ";
-static const char WEB_FOOT_POST[]  PROGMEM = "</div></body></html>";
+static const char WEB_FOOT_PRE[]   PROGMEM = "<footer>";
+static const char WEB_FOOT_HEAP_PRE[] PROGMEM = "<span class=heap>Free heap: ";
+static const char WEB_FOOT_POST[]  PROGMEM = "</span></footer></body></html>";
 
 static const char WEB_WIFI_FORM_PRE[] PROGMEM =
     "<h2>WiFi Settings</h2>"
@@ -96,6 +106,21 @@ static const char WEB_OTA_FORM[] PROGMEM =
     "x.onerror=function(){st.textContent='Upload failed: network error';document.getElementById('f').dataset.busy='';if(b)b.disabled=false;};"
     "x.open('POST','/ota');x.send(fd);return false;};"
     "</script>";
+
+static const char WEB_AUTH_FORM[] PROGMEM =
+    "<h2>Auth Password</h2>"
+    "<form method=post onsubmit=\""
+    "var c=this.current.value,n=this.newpass.value,r=this.confirm.value;"
+    "if(!c){alert('Current password cannot be empty');return false;}"
+    "if(!n){alert('New password cannot be empty');return false;}"
+    "if(n.length>23){alert('New password is too long');return false;}"
+    "if(n!=r){alert('Passwords do not match');return false;}"
+    "return once(this);\">"
+    "Current password<input type=password name=current maxlength=23 autocomplete=current-password required>"
+    "New password<input type=password name=newpass maxlength=23 autocomplete=new-password required>"
+    "Confirm new password<input type=password name=confirm maxlength=23 autocomplete=new-password required>"
+    "<input type=submit value='Update Password'>"
+    "</form>";
 
 static const char WEB_REBOOT_CONFIRM[] PROGMEM =
     "<h2>Reboot</h2>"
@@ -188,11 +213,14 @@ static void _sendLogFileEscaped(const char* path) {
 
 static void _sendLogSection(const char* label, const char* path, uint32_t size) {
     char sizeBuf[16];
-    char line[96];
     Esp8266BaseUtil::formatBytes(size, sizeBuf, sizeof(sizeBuf));
-    snprintf(line, sizeof(line), "\n\n----- %s file=%s size=%s -----\n",
-             label, path, sizeBuf);
-    Esp8266BaseWeb::sendChunk(line);
+    Esp8266BaseWeb::sendChunk("\n\n----- ");
+    Esp8266BaseWeb::sendChunk(label);
+    Esp8266BaseWeb::sendChunk(" file=");
+    Esp8266BaseWeb::sendChunk(path);
+    Esp8266BaseWeb::sendChunk(" size=");
+    Esp8266BaseWeb::sendChunk(sizeBuf);
+    Esp8266BaseWeb::sendChunk(" -----\n");
     _sendLogFileEscaped(path);
 }
 
@@ -202,16 +230,74 @@ static void _redirect(const char* url) {
     Esp8266BaseWeb::server().send(303);
 }
 
+static bool _isValidPath(const char* path) {
+    if (!path || path[0] != '/') return false;
+    size_t len = strlen(path);
+    return len > 1 && len < 24;
+}
+
+const char* Esp8266BaseWeb::_builtinLabel(Esp8266BaseWebBuiltinLabel label) {
+    return _builtinLabels[(uint8_t)label];
+}
+
+void Esp8266BaseWeb::_sendLink(const char* path, const char* title, const char* cls) {
+    Esp8266BaseWeb::sendChunk("<a href='");
+    Esp8266BaseWeb::sendChunk(path);
+    Esp8266BaseWeb::sendChunk("'");
+    if (cls && cls[0]) {
+        Esp8266BaseWeb::sendChunk(" class=");
+        Esp8266BaseWeb::sendChunk(cls);
+    }
+    Esp8266BaseWeb::sendChunk(">");
+    _sendAttrEscaped(title);
+    Esp8266BaseWeb::sendChunk("</a>");
+}
+
+const char* Esp8266BaseWeb::_brandTitle() {
+    return _deviceName[0] ? _deviceName : _titleBuf;
+}
+
+const char* Esp8266BaseWeb::_brandHref() {
+    return _homePath[0] ? _homePath : "/";
+}
+
+void Esp8266BaseWeb::_sendSystemLinks() {
+    const char* systemHome = "/";
+    if (_homeMode == Esp8266BaseWebHomeMode::APP_HOME_FIRST && _homePath[0]) {
+        systemHome = _homePath;
+    } else if (_homeMode == Esp8266BaseWebHomeMode::FUSED_HOME && _homePath[0]) {
+        systemHome = "/esp8266base";
+    }
+    _sendLink(systemHome, _builtinLabel(Esp8266BaseWebBuiltinLabel::HOME), nullptr);
+    _sendLink("/wifi", _builtinLabel(Esp8266BaseWebBuiltinLabel::WIFI), nullptr);
+    _sendLink("/ota", _builtinLabel(Esp8266BaseWebBuiltinLabel::OTA), nullptr);
+    _sendLink("/logs", _builtinLabel(Esp8266BaseWebBuiltinLabel::LOGS), nullptr);
+    _sendLink("/auth", _builtinLabel(Esp8266BaseWebBuiltinLabel::AUTH), nullptr);
+    _sendLink("/reboot", _builtinLabel(Esp8266BaseWebBuiltinLabel::REBOOT), nullptr);
+}
+
+void Esp8266BaseWeb::_sendAppLinks() {
+    for (uint8_t i = 0; i < _pageCount; i++) {
+        if (!_pages[i].showInNav) continue;
+        _sendLink(_pages[i].path, _pages[i].title, nullptr);
+    }
+}
+
 // ----------------------------------------------------------------------------
 // 公开 API
 // ----------------------------------------------------------------------------
 bool Esp8266BaseWeb::begin() {
     if (_running) return true;
 
+    _loadPersistedAuth();
+
     // 注册内置路由（静态成员函数指针，无捕获，无 std::function 对象驻留堆）
     _server.on("/",       HTTP_GET,  _handleRoot);
+    _server.on("/esp8266base", HTTP_GET, _handleSystemHome);
     _server.on("/wifi",   HTTP_GET,  _handleWiFiGet);
     _server.on("/wifi",   HTTP_POST, _handleWiFiPost);
+    _server.on("/auth",   HTTP_GET,  _handleAuthGet);
+    _server.on("/auth",   HTTP_POST, _handleAuthPost);
     _server.on("/ota",    HTTP_GET,  _handleOtaGet);
     // POST /ota 由 Esp8266BaseOTA::begin() 注册（需要 upload handler）
     _server.on("/logs",   HTTP_GET,  _handleLogsGet);
@@ -223,7 +309,7 @@ bool Esp8266BaseWeb::begin() {
 
     _server.begin();
     _running = true;
-    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=10 app_pages_registered=%d/%d app_apis_registered=%d/%d",
+    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=13 app_pages_registered=%d/%d app_apis_registered=%d/%d",
                       (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES,
                       (int)_apiCount,  ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
@@ -249,14 +335,25 @@ bool Esp8266BaseWeb::isRunning() {
 }
 
 bool Esp8266BaseWeb::addPage(const char* path, Esp8266BaseWebHandler handler) {
+    return addPage(path, nullptr, handler);
+}
+
+bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWebHandler handler) {
     if (!path || !handler) return false;
-    if (strlen(path) >= 24) { ESP8266BASE_LOG_W("Web ", "addPage path too long"); return false; }
+    if (!_isValidPath(path)) { ESP8266BASE_LOG_W("Web ", "addPage invalid path"); return false; }
     if (_pageCount >= ESP8266BASE_WEB_MAX_APP_PAGES) { ESP8266BASE_LOG_W("Web ", "addPage table full"); return false; }
 
     strncpy(_pages[_pageCount].path, path, 23);
     _pages[_pageCount].path[23]    = '\0';
+    if (title && title[0]) {
+        strncpy(_pages[_pageCount].title, title, sizeof(_pages[_pageCount].title) - 1);
+    } else {
+        strncpy(_pages[_pageCount].title, path + 1, sizeof(_pages[_pageCount].title) - 1);
+    }
+    _pages[_pageCount].title[sizeof(_pages[_pageCount].title) - 1] = '\0';
     _pages[_pageCount].handler     = handler;
     _pages[_pageCount].isApi       = false;
+    _pages[_pageCount].showInNav   = true;
     uint8_t index = _pageCount;
     _pageCount++;
 
@@ -267,20 +364,22 @@ bool Esp8266BaseWeb::addPage(const char* path, Esp8266BaseWebHandler handler) {
         case 3: _server.on(path, HTTP_GET, _handleAppPage3); break;
         default: return false;
     }
-    ESP8266BASE_LOG_I("Web ", "app_page_registered path=%s app_pages_registered=%d/%d",
-                      path, (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES);
+    ESP8266BASE_LOG_I("Web ", "app_page_registered path=%s title=%s app_pages_registered=%d/%d",
+                      path, _pages[index].title, (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES);
     return true;
 }
 
 bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     if (!path || !handler) return false;
-    if (strlen(path) >= 24) { ESP8266BASE_LOG_W("Web ", "addApi path too long"); return false; }
+    if (!_isValidPath(path)) { ESP8266BASE_LOG_W("Web ", "addApi invalid path"); return false; }
     if (_apiCount >= ESP8266BASE_WEB_MAX_APP_APIS) { ESP8266BASE_LOG_W("Web ", "addApi table full"); return false; }
 
     strncpy(_apis[_apiCount].path, path, 23);
     _apis[_apiCount].path[23]    = '\0';
+    _apis[_apiCount].title[0]    = '\0';
     _apis[_apiCount].handler     = handler;
     _apis[_apiCount].isApi       = true;
+    _apis[_apiCount].showInNav   = false;
     uint8_t index = _apiCount;
     _apiCount++;
 
@@ -298,7 +397,54 @@ bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     return true;
 }
 
-void Esp8266BaseWeb::setAuth(const char* user, const char* pass) {
+bool Esp8266BaseWeb::addNavItem(const char* path, const char* title) {
+    if (!_isValidPath(path) || !title || !title[0]) return false;
+    for (uint8_t i = 0; i < _pageCount; i++) {
+        if (strcmp(_pages[i].path, path) == 0) {
+            strncpy(_pages[i].title, title, sizeof(_pages[i].title) - 1);
+            _pages[i].title[sizeof(_pages[i].title) - 1] = '\0';
+            _pages[i].showInNav = true;
+            ESP8266BASE_LOG_I("Web ", "app_nav_registered path=%s title=%s", path, _pages[i].title);
+            return true;
+        }
+    }
+    ESP8266BASE_LOG_W("Web ", "addNavItem path not registered");
+    return false;
+}
+
+void Esp8266BaseWeb::setDeviceName(const char* name) {
+    if (!name) return;
+    strncpy(_deviceName, name, sizeof(_deviceName) - 1);
+    _deviceName[sizeof(_deviceName) - 1] = '\0';
+}
+
+void Esp8266BaseWeb::setHomePath(const char* path) {
+    if (!_isValidPath(path)) return;
+    strncpy(_homePath, path, sizeof(_homePath) - 1);
+    _homePath[sizeof(_homePath) - 1] = '\0';
+}
+
+void Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode mode) {
+    _homeMode = mode;
+}
+
+void Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode mode) {
+    _systemNavMode = mode;
+}
+
+void Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const char* title) {
+    if (!title) return;
+    uint8_t index = (uint8_t)label;
+    if (index >= 6) return;
+    strncpy(_builtinLabels[index], title, sizeof(_builtinLabels[index]) - 1);
+    _builtinLabels[index][sizeof(_builtinLabels[index]) - 1] = '\0';
+}
+
+void Esp8266BaseWeb::setDefaultAuth(const char* user, const char* pass) {
+    if (_running) {
+        ESP8266BASE_LOG_W("Web ", "set_default_auth_ignored reason=web_already_running");
+        return;
+    }
     if (user) { strncpy(_authUser, user, 23); _authUser[23] = '\0'; }
     if (pass) { strncpy(_authPass, pass, 23); _authPass[23] = '\0'; }
 }
@@ -322,6 +468,30 @@ bool Esp8266BaseWeb::checkAuth() {
 
 bool Esp8266BaseWeb::verifyAuth() {
     return _server.authenticate(_authUser, _authPass);
+}
+
+void Esp8266BaseWeb::_loadPersistedAuth() {
+    char user[24] = "";
+    char pass[24] = "";
+    bool userFound = false;
+    bool passFound = false;
+    if (Esp8266BaseConfig::isReady()) {
+        userFound = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WEB_USER, user, sizeof(user), "");
+        passFound = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WEB_PASS, pass, sizeof(pass), "");
+    }
+    if (userFound && user[0]) {
+        strncpy(_authUser, user, sizeof(_authUser) - 1);
+        _authUser[sizeof(_authUser) - 1] = '\0';
+    }
+    if (passFound && pass[0]) {
+        strncpy(_authPass, pass, sizeof(_authPass) - 1);
+        _authPass[sizeof(_authPass) - 1] = '\0';
+    }
+    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s password=%s user_source=%s pass_source=%s password_length=%u",
+                      _authUser, _authPass,
+                      (userFound && user[0]) ? "persisted" : "default",
+                      (passFound && pass[0]) ? "persisted" : "default",
+                      (unsigned)strlen(_authPass));
 }
 
 void Esp8266BaseWeb::_markRequest() {
@@ -378,18 +548,27 @@ void Esp8266BaseWeb::sendHeader() {
     _sendAttrEscaped(_titleBuf);
     sendChunk("</title>");
     sendContent_P(WEB_HEAD);
-    sendContent_P(WEB_NAV_BUILTINS);
-    // 注册的应用页面也加入导航（显示简短路径名）
-    for (uint8_t i = 0; i < _pageCount; i++) {
-        snprintf(_wb, sizeof(_wb), "<a href='%s'>%s</a>",
-                 _pages[i].path, _pages[i].path + 1);
-        sendChunk(_wb);
+    _sendLink(_brandHref(), _brandTitle(), "brand");
+    _sendAppLinks();
+    if (_systemNavMode == Esp8266BaseWebSystemNavMode::TOP_NAV) {
+        _sendSystemLinks();
     }
     sendContent_P(WEB_NAV_END);
 }
 
 void Esp8266BaseWeb::sendFooter() {
+    if (_systemNavMode == Esp8266BaseWebSystemNavMode::BOTTOM_NAV) {
+        sendChunk("<div class=sysnav>");
+        _sendSystemLinks();
+        sendChunk("</div>");
+    }
     sendContent_P(WEB_FOOT_PRE);
+    if (_systemNavMode == Esp8266BaseWebSystemNavMode::FOOTER_COMPACT) {
+        sendChunk("<span class=tools>");
+        _sendSystemLinks();
+        sendChunk("</span>");
+    }
+    sendContent_P(WEB_FOOT_HEAP_PRE);
     Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), _wb, sizeof(_wb));
     sendChunk(_wb);
     sendContent_P(WEB_FOOT_POST);
@@ -428,9 +607,23 @@ void Esp8266BaseWeb::sendChunk(const char* content) {
 // 内置路由处理函数
 // ----------------------------------------------------------------------------
 void Esp8266BaseWeb::_handleRoot() {
+    _markRequest();
+    if (_homePath[0] && _homeMode != Esp8266BaseWebHomeMode::DEFAULT_SYSTEM_HOME) {
+        _redirect(_homePath);
+        return;
+    }
+    _handleSystemHome();
+}
+
+void Esp8266BaseWeb::_handleSystemHome() {
+    _markRequest();
+    if (_homePath[0] && _homeMode == Esp8266BaseWebHomeMode::APP_HOME_FIRST) {
+        _redirect(_homePath);
+        return;
+    }
     if (!checkAuth()) return;
     sendHeader();
-        snprintf(_wb, sizeof(_wb), "<h2>%s</h2>", _titleBuf);
+    snprintf(_wb, sizeof(_wb), "<h2>%s</h2>", _brandTitle());
     sendChunk(_wb);
 
     if (Esp8266BaseWiFi::isConnected()) {
@@ -507,6 +700,86 @@ void Esp8266BaseWeb::_handleWiFiPost() {
     }
 }
 
+void Esp8266BaseWeb::_handleAuthGet() {
+    if (!checkAuth()) return;
+    sendHeader();
+    if (_server.hasArg("saved")) {
+        sendChunk("<p class=ok>Password saved. Use the new password for the next request.</p>");
+    } else if (_server.hasArg("error")) {
+        char err[24] = "";
+        strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
+        if (strcmp(err, "current") == 0) {
+            sendChunk("<p class=err>Current password is incorrect.</p>");
+        } else if (strcmp(err, "empty") == 0) {
+            sendChunk("<p class=err>New password cannot be empty.</p>");
+        } else if (strcmp(err, "too_long") == 0) {
+            sendChunk("<p class=err>New password is too long. Maximum length is 23.</p>");
+        } else if (strcmp(err, "mismatch") == 0) {
+            sendChunk("<p class=err>New password and confirmation do not match.</p>");
+        } else if (strcmp(err, "save_failed") == 0) {
+            sendChunk("<p class=err>Failed to save password.</p>");
+        } else {
+            sendChunk("<p class=err>Password was not saved.</p>");
+        }
+    }
+    sendContent_P(WEB_AUTH_FORM);
+    sendFooter();
+}
+
+void Esp8266BaseWeb::_handleAuthPost() {
+    if (!checkAuth()) return;
+    _markRequest();
+
+    const String currentArg = _server.arg("current");
+    const String newArg = _server.arg("newpass");
+    const String confirmArg = _server.arg("confirm");
+
+    if (newArg.length() == 0) {
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=empty");
+        _redirect("/auth?error=empty");
+        return;
+    }
+    if (newArg.length() > 23 || currentArg.length() > 23 || confirmArg.length() > 23) {
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=too_long current_length=%u new_length=%u confirm_length=%u",
+                          (unsigned)currentArg.length(), (unsigned)newArg.length(), (unsigned)confirmArg.length());
+        _redirect("/auth?error=too_long");
+        return;
+    }
+
+    char current[24] = "";
+    char newPass[24] = "";
+    char confirm[24] = "";
+    strncpy(current, currentArg.c_str(), sizeof(current) - 1);
+    strncpy(newPass, newArg.c_str(), sizeof(newPass) - 1);
+    strncpy(confirm, confirmArg.c_str(), sizeof(confirm) - 1);
+
+    if (strcmp(current, _authPass) != 0) {
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=current_password_mismatch current=%s expected=%s",
+                          current, _authPass);
+        _redirect("/auth?error=current");
+        return;
+    }
+    if (strcmp(newPass, confirm) != 0) {
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=mismatch new=%s confirm=%s",
+                          newPass, confirm);
+        _redirect("/auth?error=mismatch");
+        return;
+    }
+
+    if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WEB_PASS, newPass)) {
+        ESP8266BASE_LOG_E("Web ", "web_password_update_failed password=%s password_length=%u",
+                          newPass, (unsigned)strlen(newPass));
+        _redirect("/auth?error=save_failed");
+        return;
+    }
+
+    strncpy(_authPass, newPass, sizeof(_authPass) - 1);
+    _authPass[sizeof(_authPass) - 1] = '\0';
+    ESP8266BASE_LOG_I("Web ", "web_password_updated password=%s password_length=%u result=success",
+                      _authPass, (unsigned)strlen(_authPass));
+    _redirect("/auth?saved=1");
+}
+
 void Esp8266BaseWeb::_handleOtaGet() {
     if (!checkAuth()) return;
     sendHeader();
@@ -559,26 +832,62 @@ void Esp8266BaseWeb::_handleLogsGet() {
              maxBuf, totalBuf);
     sendChunk(_wb);
     sendChunk("<br>Segments: ");
-    for (int8_t i = (int8_t)Esp8266BaseLog::fileSinkRotateFiles() - 1; i >= 0; i--) {
+    for (uint8_t i = 0; i < Esp8266BaseLog::fileSinkRotateFiles(); i++) {
         char segBuf[16];
-        Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkSegmentSize((uint8_t)i),
-                                     segBuf, sizeof(segBuf));
-        snprintf(_wb, sizeof(_wb), "%s%u=%s", i == (int8_t)Esp8266BaseLog::fileSinkRotateFiles() - 1 ? "" : ", ",
-                 (unsigned)i, segBuf);
+        Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkSegmentSize(i), segBuf, sizeof(segBuf));
+        snprintf(_wb, sizeof(_wb), "%s%u=%s", i == 0 ? "" : ", ", (unsigned)i, segBuf);
         sendChunk(_wb);
+    }
+    sendChunk("</p>");
+
+    uint8_t selected = 0;
+    if (_server.hasArg("seg")) {
+        int v = _server.arg("seg").toInt();
+        if (v >= 0 && v < (int)Esp8266BaseLog::fileSinkRotateFiles()) {
+            selected = (uint8_t)v;
+        }
+    }
+
+    sendChunk("<p class=tabs><span>Files:</span> ");
+    for (uint8_t i = 0; i < Esp8266BaseLog::fileSinkRotateFiles(); i++) {
+        char segBuf[16];
+        Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkSegmentSize(i), segBuf, sizeof(segBuf));
+        if (i == selected) {
+            sendChunk("<b>");
+            if (i == 0) {
+                snprintf(_wb, sizeof(_wb), "current-0 (%s)", segBuf);
+            } else {
+                snprintf(_wb, sizeof(_wb), "history-%u (%s)", (unsigned)i, segBuf);
+            }
+            sendChunk(_wb);
+            sendChunk("</b>");
+        } else {
+            snprintf(_wb, sizeof(_wb), "<a href='/logs?seg=%u'>", (unsigned)i);
+            sendChunk(_wb);
+            if (i == 0) {
+                snprintf(_wb, sizeof(_wb), "current-0 (%s)", segBuf);
+            } else {
+                snprintf(_wb, sizeof(_wb), "history-%u (%s)", (unsigned)i, segBuf);
+            }
+            sendChunk(_wb);
+            sendChunk("</a>");
+        }
+        if (i + 1 < Esp8266BaseLog::fileSinkRotateFiles()) sendChunk(" ");
     }
     sendChunk("</p><pre>");
 
-    for (int8_t i = (int8_t)Esp8266BaseLog::fileSinkRotateFiles() - 1; i >= 1; i--) {
-        char path[36];
-        uint32_t sz = Esp8266BaseLog::fileSinkSegmentSize((uint8_t)i);
-        if (snprintf(path, sizeof(path), "%s.%u", Esp8266BaseLog::fileSinkPath(), (unsigned)i) < (int)sizeof(path)) {
-            snprintf(_wb, sizeof(_wb), "history-%u", (unsigned)i);
-            _sendLogSection(_wb, path, sz);
-        }
+    char selectedPath[36];
+    const char* selectedLabel = "current-0";
+    uint32_t selectedSize = Esp8266BaseLog::fileSinkSegmentSize(selected);
+    if (selected == 0) {
+        snprintf(selectedPath, sizeof(selectedPath), "%s", Esp8266BaseLog::fileSinkPath());
+    } else {
+        snprintf(selectedPath, sizeof(selectedPath), "%s.%u",
+                 Esp8266BaseLog::fileSinkPath(), (unsigned)selected);
+        snprintf(_wb, sizeof(_wb), "history-%u", (unsigned)selected);
+        selectedLabel = _wb;
     }
-    uint32_t size = Esp8266BaseLog::fileSinkSize();
-    _sendLogSection("current-0", Esp8266BaseLog::fileSinkPath(), size);
+    _sendLogSection(selectedLabel, selectedPath, selectedSize);
     sendChunk("</pre>");
     sendFooter();
 }

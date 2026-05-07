@@ -1,5 +1,6 @@
 #include "Esp8266BaseLog.h"
 #include "Esp8266BaseConfig.h"
+#include "Esp8266BaseUtil.h"
 #include <LittleFS.h>
 #include <stdarg.h>
 
@@ -73,9 +74,10 @@ bool Esp8266BaseLog::enableFileSink(const char* path,
 #endif
 
     _fileEnabled = true;
-    log(1, "Log ", "file_sink_enabled path=%s max_bytes=%lu rotate_files=%u file_level=%s(%u) low_priority_buffer=%s buffer_size=%u flush_interval_ms=%lu",
+    log(1, "Log ", "file_sink_enabled path=%s max_bytes=%lu rotate_files=%u file_level=%s(%u)",
         _filePath, (unsigned long)_fileMaxBytes,
-        (unsigned)_fileRotateFiles, _levelName(_fileLevel), (unsigned)_fileLevel,
+        (unsigned)_fileRotateFiles, _levelName(_fileLevel), (unsigned)_fileLevel);
+    log(1, "Log ", "file_sink_buffer low_priority=%s buffer_size=%u flush_interval_ms=%lu",
         fileSinkBufferEnabled() ? "enabled" : "disabled",
         (unsigned)fileSinkBufferSize(),
         (unsigned long)fileSinkFlushIntervalMs());
@@ -238,18 +240,39 @@ const char* Esp8266BaseLog::_levelName(uint8_t level) {
     }
 }
 
+const char* Esp8266BaseLog::_bootReasonDesc(const char* bootReason) {
+    if (!bootReason || strcmp(bootReason, "unknown") == 0) return "未知启动原因";
+    if (strcmp(bootReason, "power-on") == 0) return "上电或外部复位";
+    if (strcmp(bootReason, "deep-sleep") == 0) return "深度睡眠唤醒";
+    if (strcmp(bootReason, "soft-restart") == 0) return "软件重启";
+    if (strcmp(bootReason, "wdt-reset") == 0) return "看门狗重启";
+    return "未知启动原因";
+}
+
 void Esp8266BaseLog::beginBootSession(const char* firmware,
                                       const char* version,
-                                      const char* resetReason,
+                                      const char* bootReason,
                                       uint32_t bootCount,
                                       uint32_t freeHeap) {
+    const char* reason = (bootReason && bootReason[0] && strcmp(bootReason, "undefined") != 0)
+        ? bootReason
+        : "unknown";
+    if (strcmp(reason, "power-on") != 0 &&
+        strcmp(reason, "deep-sleep") != 0 &&
+        strcmp(reason, "soft-restart") != 0 &&
+        strcmp(reason, "wdt-reset") != 0 &&
+        strcmp(reason, "unknown") != 0) {
+        reason = "unknown";
+    }
+    char heapBuf[16];
+    Esp8266BaseUtil::formatBytes(freeHeap, heapBuf, sizeof(heapBuf));
     log(1, "Boot", "============================================================");
-    log(1, "Boot", "BOOT SESSION START boot_count=%lu reset_reason=%s firmware=%s version=%s free_heap=%lu",
-        (unsigned long)bootCount,
-        resetReason ? resetReason : "unknown",
+    log(1, "Boot", "boot_session_start boot_count=%lu", (unsigned long)bootCount);
+    log(1, "Boot", "boot_reason=%s boot_desc=%s", reason, _bootReasonDesc(reason));
+    log(1, "Boot", "firmware=%s version=%s free_heap=%s",
         firmware ? firmware : "",
         version ? version : "",
-        (unsigned long)freeHeap);
+        heapBuf);
     log(1, "Boot", "============================================================");
 }
 

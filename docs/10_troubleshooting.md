@@ -32,7 +32,7 @@
 ```text
 loaded_saved_wifi_credentials ssid=... password=... password_length=...
 station_connect_timeout ssid=... status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
-station_reconnect_scheduled attempt=1 retry_in=5s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
+station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
 ```
 
 可能原因：
