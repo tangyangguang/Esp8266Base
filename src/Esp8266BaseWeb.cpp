@@ -35,7 +35,7 @@ Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSyste
 static const char WEB_HEAD[] PROGMEM =
     "<meta charset=UTF-8><meta name=viewport content=width=device-width>"
     "<style>"
-    "body{font-family:sans-serif;padding:12px;max-width:560px}"
+    "body{font-family:sans-serif;padding:12px;max-width:760px}"
     "h2{margin:0 0 10px}"
     "a,input[type=submit]{background:#2678c8;color:#fff;padding:7px 12px;"
     "text-decoration:none;border:none;border-radius:3px;cursor:pointer;margin:2px 2px 2px 0}"
@@ -45,6 +45,7 @@ static const char WEB_HEAD[] PROGMEM =
     "nav a{font-size:.88em}.brand{background:transparent;color:#222;font-weight:bold;padding-left:0}"
     ".sysnav{margin-top:14px;padding-top:8px;border-top:1px solid #eee;display:flex;flex-wrap:wrap;gap:4px}"
     ".tabs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
+    ".tabs span{white-space:nowrap}"
     ".tabs a,.tabs b{background:#f4f4f4;color:#333;padding:4px 7px;border-radius:3px;"
     "font-size:.85em;text-decoration:none;margin:0;font-weight:normal;white-space:nowrap}"
     ".tabs b{background:#333;color:#fff}"
