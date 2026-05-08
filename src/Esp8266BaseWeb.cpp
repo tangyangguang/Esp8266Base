@@ -43,7 +43,8 @@ Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSyste
 static const char WEB_HEAD[] PROGMEM =
     "<meta charset=UTF-8><meta name=viewport content=width=device-width>"
     "<style>"
-    "body{font-family:sans-serif;padding:12px;max-width:760px;margin:0 auto}"
+    "body{font-family:sans-serif;padding:12px;max-width:760px;margin:0 auto;"
+    "font-size:14px;font-weight:normal;color:#222;line-height:1.45}"
     "h2{margin:0 0 10px}"
     "a,input[type=submit]{background:#2678c8;color:#fff;padding:7px 12px;"
     "text-decoration:none;border:none;border-radius:3px;cursor:pointer;margin:2px 2px 2px 0}"
@@ -56,6 +57,7 @@ static const char WEB_HEAD[] PROGMEM =
     "h3{margin:0 0 8px;font-size:1em}"
     "dl{margin:0;display:grid;grid-template-columns:82px 1fr;gap:5px 8px;font-size:14px}"
     "dt{color:#666}dd{margin:0;overflow-wrap:anywhere}"
+    "pre{font-size:14px;font-weight:normal;line-height:1.35}"
     ".sysnav{margin-top:14px;padding-top:8px;border-top:1px solid #eee;display:flex;flex-wrap:wrap;gap:4px}"
     ".tabs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
     ".tabs span{white-space:nowrap}"
@@ -899,7 +901,7 @@ void Esp8266BaseWeb::_handleLogsGet() {
     sendContent_P(WEB_LOGS_PRE);
 
     if (!Esp8266BaseLog::isFileSinkEnabled()) {
-        sendChunk("<p>File sink: <b>disabled</b></p>");
+        sendChunk("<p>File sink: disabled</p>");
         sendFooter();
         return;
     }
@@ -910,7 +912,7 @@ void Esp8266BaseWeb::_handleLogsGet() {
     Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkMaxBytes(), maxBuf, sizeof(maxBuf));
     Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkMaxBytes() * Esp8266BaseLog::fileSinkRotateFiles(),
                                  totalBuf, sizeof(totalBuf));
-    sendChunk("<p>File sink: <b>enabled</b><br>Path: ");
+    sendChunk("<p>File sink: enabled<br>Path: ");
     sendChunk(Esp8266BaseLog::fileSinkPath());
     snprintf(_wb, sizeof(_wb), "<br>Rotation files: %u<br>File level: %s (%u)",
              (unsigned)Esp8266BaseLog::fileSinkRotateFiles(),
