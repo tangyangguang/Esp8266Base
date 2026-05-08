@@ -10,7 +10,7 @@
 // Basic Auth 默认开启
 // HTML 全部放 PROGMEM，动态响应分段发送
 //
-// RAM 预算：<= 800B（路由表 + 导航配置 + 状态 + 认证字段）
+// RAM 预算：<= 880B（路由表 + 导航配置 + 状态 + 认证字段 + 首页系统信息）
 // ----------------------------------------------------------------------------
 
 #ifndef ESP8266BASE_WEB_MAX_APP_PAGES
@@ -91,8 +91,8 @@ public:
     // 暴露底层 server，供需要直接操作的 handler 使用
     static ESP8266WebServer& server();
 
-    // 供 Esp8266Base 在 begin() 时设置设备标题
-    static void setTitle(const char* hostname, const char* fw, const char* ver);
+    // 供 Esp8266Base 在 begin() 时设置系统信息
+    static void setSystemInfo(const char* hostname, const char* fw, const char* ver, uint32_t bootCount);
 
 private:
     struct AppRoute {
@@ -113,6 +113,10 @@ private:
     static char             _authPass[24];                      // 24B
     static char             _deviceName[24];                    // 24B
     static char             _homePath[24];                      // 24B
+    static char             _hostname[24];                      // 24B
+    static char             _fwName[24];                        // 24B
+    static char             _fwVersion[16];                     // 16B
+    static uint32_t         _bootCount;                         // 4B
     static char             _titleBuf[48];                      // "hostname (fw ver)" 48B
     static char             _activeUri[32];                     // 当前请求 URI，用于慢请求日志
     static char             _activeMethod[5];                   // GET/POST
@@ -154,4 +158,6 @@ private:
     static void _sendAppLinks();
     static void _sendSystemLinks();
     static void _loadPersistedAuth();
+    static void _formatDuration(uint32_t seconds, char* out, size_t len);
+    static void _sendKv(const char* key, const char* value);
 };

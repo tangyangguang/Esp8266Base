@@ -189,6 +189,36 @@ def test_web_auth_contract() -> None:
             fail(f"missing Web Auth contract token: {token}")
 
 
+def test_web_home_contract() -> None:
+    web_h = read("src/Esp8266BaseWeb.h")
+    web_cpp = read("src/Esp8266BaseWeb.cpp")
+    wifi_h = read("src/Esp8266BaseWiFi.h")
+    api = read("docs/03_api_reference.md")
+    web_doc = read("docs/06_web_ota.md")
+
+    for token in [
+        "setSystemInfo",
+        "_formatDuration",
+        "Boot time",
+        "Network",
+        "Device",
+        "Time",
+        "margin:0 auto",
+        "%Y-%m-%d %H:%M:%S",
+    ]:
+        if token not in web_cpp and token not in web_h:
+            fail(f"missing Web home contract token: {token}")
+
+    for token in ["ssid()", "rssi()", "macAddressTo"]:
+        if token not in wifi_h or token not in api:
+            fail(f"missing WiFi home query API token: {token}")
+
+    if "setTitle" in web_h or "setTitle" in api:
+        fail("old Web title-only API must not remain")
+    if "系统首页以轻量分组展示" not in web_doc:
+        fail("Web doc must describe system home information groups")
+
+
 def main() -> None:
     test_format_bytes()
     test_log_file_buffer_rules()
@@ -197,6 +227,7 @@ def main() -> None:
     test_log_segment_paths()
     test_boot_session_log_contract()
     test_web_auth_contract()
+    test_web_home_contract()
     print("[logic] ok")
 
 

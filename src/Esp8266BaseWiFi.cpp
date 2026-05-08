@@ -213,6 +213,22 @@ const char* Esp8266BaseWiFi::ip() {
     return _ip;
 }
 
+const char* Esp8266BaseWiFi::ssid() {
+    return _staSSID;
+}
+
+int Esp8266BaseWiFi::rssi() {
+    return isConnected() ? (int)WiFi.RSSI() : 0;
+}
+
+void Esp8266BaseWiFi::macAddressTo(char* out, size_t len) {
+    if (!out || len == 0) return;
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    snprintf(out, len, "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
 Esp8266BaseWiFiState Esp8266BaseWiFi::state() {
     return _state;
 }

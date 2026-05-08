@@ -5,7 +5,11 @@
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWiFi.h"
 #include "Esp8266BaseUtil.h"
+#if ESP8266BASE_USE_NTP
+#include "Esp8266BaseNTP.h"
+#endif
 #include <LittleFS.h>
+#include <time.h>
 
 // ----------------------------------------------------------------------------
 // 静态成员定义
@@ -20,6 +24,10 @@ char                     Esp8266BaseWeb::_authUser[24] = ESP8266BASE_WEB_AUTH_US
 char                     Esp8266BaseWeb::_authPass[24] = ESP8266BASE_WEB_AUTH_PASS;
 char                     Esp8266BaseWeb::_deviceName[24] = "";
 char                     Esp8266BaseWeb::_homePath[24] = "";
+char                     Esp8266BaseWeb::_hostname[24] = "esp8266";
+char                     Esp8266BaseWeb::_fwName[24] = "esp8266base";
+char                     Esp8266BaseWeb::_fwVersion[16] = "1.0.0";
+uint32_t                 Esp8266BaseWeb::_bootCount = 0;
 char                     Esp8266BaseWeb::_titleBuf[48] = "ESP8266";
 char                     Esp8266BaseWeb::_activeUri[32] = "";
 char                     Esp8266BaseWeb::_activeMethod[5] = "";
@@ -35,7 +43,7 @@ Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSyste
 static const char WEB_HEAD[] PROGMEM =
     "<meta charset=UTF-8><meta name=viewport content=width=device-width>"
     "<style>"
-    "body{font-family:sans-serif;padding:12px;max-width:760px}"
+    "body{font-family:sans-serif;padding:12px;max-width:760px;margin:0 auto}"
     "h2{margin:0 0 10px}"
     "a,input[type=submit]{background:#2678c8;color:#fff;padding:7px 12px;"
     "text-decoration:none;border:none;border-radius:3px;cursor:pointer;margin:2px 2px 2px 0}"
@@ -43,6 +51,11 @@ static const char WEB_HEAD[] PROGMEM =
     "border:1px solid #ccc;border-radius:3px;box-sizing:border-box}"
     "nav{margin-bottom:14px;border-bottom:1px solid #eee;padding-bottom:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
     "nav a{font-size:.88em}.brand{background:transparent;color:#222;font-weight:bold;padding-left:0}"
+    ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:12px 0}"
+    "section{border:1px solid #eee;border-radius:4px;padding:10px;background:#fafafa}"
+    "h3{margin:0 0 8px;font-size:1em}"
+    "dl{margin:0;display:grid;grid-template-columns:82px 1fr;gap:5px 8px;font-size:14px}"
+    "dt{color:#666}dd{margin:0;overflow-wrap:anywhere}"
     ".sysnav{margin-top:14px;padding-top:8px;border-top:1px solid #eee;display:flex;flex-wrap:wrap;gap:4px}"
     ".tabs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
     ".tabs span{white-space:nowrap}"
@@ -450,8 +463,27 @@ void Esp8266BaseWeb::setDefaultAuth(const char* user, const char* pass) {
     if (pass) { strncpy(_authPass, pass, 23); _authPass[23] = '\0'; }
 }
 
-void Esp8266BaseWeb::setTitle(const char* hostname, const char* fw, const char* ver) {
-    snprintf(_titleBuf, sizeof(_titleBuf), "%s (%s %s)", hostname, fw, ver);
+void Esp8266BaseWeb::setSystemInfo(const char* hostname, const char* fw, const char* ver, uint32_t bootCount) {
+    if (hostname) {
+        strncpy(_hostname, hostname, sizeof(_hostname) - 1);
+        _hostname[sizeof(_hostname) - 1] = '\0';
+    }
+    if (fw) {
+        strncpy(_fwName, fw, sizeof(_fwName) - 1);
+        _fwName[sizeof(_fwName) - 1] = '\0';
+    }
+    if (ver) {
+        strncpy(_fwVersion, ver, sizeof(_fwVersion) - 1);
+        _fwVersion[sizeof(_fwVersion) - 1] = '\0';
+    }
+    _bootCount = bootCount;
+    strncpy(_titleBuf, _hostname, sizeof(_titleBuf) - 1);
+    _titleBuf[sizeof(_titleBuf) - 1] = '\0';
+    strncat(_titleBuf, " (", sizeof(_titleBuf) - strlen(_titleBuf) - 1);
+    strncat(_titleBuf, _fwName, sizeof(_titleBuf) - strlen(_titleBuf) - 1);
+    strncat(_titleBuf, " ", sizeof(_titleBuf) - strlen(_titleBuf) - 1);
+    strncat(_titleBuf, _fwVersion, sizeof(_titleBuf) - strlen(_titleBuf) - 1);
+    strncat(_titleBuf, ")", sizeof(_titleBuf) - strlen(_titleBuf) - 1);
 }
 
 ESP8266WebServer& Esp8266BaseWeb::server() {
@@ -493,6 +525,36 @@ void Esp8266BaseWeb::_loadPersistedAuth() {
                       (userFound && user[0]) ? "persisted" : "default",
                       (passFound && pass[0]) ? "persisted" : "default",
                       (unsigned)strlen(_authPass));
+}
+
+void Esp8266BaseWeb::_formatDuration(uint32_t seconds, char* out, size_t len) {
+    if (!out || len == 0) return;
+    uint32_t days = seconds / 86400UL;
+    seconds %= 86400UL;
+    uint32_t hours = seconds / 3600UL;
+    seconds %= 3600UL;
+    uint32_t minutes = seconds / 60UL;
+    seconds %= 60UL;
+    if (days > 0) {
+        snprintf(out, len, "%lud %luh %lum %lus",
+                 (unsigned long)days, (unsigned long)hours,
+                 (unsigned long)minutes, (unsigned long)seconds);
+    } else if (hours > 0) {
+        snprintf(out, len, "%luh %lum %lus",
+                 (unsigned long)hours, (unsigned long)minutes, (unsigned long)seconds);
+    } else if (minutes > 0) {
+        snprintf(out, len, "%lum %lus", (unsigned long)minutes, (unsigned long)seconds);
+    } else {
+        snprintf(out, len, "%lus", (unsigned long)seconds);
+    }
+}
+
+void Esp8266BaseWeb::_sendKv(const char* key, const char* value) {
+    sendChunk("<dt>");
+    _sendAttrEscaped(key);
+    sendChunk("</dt><dd>");
+    _sendAttrEscaped(value && value[0] ? value : "-");
+    sendChunk("</dd>");
 }
 
 void Esp8266BaseWeb::_markRequest() {
@@ -627,19 +689,62 @@ void Esp8266BaseWeb::_handleSystemHome() {
     snprintf(_wb, sizeof(_wb), "<h2>%s</h2>", _brandTitle());
     sendChunk(_wb);
 
+    const char* wifiState = "Connecting";
+    const char* ssid = Esp8266BaseWiFi::ssid();
+    const char* ip = "-";
+    char rssi[8] = "-";
+    char mac[18] = "";
+    Esp8266BaseWiFi::macAddressTo(mac, sizeof(mac));
     if (Esp8266BaseWiFi::isConnected()) {
-        snprintf(_wb, sizeof(_wb),
-                 "<p>WiFi: <b>Connected</b><br>IP: %s<br>Uptime: %lus</p>",
-                 Esp8266BaseWiFi::ip(), millis() / 1000UL);
-        sendChunk(_wb);
+        wifiState = "Connected";
+        ip = Esp8266BaseWiFi::ip();
+        snprintf(rssi, sizeof(rssi), "%d", Esp8266BaseWiFi::rssi());
     } else if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG) {
-        snprintf(_wb, sizeof(_wb),
-                 "<p>WiFi: <b>AP Mode</b> (%s)<br>IP: 192.168.4.1</p>",
-                 Esp8266BaseWiFi::apSSID());
-        sendChunk(_wb);
-    } else {
-        sendChunk("<p>WiFi: Connecting...</p>");
+        wifiState = "AP Mode";
+        ssid = Esp8266BaseWiFi::apSSID();
+        ip = "192.168.4.1";
     }
+
+    char bootCount[12];
+    snprintf(bootCount, sizeof(bootCount), "%lu", (unsigned long)_bootCount);
+
+    char uptime[32];
+    _formatDuration(millis() / 1000UL, uptime, sizeof(uptime));
+
+    char ntpState[12] = "disabled";
+    char currentTime[20] = "-";
+    char bootTime[20] = "-";
+#if ESP8266BASE_USE_NTP
+    if (Esp8266BaseNTP::isSynced()) {
+        strncpy(ntpState, "synced", sizeof(ntpState) - 1);
+        Esp8266BaseNTP::formatTo(currentTime, sizeof(currentTime), "%Y-%m-%d %H:%M:%S");
+        time_t bt = time(nullptr) - (time_t)(millis() / 1000UL);
+        struct tm* tm_info = localtime(&bt);
+        if (tm_info) {
+            strftime(bootTime, sizeof(bootTime), "%Y-%m-%d %H:%M:%S", tm_info);
+        }
+    } else {
+        strncpy(ntpState, "pending", sizeof(ntpState) - 1);
+    }
+#endif
+
+    sendChunk("<div class=grid><section><h3>Network</h3><dl>");
+    _sendKv("WiFi", wifiState);
+    _sendKv("SSID", ssid);
+    _sendKv("IP", ip);
+    _sendKv("RSSI", rssi);
+    _sendKv("MAC", mac);
+    sendChunk("</dl></section><section><h3>Device</h3><dl>");
+    _sendKv("Hostname", _hostname);
+    _sendKv("Firmware", _fwName);
+    _sendKv("Version", _fwVersion);
+    _sendKv("Boot", bootCount);
+    sendChunk("</dl></section><section><h3>Time</h3><dl>");
+    _sendKv("Uptime", uptime);
+    _sendKv("NTP", ntpState);
+    _sendKv("Now", currentTime);
+    _sendKv("Boot time", bootTime);
+    sendChunk("</dl></section></div>");
     sendFooter();
 }
 

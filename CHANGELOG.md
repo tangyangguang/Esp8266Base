@@ -44,6 +44,9 @@
 
 ### 优化
 
+- 内置页面整体内容容器默认在浏览器中水平居中，正文和日志内容仍保持左对齐。
+- 系统首页改为轻量分组展示 Network、Device、Time 信息，新增 SSID、RSSI、MAC、hostname、固件信息、库级 boot count、NTP 状态、当前时间和 Boot time。
+- 首页 `Uptime` 改为人性化格式并保留秒级精度；`Boot time` 在 NTP 同步后显示到秒。
 - `/logs` 页面改为单文件段展示：默认显示最新 `current-0`，顶部提供 `current-0`、`history-1`、`history-2`、`history-3` 标签切换，避免一次输出全部轮转日志导致页面过大。
 - WiFi STA 首连增加 `WL_DISCONNECTED` 卡住恢复策略：默认 7s 无进展会记录 `station_connect_stuck_restarting` 并重启本轮连接，避免每次都白等 20s 连接观察窗口。
 - WiFi 前 3 次快速重试间隔从 5s 调整为 2s；如果 stuck restart 后仍然卡在 `WL_DISCONNECTED`，会记录 `station_connect_stuck_retrying` 并直接进入快速重试，不再继续等满 20s。

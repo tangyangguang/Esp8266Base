@@ -328,10 +328,13 @@ static bool clearCredentials();
 ```cpp
 static bool isConnected();
 static const char* ip();
+static const char* ssid();
+static int rssi();
+static void macAddressTo(char* out, size_t len);
 static Esp8266BaseWiFiState state();
 static const char* apSSID();
 ```
-状态查询。`ip()` 未连接时返回空字符串。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
+状态查询。`ip()` 未连接时返回空字符串。`ssid()` 返回当前内存缓存中的 STA SSID。`rssi()` 仅连接后有效，未连接时返回 0。`macAddressTo()` 输出 STA MAC 地址。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
 
 ### 默认参数
 
@@ -444,10 +447,12 @@ static bool verifyAuth();
 
 ```cpp
 static void setDefaultAuth(const char* user, const char* pass);
-static void setTitle(const char* hostname, const char* fw, const char* ver);
+static void setSystemInfo(const char* hostname, const char* fw, const char* ver, uint32_t bootCount);
 static ESP8266WebServer& server();
 static bool isRunning();
 ```
+
+`setSystemInfo()` 由 `Esp8266Base::begin()` 调用，用于向内置首页传入 hostname、固件名、版本和库级 boot count。业务项目通常不需要直接调用。
 
 `setDefaultAuth()` 只设置 Web Basic Auth 默认值，必须在 `Esp8266Base::begin()` 前调用；Web 已启动后调用会被忽略。认证优先级为：
 

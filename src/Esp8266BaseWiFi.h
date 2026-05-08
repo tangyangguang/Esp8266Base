@@ -67,6 +67,15 @@ public:
     // 当前 IP 地址字符串（未连接时返回 ""）
     static const char* ip();
 
+    // 当前 STA SSID（来自内存缓存，未配置时返回 ""）
+    static const char* ssid();
+
+    // 当前 RSSI；仅 STA 已连接时有效
+    static int rssi();
+
+    // 当前 STA MAC 地址，格式化到调用方缓冲
+    static void macAddressTo(char* out, size_t len);
+
     // 当前状态机状态
     static Esp8266BaseWiFiState state();
 

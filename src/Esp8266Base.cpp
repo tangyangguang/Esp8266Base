@@ -102,7 +102,7 @@ bool Esp8266Base::begin() {
 
     // 6. Web — 注册内置路由（OTA 路由由 OTA 模块在此后注册）
 #if ESP8266BASE_USE_WEB
-    Esp8266BaseWeb::setTitle(_hostname, _fwName, _fwVersion);
+    Esp8266BaseWeb::setSystemInfo(_hostname, _fwName, _fwVersion, bootCount);
     Esp8266BaseWeb::begin();
 #endif
 
