@@ -49,6 +49,8 @@
 
 示例构建资源参考（PlatformIO `esp12f` release）：
 
+下表是编译产物的 RAM/Flash 占用参考，用于观察趋势和回归；它不是运行时 free heap 实测。第二节的场景目标必须在硬件上结合 Web 页面、OTA、AP 配网等真实路径验收。
+
 | 示例 | 启用模块 | RAM | Flash |
 |------|----------|-----|-------|
 | `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,096B | 313,039B |

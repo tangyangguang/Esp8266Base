@@ -203,8 +203,6 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 ## 九、全局 RAM 预算
 
 全局静态 RAM 预算以 `docs/04_memory_budget.md` 为唯一权威来源。本文只描述架构关系，避免维护两份预算表导致数值漂移。
-| LittleFS | ~2-3KB |
-| Arduino Core | ~3-4KB |
 
 ---
 
@@ -216,7 +214,6 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | 虚函数 | 虚表指针增加 RAM，阻止内联优化 |
 | std::function | 每个对象额外 ~16-24B heap，不可控 |
 | STL 容器 | heap 碎片化，RAM 不可预测 |
-| 事件总线 | 动态订阅需要动态分配或大静态表 |
 | 通用事件总线 | 增加框架复杂度和 RAM 常驻状态 |
 | 复杂状态页 | 大 HTML 缓冲耗 RAM |
 | 异步 Web | ESPAsyncWebServer RAM 占用更大 |

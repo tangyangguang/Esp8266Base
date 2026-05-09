@@ -17,6 +17,8 @@ ESP8266 专用轻量基础库。RAM 优先设计，仅支持 ESP8266 Arduino Cor
 | OTA 上传过程中 | >= 12KB |
 | AP 配网模式 | >= 18KB |
 
+这些是硬件运行时目标，不能只用 PlatformIO 编译阶段的 RAM 用量替代；发布前仍以 `docs/04_memory_budget.md` 的规则和硬件验收为准。
+
 ---
 
 ## 快速开始
@@ -184,7 +186,7 @@ Web Auth 策略：认证默认值按 `ESP8266BASE_WEB_AUTH_USER/PASS` → `Esp82
 
 OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
 
-日志策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
+日志与回显策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段；`/wifi` GET 表单也会回显已保存密码，页面默认隐藏，可手动显示。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
 
 可选文件日志和配置审计：
 

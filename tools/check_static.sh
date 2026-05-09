@@ -40,7 +40,7 @@ if rg -n 'ESP8266BASE_WEB_AUTH_PASS=\\"esp8266\\"|admin / esp8266|admin/esp8266|
   README.md docs examples platformio.ini; then
   fail "old default Web Auth password reference found"
 fi
-if rg -n '\(redacted\)|不得明文|不会明文|只记录长度、来源和结果|敏感信息处理' src README.md docs AGENTS.md CHANGELOG.md; then
+if rg -n '\(redacted\)|\bredacted\b|不得明文|不会明文|只记录长度、来源和结果' src README.md docs AGENTS.md CHANGELOG.md; then
   fail "password redaction wording found; plaintext password logging is intentional"
 fi
 

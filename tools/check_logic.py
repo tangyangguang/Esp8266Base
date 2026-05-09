@@ -198,6 +198,9 @@ def test_public_default_tables() -> None:
     readme = read("README.md")
     api = read("docs/03_api_reference.md")
     overview = read("docs/01_overview.md")
+    web_doc = read("docs/06_web_ota.md")
+    architecture = read("docs/02_architecture.md")
+    memory = read("docs/04_memory_budget.md")
 
     for text, label in [(readme, "README"), (api, "API reference"), (overview, "overview")]:
         require_token(text, '| `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` |', f"{label} Web Auth default")
@@ -207,6 +210,17 @@ def test_public_default_tables() -> None:
 
     require_token(readme, 'ESP8266BASE_WEB_AUTH_PASS=\\"admin\\"', "README build flag default")
     require_token(overview, 'ESP8266BASE_WEB_AUTH_PASS=\\"admin\\"', "overview build flag default")
+    require_token(readme, "/wifi` GET 表单也会回显已保存密码", "README plaintext WiFi password echo")
+    require_token(readme, "硬件运行时目标", "README free heap target scope")
+    require_token(web_doc, "路径字符集", "Web route path charset table")
+    require_token(web_doc, "addPage()` / `addApi()` 返回 `false`", "Web invalid route path behavior")
+    require_token(web_doc, "Web Auth 改密成功和失败路径都会", "Web Auth plaintext change logs")
+    require_token(memory, "它不是运行时 free heap 实测", "memory build RAM scope")
+
+    if "| LittleFS | ~2-3KB |" in architecture or "| Arduino Core | ~3-4KB |" in architecture:
+        fail("architecture doc must not keep orphan RAM table rows")
+    if "事件总线 | 动态订阅" in architecture:
+        fail("architecture doc must not duplicate event bus non-goal rows")
 
 
 def test_web_home_contract() -> None:
