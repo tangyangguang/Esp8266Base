@@ -119,7 +119,7 @@ static const char WEB_OTA_FORM[] PROGMEM =
     "var b=this.querySelector('[type=submit]');"
     "if(!file){this.dataset.busy='';alert('Choose firmware first');return false;}"
     "var fd=new FormData();fd.append('firmware',file);"
-    "function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}"
+    "function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(2)+' KB';return(n/1048576).toFixed(2)+' MB';}"
     "var x=new XMLHttpRequest();if(b)b.disabled=true;pg.style.display='block';pg.value=0;st.textContent='Uploading 0%';"
     "x.upload.onprogress=function(ev){if(ev.lengthComputable){var p=Math.floor(ev.loaded*100/ev.total);pg.value=p;st.textContent='Uploading '+p+'% ('+fb(ev.loaded)+'/'+fb(ev.total)+')';}};"
     "x.onload=function(){st.textContent=(x.status==200?x.responseText:('Upload failed: HTTP '+x.status+' '+x.responseText));if(x.status!=200){document.getElementById('f').dataset.busy='';if(b)b.disabled=false;}};"

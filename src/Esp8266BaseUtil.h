@@ -14,11 +14,11 @@ public:
         if (bytes < 1024UL) {
             snprintf(out, len, "%u B", (unsigned)bytes);
         } else if (bytes < 1048576UL) {
-            uint32_t v10 = (bytes * 10UL + 512UL) / 1024UL;
-            snprintf(out, len, "%u.%u KB", (unsigned)(v10 / 10UL), (unsigned)(v10 % 10UL));
+            uint32_t v100 = (bytes * 100UL + 512UL) / 1024UL;
+            snprintf(out, len, "%u.%02u KB", (unsigned)(v100 / 100UL), (unsigned)(v100 % 100UL));
         } else {
-            uint32_t v10 = (uint32_t)(((uint64_t)bytes * 10ULL + 524288ULL) / 1048576ULL);
-            snprintf(out, len, "%u.%u MB", (unsigned)(v10 / 10UL), (unsigned)(v10 % 10UL));
+            uint32_t v100 = (uint32_t)(((uint64_t)bytes * 100ULL + 524288ULL) / 1048576ULL);
+            snprintf(out, len, "%u.%02u MB", (unsigned)(v100 / 100UL), (unsigned)(v100 % 100UL));
         }
     }
 };

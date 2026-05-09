@@ -21,10 +21,10 @@ def format_bytes(value: int) -> str:
     if value < 1024:
         return f"{value} B"
     if value < 1048576:
-        v10 = (value * 10 + 512) // 1024
-        return f"{v10 // 10}.{v10 % 10} KB"
-    v10 = (value * 10 + 524288) // 1048576
-    return f"{v10 // 10}.{v10 % 10} MB"
+        v100 = (value * 100 + 512) // 1024
+        return f"{v100 // 100}.{v100 % 100:02d} KB"
+    v100 = (value * 100 + 524288) // 1048576
+    return f"{v100 // 100}.{v100 % 100:02d} MB"
 
 
 def file_buffer_size_for_level(file_level: int, explicit_size: int | None = None) -> int:
@@ -64,13 +64,14 @@ def test_format_bytes() -> None:
         0: "0 B",
         1: "1 B",
         1023: "1023 B",
-        1024: "1.0 KB",
-        1536: "1.5 KB",
-        16384: "16.0 KB",
-        1048575: "1024.0 KB",
-        1048576: "1.0 MB",
-        1572864: "1.5 MB",
-        4294967295: "4096.0 MB",
+        1024: "1.00 KB",
+        1536: "1.50 KB",
+        16384: "16.00 KB",
+        1048575: "1024.00 KB",
+        1048576: "1.00 MB",
+        1562378: "1.49 MB",
+        1572864: "1.50 MB",
+        4294967295: "4096.00 MB",
     }
     for value, expected in cases.items():
         assert_eq(format_bytes(value), expected, f"formatBytes({value})")

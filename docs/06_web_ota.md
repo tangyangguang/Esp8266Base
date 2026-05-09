@@ -58,6 +58,8 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
 `Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
 
+`Flash`、`Sketch`、`OTA free` 和 footer 的 `Free heap` 等字节数统一保留两位小数。`OTA free` 直接显示 `ESP.getFreeSketchSpace()` 的结果，表示当前 Flash map、OTA slot、bootloader 和对齐规则下可写入新固件的空间；它不是 `2MB - Sketch` 的简单差值。
+
 业务项目希望业务页面成为主界面时，在 `Esp8266Base::begin()` 前配置首页和导航模型，在 `begin()` 后注册页面：
 
 ```cpp

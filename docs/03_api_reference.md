@@ -483,7 +483,7 @@ static bool isRunning();
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
-系统首页的 Network 卡片显示 `Hostname/WiFi/SSID/IP/RSSI/MAC`；Device 卡片显示 `Firmware/Version/Boot count/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。
+系统首页的 Network 卡片显示 `Hostname/WiFi/SSID/IP/RSSI/MAC`；Device 卡片显示 `Firmware/Version/Boot count/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap` 等字节数统一保留两位小数；`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
 
 `/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 
