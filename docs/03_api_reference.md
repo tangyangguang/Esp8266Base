@@ -530,12 +530,14 @@ OTA 上传是否正在进行。
 
 1. GET /ota 页面使用 Web Basic Auth；页面内用 XMLHttpRequest 上传并显示进度
 2. POST /ota 在上传开始时强制验证 Basic Auth；未认证请求返回 `401 Unauthorized`
-3. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，然后调用 `Update.begin(ESP.getFreeSketchSpace())`，日志输出 `upload_started`
-4. 上传期间：分块写入固件，每块后 `yield()`，按 10% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
-5. 上传完成：输出 `upload_finished`，启用 Watchdog 时 `resume()`，成功后输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
-6. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed` 和 `average_speed`，返回简短错误信息
+3. 页面提交前：内置 OTA 页用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验，失败时不发起上传并提示 `Invalid firmware: not an ESP8266 app image`
+4. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，日志输出 `upload_started`
+5. 首个数据块：服务端再次做 ESP8266 固件头快速校验，拒绝 ESP32 固件、gzip 包和非固件文件；校验通过后调用 `Update.begin(ESP.getFreeSketchSpace())`
+6. 上传期间：分块写入固件，每块后 `yield()`，按 10% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
+7. 上传完成：输出 `upload_finished`，启用 Watchdog 时 `resume()`，成功后输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
+8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息
 
-OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。当前不计算 SHA256；接收是否成功由 `Update.write()` 和 `Update.end(true)` 的写入与镜像校验结果决定。
+OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。当前不计算 SHA256；页面预检和服务端 ESP8266 镜像头快速校验用于提前拒绝明显错误平台的固件，接收是否成功由 `Update.write()` 和 `Update.end(true)` 的写入与镜像校验结果决定。浏览器进度条表示上传进度，不代表服务端已经接受固件。
 
 ---
 

@@ -209,12 +209,13 @@ http://<device-ip>/ota
 - `GET /ota` 需要 Basic Auth。
 - `POST /ota` 也需要 Basic Auth。
 - `ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面和导航入口，避免上传表单可见但 POST `/ota` 返回 404。
-- 上传页面使用 XMLHttpRequest 显示百分比和字节数。
+- 上传页面先用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验；校验失败时不发起上传，直接提示 `Invalid firmware: not an ESP8266 app image`。
+- 上传页面使用 XMLHttpRequest 显示百分比和字节数；进度条表示浏览器上传进度，不代表服务端已经接受固件。
 - 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。
 - OTA 上传期间暂停 Watchdog，上传完成后恢复。
-- 使用 `Update.begin(ESP.getFreeSketchSpace())`。
+- 服务端首个数据块也会做同一类 ESP8266 固件头快速校验，作为 curl 或绕过页面上传时的兜底；校验通过后才调用 `Update.begin(ESP.getFreeSketchSpace())` 并写入 Flash。
 - 成功后 flush 响应并重启。
-- 当前不计算 SHA256；OTA 依赖 `Update.write()` / `Update.end(true)` 的写入与镜像校验结果决定是否接受固件。
+- 当前不计算 SHA256；OTA 依赖页面预检、服务端头部兜底校验，以及 `Update.write()` / `Update.end(true)` 的写入与镜像校验结果决定是否接受固件。
 
 如果出现 `Unauthorized`，先确认浏览器当前会话已经通过 Basic Auth，或重新打开 `/ota` 输入用户名密码。
 

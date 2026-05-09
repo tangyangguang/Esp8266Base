@@ -85,6 +85,8 @@ mdns_started host=esp-demo.local service=http tcp_port=80
 - OTA 上传返回 `Unauthorized`。
 - 上传中断或失败。
 - 上传进度到 100%，最后显示 `HTTP 404 Not found`。
+- 选择 ESP32 固件、bootloader、gzip 或非 ESP8266 app bin 后，页面立即提示 `Invalid firmware: not an ESP8266 app image`。
+- 绕过页面上传错误固件时，服务端返回 HTTP 400 和明确错误文本，日志出现 `upload_rejected reason=not_esp8266_segment detail=not_esp8266_firmware`。
 
 处理：
 
@@ -92,6 +94,8 @@ mdns_started host=esp-demo.local service=http tcp_port=80
 - 确认 `ESP8266BASE_USE_WEB=1` 且 `ESP8266BASE_USE_OTA=1`。
 - 如果进度到 100% 后返回 `HTTP 404 Not found`，通常是当前运行固件没有注册 `POST /ota`：例如固件编译时 `ESP8266BASE_USE_OTA=0`，或来自旧版本 Web 页面。先用串口刷入启用 OTA 的固件，再继续用 Web OTA。
 - 确认固件适合当前分区空间。
+- 只能上传 ESP8266 app 固件，例如 PlatformIO 生成的 `.pio/build/esp12f/firmware.bin`；ESP32 固件、压缩包和文件系统镜像会被拒绝。
+- 浏览器进度条表示上传进度，不代表固件已被服务端接受；新版本内置页面会在上传前先做轻量头部预检。
 - 上传时保持供电和 WiFi 稳定。
 
 重点日志：

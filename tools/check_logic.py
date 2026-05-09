@@ -43,6 +43,21 @@ def log_segment_path(base: str, index: int) -> str:
     return base if index == 0 else f"{base}.{index}"
 
 
+def ota_header_ok(data: bytes) -> bool:
+    if len(data) < 16:
+        return False
+    if data[0] != 0xE9:
+        return False
+    if data[1] == 0 or data[1] > 16:
+        return False
+    if data[2] > 3:
+        return False
+    first_addr = int.from_bytes(data[8:12], "little")
+    first_size = int.from_bytes(data[12:16], "little")
+    first_addr_ok = (0x40100000 <= first_addr < 0x40110000) or (0x3FFE8000 <= first_addr < 0x40000000)
+    return first_addr_ok and 0 < first_size <= 65536
+
+
 def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
@@ -132,6 +147,37 @@ def test_log_segment_paths() -> None:
     assert_eq([log_segment_path("/logs/app.log", i) for i in range(4)],
               ["/logs/app.log", "/logs/app.log.1", "/logs/app.log.2", "/logs/app.log.3"],
               "log rotation paths")
+
+
+def test_ota_header_guard() -> None:
+    esp8266 = bytes.fromhex("e902024080f4104000f01040600d0000")
+    esp32 = bytes.fromhex("e907022040088040ee00000000000000")
+    gzip = bytes.fromhex("1f8b0800000000000000000000000000")
+    assert_eq(ota_header_ok(esp8266), True, "ESP8266 OTA header")
+    assert_eq(ota_header_ok(esp32), False, "ESP32 OTA header")
+    assert_eq(ota_header_ok(gzip), False, "gzip OTA header")
+
+    ota_cpp = read("src/Esp8266BaseOTA.cpp")
+    web_cpp = read("src/Esp8266BaseWeb.cpp")
+    api = read("docs/03_api_reference.md")
+    web_doc = read("docs/06_web_ota.md")
+    troubleshooting = read("docs/10_troubleshooting.md")
+    require_token(web_cpp, "FileReader", "OTA browser-side header reader")
+    require_token(web_cpp, "readAsArrayBuffer(file.slice(0,16))", "OTA browser-side 16-byte preflight")
+    require_token(web_cpp, "Invalid firmware: not an ESP8266 app image", "OTA browser-side invalid firmware message")
+    require_token(ota_cpp, "_isLikelyEsp8266Firmware", "OTA ESP8266 firmware guard")
+    require_token(ota_cpp, "not_esp8266_segment", "OTA ESP32 segment rejection")
+    require_token(ota_cpp, "detail=not_esp8266_firmware", "OTA rejection log detail")
+    require_token(ota_cpp, "Invalid firmware: not an ESP8266 app image", "OTA server invalid firmware response")
+    if '"FAIL"' in ota_cpp:
+        fail("OTA server response must not use generic FAIL")
+    require_token(ota_cpp, "if (!Update.begin(ESP.getFreeSketchSpace()))", "OTA begin after header guard")
+    require_token(api, "内置 OTA 页用 `FileReader`", "API OTA browser preflight doc")
+    require_token(api, "浏览器进度条表示上传进度，不代表服务端已经接受固件", "API OTA progress meaning doc")
+    require_token(web_doc, "服务端首个数据块也会做同一类 ESP8266 固件头快速校验", "Web OTA server guard doc")
+    require_token(web_doc, "进度条表示浏览器上传进度", "Web OTA progress meaning doc")
+    require_token(troubleshooting, "页面立即提示 `Invalid firmware: not an ESP8266 app image`",
+                  "troubleshooting OTA browser rejection doc")
 
 
 def test_boot_session_log_contract() -> None:
@@ -228,6 +274,8 @@ def test_watchdog_and_ota_failure_contract() -> None:
     require_token(ota_cpp, "_uploadedBytes", "OTA uploaded byte state")
     require_token(ota_cpp, "_requestBytes", "OTA request byte state")
     require_token(ota_cpp, "_lastProgressPct", "OTA progress step state")
+    require_token(ota_cpp, "_resumeWatchdog();", "OTA watchdog resume helper")
+    require_token(ota_cpp, "_watchdogPaused", "OTA watchdog resume state")
 
 
 def test_public_default_tables() -> None:
@@ -360,6 +408,7 @@ def main() -> None:
     test_wifi_retry_rules()
     test_config_deferred_rules()
     test_log_segment_paths()
+    test_ota_header_guard()
     test_boot_session_log_contract()
     test_web_auth_contract()
     test_watchdog_and_ota_failure_contract()
