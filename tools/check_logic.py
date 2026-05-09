@@ -70,9 +70,14 @@ def test_format_bytes() -> None:
         1048575: "1024.0 KB",
         1048576: "1.0 MB",
         1572864: "1.5 MB",
+        4294967295: "4096.0 MB",
     }
     for value, expected in cases.items():
         assert_eq(format_bytes(value), expected, f"formatBytes({value})")
+
+    util_h = read("src/Esp8266BaseUtil.h")
+    if "(uint64_t)bytes" not in util_h:
+        fail("formatBytes MB path must avoid uint32_t overflow")
 
 
 def test_log_file_buffer_rules() -> None:
@@ -194,6 +199,19 @@ def test_web_auth_contract() -> None:
             fail(f"missing Web Auth contract token: {token}")
 
 
+def test_watchdog_and_ota_failure_contract() -> None:
+    watchdog_cpp = read("src/Esp8266BaseWatchdog.cpp")
+    watchdog_doc = read("docs/09_power_watchdog.md")
+    ota_cpp = read("src/Esp8266BaseOTA.cpp")
+
+    require_token(watchdog_cpp, "system_rtc_mem_write", "Watchdog RTC timeout marker")
+    require_token(watchdog_cpp, "source=rtc", "Watchdog RTC recovery log")
+    require_token(watchdog_doc, "超时时只写 RTC user memory 标记，不写 LittleFS", "Watchdog no-Flash timeout doc")
+    if "Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   (int)_resetCount)" in watchdog_cpp:
+        fail("Watchdog timeout branch must not write WDT count to LittleFS directly")
+    require_token(ota_cpp, "Update.end();", "OTA write failure cleanup")
+
+
 def test_public_default_tables() -> None:
     readme = read("README.md")
     api = read("docs/03_api_reference.md")
@@ -261,6 +279,7 @@ def main() -> None:
     test_log_segment_paths()
     test_boot_session_log_contract()
     test_web_auth_contract()
+    test_watchdog_and_ota_failure_contract()
     test_public_default_tables()
     test_web_home_contract()
     print("[logic] ok")

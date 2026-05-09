@@ -5,6 +5,41 @@
 #include "Esp8266BaseLog.h"
 #include <user_interface.h>
 
+static const uint32_t WDT_RTC_ADDR = 64;
+static const uint32_t WDT_RTC_MAGIC = 0xEB0BDA6DUL;
+static const uint32_t WDT_RTC_SALT = 0xA5C35A3CUL;
+
+struct WatchdogRtcState {
+    uint32_t magic;
+    uint32_t count;
+    uint32_t checksum;
+};
+
+static uint32_t _wdtRtcChecksum(uint32_t count) {
+    return WDT_RTC_MAGIC ^ count ^ WDT_RTC_SALT;
+}
+
+static bool _readWdtRtcState(WatchdogRtcState& state) {
+    if (!system_rtc_mem_read(WDT_RTC_ADDR, &state, sizeof(state))) return false;
+    return state.magic == WDT_RTC_MAGIC && state.checksum == _wdtRtcChecksum(state.count);
+}
+
+static bool _writeWdtRtcState(uint32_t count) {
+    WatchdogRtcState state;
+    state.magic = WDT_RTC_MAGIC;
+    state.count = count;
+    state.checksum = _wdtRtcChecksum(count);
+    return system_rtc_mem_write(WDT_RTC_ADDR, &state, sizeof(state));
+}
+
+static void _clearWdtRtcState() {
+    WatchdogRtcState state;
+    state.magic = 0;
+    state.count = 0;
+    state.checksum = 0;
+    system_rtc_mem_write(WDT_RTC_ADDR, &state, sizeof(state));
+}
+
 // ----------------------------------------------------------------------------
 // 静态成员定义
 // ----------------------------------------------------------------------------
@@ -24,18 +59,33 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     if (timeoutMs > 3000) timeoutMs = 3000;
     _timeoutMs = timeoutMs;
 
-    // 读取累计重启记录
+    // 读取累计重启记录；WDT 超时路径只写 RTC 标记，Flash 在本次正常启动后补写。
     _resetCount  = (uint32_t)Esp8266BaseConfig::getInt(ESP8266BASE_CFG_KEY_WDT_COUNT);
     int pending  = Esp8266BaseConfig::getInt(ESP8266BASE_CFG_KEY_WDT_PENDING);
+    WatchdogRtcState rtcState;
+    bool rtcPending = _readWdtRtcState(rtcState);
 
     rst_info* ri = ESP.getResetInfoPtr();
     bool resetReasonIsWdt = ri && (ri->reason == REASON_SOFT_WDT_RST || ri->reason == REASON_WDT_RST);
 
-    if (pending && resetReasonIsWdt) {
+    if (rtcPending) {
         _wasWdtReset = true;
-        // 清除 pending 标志，避免下次误判
+        if (rtcState.count > _resetCount) {
+            _resetCount = rtcState.count;
+        } else if (_resetCount < 0xFFFFFFFFUL) {
+            _resetCount++;
+        }
+        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT, (int)_resetCount);
         Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 0);
-        ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u", (unsigned)_resetCount);
+        _clearWdtRtcState();
+        ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u source=rtc",
+                          (unsigned)_resetCount);
+    } else if (pending && resetReasonIsWdt) {
+        _wasWdtReset = true;
+        // 兼容旧固件写入的 pending 标志。
+        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 0);
+        ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u source=config",
+                          (unsigned)_resetCount);
     } else {
         _wasWdtReset = false;
         if (pending) {
@@ -61,15 +111,14 @@ void Esp8266BaseWatchdog::handle() {
 
     uint32_t elapsed = millis() - _lastFeedMs;
     if (elapsed >= _timeoutMs) {
-        // 超时：保存状态后重启
-        _resetCount++;
-        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   (int)_resetCount);
-        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 1);
-        Esp8266BaseConfig::flush();
+        // 超时路径避免写 LittleFS，防止在系统已卡住时二次阻塞。
+        if (_resetCount < 0xFFFFFFFFUL) {
+            _resetCount++;
+        }
+        _writeWdtRtcState(_resetCount);
 
         ESP8266BASE_LOG_E("WDT ", "watchdog_timeout elapsed=%ums reset_count=%u action=restart",
                           (unsigned)elapsed, (unsigned)_resetCount);
-        Esp8266BaseLog::flushFileSink();
 
         // 给串口缓冲区时间输出
         delay(50);
@@ -119,6 +168,7 @@ uint32_t Esp8266BaseWatchdog::resetCount() {
 
 void Esp8266BaseWatchdog::clearResetCount() {
     _resetCount = 0;
+    _clearWdtRtcState();
     Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   0);
     Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 0);
     ESP8266BASE_LOG_I("WDT ", "watchdog_reset_count_cleared");

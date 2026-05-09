@@ -122,6 +122,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
             _rejected = true;
             _status = 500;
+            Update.end();
             char totalBuf[16];
             Esp8266BaseUtil::formatBytes(upload.totalSize, totalBuf, sizeof(totalBuf));
             ESP8266BASE_LOG_E("OTA ", "update_write_failed written=%s", totalBuf);

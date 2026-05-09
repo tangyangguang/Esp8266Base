@@ -17,7 +17,7 @@ public:
             uint32_t v10 = (bytes * 10UL + 512UL) / 1024UL;
             snprintf(out, len, "%u.%u KB", (unsigned)(v10 / 10UL), (unsigned)(v10 % 10UL));
         } else {
-            uint32_t v10 = (bytes * 10UL + 524288UL) / 1048576UL;
+            uint32_t v10 = (uint32_t)(((uint64_t)bytes * 10ULL + 524288ULL) / 1048576ULL);
             snprintf(out, len, "%u.%u MB", (unsigned)(v10 / 10UL), (unsigned)(v10 % 10UL));
         }
     }

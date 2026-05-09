@@ -708,7 +708,7 @@ static bool wasWatchdogReset();
 static uint32_t resetCount();
 static void clearResetCount();
 ```
-WDT 重启累计次数查询与清零（从 Config key `eb_wdt_pending` / `eb_wdt_count` 读取）。
+WDT 重启累计次数查询与清零。超时路径先写 RTC 标记并重启，下一次正常启动阶段补写 Config key `eb_wdt_count`；`eb_wdt_pending` 仅用于兼容旧固件残留标记。
 
 ### 默认配置
 
