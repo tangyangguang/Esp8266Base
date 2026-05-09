@@ -109,7 +109,11 @@ void Esp8266BaseOTA::_handleUploadChunk() {
                           upload.filename.c_str(), heapBuf, spaceBuf);
         if (!Update.begin(ESP.getFreeSketchSpace())) {
             _rejected = true;
+            _inProgress = false;
             _status = 500;
+#if ESP8266BASE_USE_WATCHDOG
+            Esp8266BaseWatchdog::resume();
+#endif
             ESP8266BASE_LOG_E("OTA ", "update_begin_failed error=%s", Update.getErrorString().c_str());
         }
 
@@ -125,7 +129,13 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         yield();  // 每块写入后让出 CPU，防止 Soft WDT
 
     } else if (upload.status == UPLOAD_FILE_END) {
-        if (_rejected) return;
+        _inProgress = false;
+        if (_rejected) {
+#if ESP8266BASE_USE_WATCHDOG
+            Esp8266BaseWatchdog::resume();
+#endif
+            return;
+        }
         if (Update.end(true)) {
             char totalBuf[16];
             char heapBuf[16];
@@ -137,6 +147,9 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             _status = 500;
             ESP8266BASE_LOG_E("OTA ", "update_end_failed error=%s", Update.getErrorString().c_str());
         }
+#if ESP8266BASE_USE_WATCHDOG
+        Esp8266BaseWatchdog::resume();
+#endif
 
     } else if (upload.status == UPLOAD_FILE_ABORTED) {
         if (!_rejected) Update.end();

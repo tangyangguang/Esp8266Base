@@ -8,7 +8,7 @@
 // 对时成功后自动回调 Esp8266BaseLog::setTimeProvider() 切换时间戳格式
 // 默认：UTC+8，ntp.aliyun.com / ntp.tencent.com / cn.pool.ntp.org
 //
-// RAM 预算：<= 160B
+// RAM 预算：<= 224B
 // ----------------------------------------------------------------------------
 
 #ifndef ESP8266BASE_NTP_TIMEZONE

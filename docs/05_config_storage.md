@@ -98,7 +98,7 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | `eb_hostname` | string | 设备 hostname | 立即 |
 | `eb_web_user` | string | Web Auth 持久化用户名，覆盖默认用户名 | 立即 |
 | `eb_web_pass` | string | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 | 立即 |
-| `eb_wdt_count` | int32 | WDT 重启累计次数 | deferred |
+| `eb_wdt_count` | int32 | WDT 重启累计次数 | immediate |
 | `eb_wdt_pending` | bool | 上次是否 WDT 重启 | 立即 |
 | `eb_boot_count` | uint32 string | 启动次数，库自动维护，达到 4,294,967,295 后饱和 | immediate |
 

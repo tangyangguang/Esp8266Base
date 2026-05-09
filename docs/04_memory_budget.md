@@ -51,11 +51,11 @@
 
 | 示例 | 启用模块 | RAM | Flash |
 |------|----------|-----|-------|
-| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,116B | 313,299B |
-| `sleep_watchdog` | Sleep + WDT | 33,104B | 314,559B |
-| `custom_web` | Web + mDNS + WDT | 38,128B | 390,120B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 40,344B | 410,244B |
-| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 42,372B | 418,720B |
+| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,096B | 313,039B |
+| `sleep_watchdog` | Sleep + WDT | 33,088B | 314,311B |
+| `custom_web` | Web + mDNS + WDT | 38,124B | 389,844B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 40,412B | 410,064B |
+| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 42,440B | 418,588B |
 
 Arduino SDK 内部开销（不可控，参考值）：
 

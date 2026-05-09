@@ -115,6 +115,7 @@ void loop() {
     // freeze 测试：主动阻塞，触发 WDT
     if (freezeTest) {
         ESP8266BASE_LOG_W("App ", "Blocking now — WDT should restart in ~2s");
+        freezeTest = false;  // WDT disabled builds should not stay stuck forever.
         delay(5000);  // 超过 WDT timeout（默认 2500ms），触发重启
     }
 

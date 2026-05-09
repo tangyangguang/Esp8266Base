@@ -200,27 +200,9 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 
 ---
 
-## 九、全局 RAM 预算汇总
+## 九、全局 RAM 预算
 
-| 模块 | 静态 RAM 预算 | 包含内容 |
-|------|--------------|----------|
-| Esp8266BaseLog | <= 240B 默认；INFO/DEBUG 文件缓存另加 <=512B | level/timeFn/hook/file sink path/current size；格式缓冲 128B 在栈上 |
-| Esp8266BaseConfig | <= 432B | deferred 队列 + 状态标志 + deferred flush 计时器 |
-| Esp8266BaseWiFi | <= 384B | 状态/计时器 + _apSSID(28B) + _ip(16B) + _staSSID/Pass(128B) |
-| Esp8266BaseWeb（路由表） | <= 880B | AppRoute 数组 480B + auth(48B) + device/home/title(96B) + labels(96B) + request trace(37B) + 状态 |
-| Esp8266BaseOTA | <= 136B | _inProgress/_rejected/_started/_status |
-| Esp8266BaseNTP | <= 224B | 同步状态 + 计时器 + 主动 UDP NTP 状态 |
-| Esp8266BaseMDNS | <= 96B | 运行状态 |
-| Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + 标志(2B) |
-| Esp8266BaseWatchdog | <= 96B | timeout(4B) + 计时器(8B) + pause(1B) + count(4B) |
-| **库总计（自有）** | **< 2.5KB** | 不含 Arduino SDK 内部开销 |
-
-Arduino SDK 内部开销（参考值，不可控）：
-
-| 组件 | 估算 RAM |
-|------|---------|
-| WiFi SDK | ~12-15KB |
-| ESP8266WebServer | ~4-6KB（含请求缓冲） |
+全局静态 RAM 预算以 `docs/04_memory_budget.md` 为唯一权威来源。本文只描述架构关系，避免维护两份预算表导致数值漂移。
 | LittleFS | ~2-3KB |
 | Arduino Core | ~3-4KB |
 
@@ -235,6 +217,6 @@ Arduino SDK 内部开销（参考值，不可控）：
 | std::function | 每个对象额外 ~16-24B heap，不可控 |
 | STL 容器 | heap 碎片化，RAM 不可预测 |
 | 事件总线 | 动态订阅需要动态分配或大静态表 |
-| FileLog | 高频 Flash 写增加阻塞风险 |
+| 通用事件总线 | 增加框架复杂度和 RAM 常驻状态 |
 | 复杂状态页 | 大 HTML 缓冲耗 RAM |
 | 异步 Web | ESPAsyncWebServer RAM 占用更大 |

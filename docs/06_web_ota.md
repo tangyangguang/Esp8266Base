@@ -106,7 +106,9 @@ Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
 
 `setDefaultAuth()` 不是强制覆盖用户保存的密码。设备上已经保存 `eb_web_pass` 时，启动后会优先使用保存值。Web 已启动后再调用 `setDefaultAuth()` 会被忽略。
 
-`/auth` 页面用于修改密码，不修改用户名。页面字段包含当前密码、新密码、确认新密码；新密码不能为空，最长 23 字符，确认必须一致。保存成功后立即更新运行时密码并写入 `eb_web_pass`，随后 `303` 回 `/auth?saved=1`。浏览器如果仍缓存旧 Basic Auth，可能会在跳转后重新弹出认证框，这是预期行为。Web Auth 密码不会明文写入 Web 日志或 Config 审计日志。
+`/auth` 页面用于修改密码，不修改用户名。页面字段包含当前密码、新密码、确认新密码；新密码不能为空，最长 23 字符，确认必须一致。保存成功后立即更新运行时密码并写入 `eb_web_pass`，随后 `303` 回 `/auth?saved=1`。浏览器如果仍缓存旧 Basic Auth，可能会在跳转后重新弹出认证框，这是预期行为。Web Auth 密码会明文写入日志和 Config 审计，这是个人项目为了调试观察保留的设计。
+
+本库不提供 CSRF token 机制；Basic Auth 会被浏览器自动带到同源请求中。Web 管理页、OTA、危险 POST 操作默认面向可信局域网和个人调试环境使用。
 
 `clearAll()` 删除所有 `/cfg_*` 配置后，Web Auth 恢复为 `setDefaultAuth()` 设置的默认值；如果业务代码没有设置，则恢复为编译期宏默认值。
 

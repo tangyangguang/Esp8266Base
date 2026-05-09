@@ -34,7 +34,7 @@
 #endif
 
 #ifndef ESP8266BASE_WEB_AUTH_PASS
-#define ESP8266BASE_WEB_AUTH_PASS "esp8266"
+#define ESP8266BASE_WEB_AUTH_PASS "admin"
 #endif
 
 typedef void (*Esp8266BaseWebHandler)();

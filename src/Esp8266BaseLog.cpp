@@ -366,7 +366,7 @@ bool Esp8266BaseLog::_writeFileBytes(const char* data, size_t len) {
         uint32_t room = _fileMaxBytes - _fileCurrentBytes;
         size_t chunk = len - offset;
         if (chunk > room) chunk = room;
-        if (chunk == 0) continue;
+        if (chunk == 0) return false;
 
         File f = LittleFS.open(_filePath, "a");
         if (!f) {

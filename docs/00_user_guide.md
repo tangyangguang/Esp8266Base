@@ -46,7 +46,7 @@ build_flags =
     -DESP8266BASE_USE_SLEEP=1
     -DESP8266BASE_USE_WATCHDOG=1
     -DESP8266BASE_WEB_AUTH_USER=\"admin\"
-    -DESP8266BASE_WEB_AUTH_PASS=\"esp8266\"
+    -DESP8266BASE_WEB_AUTH_PASS=\"admin\"
 ```
 
 上传建议使用 `460800` baud。部分 ESP8266 硬件在 `921600` 下容易出现 packet error。
@@ -85,7 +85,7 @@ void loop() {
 
 - AP SSID：`ESP8266-Config-XXXX`
 - 默认 IP：`192.168.4.1`
-- Web 认证：默认 `admin / esp8266`
+- Web 认证：默认 `admin / admin`
 
 连接 AP 后访问：
 
@@ -119,7 +119,7 @@ http://192.168.4.1/
 
 除 `/health` 外，内置管理页面使用 Basic Auth。默认认证来自 `ESP8266BASE_WEB_AUTH_USER/PASS`，业务代码可在 `Esp8266Base::begin()` 前调用 `Esp8266BaseWeb::setDefaultAuth(user, pass)` 覆盖默认值；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。Web 已启动后再调用 `setDefaultAuth()` 会被忽略。
 
-访问 `/auth` 可修改 Web 密码。页面会校验当前密码、新密码和确认值，保存成功后写入 `eb_web_pass` 并立即使用新密码；`clearAll()` 后恢复默认认证。Web Auth 密码不会明文写入 Web 日志或 Config 审计日志。
+访问 `/auth` 可修改 Web 密码。页面会校验当前密码、新密码和确认值，保存成功后写入 `eb_web_pass` 并立即使用新密码；`clearAll()` 后恢复默认认证。Web Auth 密码会明文写入日志和 Config 审计，这是个人项目为了调试观察保留的设计。
 
 表单页面使用轻量 JS 防重复提交，POST 后尽量重定向回 GET，避免刷新重复提交。
 

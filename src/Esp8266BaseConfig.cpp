@@ -82,16 +82,6 @@ bool Esp8266BaseConfig::_readRaw(const char* path, char* out, size_t len) {
     size_t n = f.readBytes(out, len - 1);
     out[n] = '\0';
     f.close();
-    if (n == 0 && LittleFS.exists(bak)) {
-        LittleFS.remove(path);
-        if (LittleFS.rename(bak, path)) {
-            f = LittleFS.open(path, "r");
-            if (!f) return false;
-            n = f.readBytes(out, len - 1);
-            out[n] = '\0';
-            f.close();
-        }
-    }
     return true;
 }
 
@@ -142,7 +132,10 @@ bool Esp8266BaseConfig::_writeRaw(const char* path, const char* value) {
         return false;
     }
     if (!LittleFS.rename(tmp, path)) {
-        if (hadOld && LittleFS.exists(bak) && !LittleFS.exists(path)) {
+        if (hadOld && LittleFS.exists(bak)) {
+            if (LittleFS.exists(path)) {
+                LittleFS.remove(path);
+            }
             LittleFS.rename(bak, path);
         }
         LittleFS.remove(tmp);
@@ -205,7 +198,9 @@ void Esp8266BaseConfig::_flushOne() {
             } else if (_deferred[i].type == 2) {
                 ok = setBool(_deferred[i].key, _deferred[i].boolVal);
             }
-            _deferred[i].used = false;
+            if (ok) {
+                _deferred[i].used = false;
+            }
             _lastDeferredFlushMs = millis();
             if (_auditEnabled) {
                 ESP8266BASE_LOG_I("Cfg ", "config_audit op=flush_one key=%s type=%s value=%ld result=%s",
@@ -246,22 +241,16 @@ bool Esp8266BaseConfig::_setStrInternal(const char* op, const char* key, const c
     bool changed = !hadOld || strcmp(oldVal, value) != 0;
     if (!changed) {
         if (_auditEnabled) {
-            bool redact = key && strcmp(key, ESP8266BASE_CFG_KEY_WEB_PASS) == 0;
             ESP8266BASE_LOG_I("Cfg ", "config_audit op=%s key=%s old=%s new=%s changed=no_change mode=immediate result=skipped",
-                              op, key,
-                              redact ? "(redacted)" : oldVal,
-                              redact ? "(redacted)" : value);
+                              op, key, oldVal, value);
         }
         return true;
     }
 
     bool ok = _writeRaw(path, value);
     if (_auditEnabled || !ok) {
-        bool redact = key && strcmp(key, ESP8266BASE_CFG_KEY_WEB_PASS) == 0;
         ESP8266BASE_LOG_I("Cfg ", "config_audit op=%s key=%s old=%s new=%s changed=changed mode=immediate result=%s",
-                          op, key,
-                          redact ? "(redacted)" : (hadOld ? oldVal : "(none)"),
-                          redact ? "(redacted)" : value,
+                          op, key, hadOld ? oldVal : "(none)", value,
                           ok ? "success" : "failed");
     }
     return ok;
@@ -270,12 +259,11 @@ bool Esp8266BaseConfig::_setStrInternal(const char* op, const char* key, const c
 void Esp8266BaseConfig::_auditRead(const char* op, const char* key, const char* value, bool found) {
     if (!_readAuditEnabled) return;
 #if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_CFG_READ_AUDIT_LEVEL
-    bool redact = key && strcmp(key, ESP8266BASE_CFG_KEY_WEB_PASS) == 0;
     Esp8266BaseLog::log(ESP8266BASE_CFG_READ_AUDIT_LEVEL,
                         "Cfg ",
                         "config_audit op=%s key=%s found=%s value=%s",
                         op, key ? key : "(null)", found ? "yes" : "no",
-                        redact ? "(redacted)" : (value ? value : ""));
+                        value ? value : "");
 #endif
 }
 
@@ -431,18 +419,26 @@ bool Esp8266BaseConfig::clearAll() {
     }
 
     bool ok = true;
-    Dir dir = LittleFS.openDir("/");
-    while (dir.next()) {
-        char name[32];
-        strncpy(name, dir.fileName().c_str(), sizeof(name) - 1);
-        name[sizeof(name) - 1] = '\0';
-        if (strncmp(name, "/cfg_", 5) == 0 || strncmp(name, "cfg_", 4) == 0) {
-            if (!LittleFS.remove(name)) {
-                ok = false;
-                ESP8266BASE_LOG_W("Cfg ", "remove failed path=%s", name);
+    while (true) {
+        char removeName[32] = "";
+        Dir dir = LittleFS.openDir("/");
+        while (dir.next()) {
+            char name[32];
+            strncpy(name, dir.fileName().c_str(), sizeof(name) - 1);
+            name[sizeof(name) - 1] = '\0';
+            if (strncmp(name, "/cfg_", 5) == 0 || strncmp(name, "cfg_", 4) == 0) {
+                strncpy(removeName, name, sizeof(removeName) - 1);
+                removeName[sizeof(removeName) - 1] = '\0';
+                break;
             }
-            yield();
         }
+        if (removeName[0] == '\0') break;
+        if (!LittleFS.remove(removeName)) {
+            ok = false;
+            ESP8266BASE_LOG_W("Cfg ", "remove failed path=%s", removeName);
+            break;
+        }
+        yield();
     }
 
     ESP8266BASE_LOG_I("Cfg ", "clear_all_config_files result=%s", ok ? "success" : "partial_failure");

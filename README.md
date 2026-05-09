@@ -143,7 +143,7 @@ build_flags =
     -DESP8266BASE_USE_SLEEP=1
     -DESP8266BASE_USE_WATCHDOG=1
     -DESP8266BASE_WEB_AUTH_USER=\"admin\"
-    -DESP8266BASE_WEB_AUTH_PASS=\"esp8266\"
+    -DESP8266BASE_WEB_AUTH_PASS=\"admin\"
     -DESP8266BASE_WDT_TIMEOUT_MS=2500
     -DESP8266BASE_NTP_TIMEZONE=28800
 ```
@@ -156,7 +156,7 @@ build_flags =
 | `ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
-| `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `USE_WEB=1` |
+| `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
 | `ESP8266BASE_USE_SLEEP` | `1` | 编译 Sleep |
@@ -164,7 +164,7 @@ build_flags =
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面上限 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 上限 |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
-| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 编译期默认密码，正式固件应覆盖 |
+| `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` | Basic Auth 编译期默认密码 |
 | `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化；正式固件建议保持关闭 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时 ms |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
@@ -172,7 +172,7 @@ build_flags =
 | `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` | `5000` | deferred 写入最小刷盘间隔 ms；设为 0 可每轮最多刷 1 条 |
 | `ESP8266BASE_WIFI_CONNECT_TIMEOUT` | `20000` | WiFi STA 单次连接观察窗口 ms |
 | `ESP8266BASE_WIFI_STA_SETTLE_MS` | `150` | 切换 STA/断开旧状态后，调用 `WiFi.begin()` 前的稳定等待 ms |
-| `ESP8266BASE_WIFI_RETRY_FAST` | `5000` | WiFi 快速重试间隔 ms |
+| `ESP8266BASE_WIFI_RETRY_FAST` | `2000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数，之后进入慢速重试 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
 
@@ -180,11 +180,11 @@ build_flags =
 
 WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。需要重新进入 AP 配网时，先清除 WiFi 凭证再重启。
 
-Web Auth 策略：认证默认值按 `ESP8266BASE_WEB_AUTH_USER/PASS` → `Esp8266BaseWeb::setDefaultAuth()` 的顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。内置 `/auth` 页面可修改密码，保存后立即使用新密码，`clearAll()` 后恢复默认值。Web Auth 密码不会明文写入 Web 日志或 Config 审计日志。
+Web Auth 策略：认证默认值按 `ESP8266BASE_WEB_AUTH_USER/PASS` → `Esp8266BaseWeb::setDefaultAuth()` 的顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。内置 `/auth` 页面可修改密码，保存后立即使用新密码，`clearAll()` 后恢复默认值。
 
 OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
 
-日志策略：WiFi 相关日志会有意输出 SSID 和密码明文，并同时输出 `password_length`。这是为了现场观察和调试连接问题的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。Web Auth 密码按敏感信息处理，只记录长度、来源和结果。
+日志策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
 
 可选文件日志和配置审计：
 
@@ -206,7 +206,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 tools/test_all.sh
 ```
 
-默认测试不烧录、不访问串口、不要求 ESP12F 在线。它会执行格式检查、静态一致性检查、轻量逻辑检查，并编译根项目和 5 个示例的 `esp12f` 环境。需要额外验证 `nodemcuv2` 编译时运行：
+默认测试不烧录、不访问串口、不要求 ESP12F 在线。它会执行格式检查、静态一致性检查、轻量逻辑检查，并编译根项目和 5 个示例的 `esp12f` 环境。需要额外验证 `nodemcuv2` 编译时运行；当前 `--all-envs` 会编译根项目 `nodemcuv2` 和除 `full_demo` 外的示例 `nodemcuv2` 环境：
 
 ```bash
 tools/test_all.sh --all-envs

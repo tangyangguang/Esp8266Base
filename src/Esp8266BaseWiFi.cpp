@@ -303,7 +303,9 @@ void Esp8266BaseWiFi::_handleConnected() {
 }
 
 void Esp8266BaseWiFi::_scheduleRetry() {
-    _retryCount++;
+    if (_retryCount < 0xFF) {
+        _retryCount++;
+    }
     uint32_t interval = (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT)
         ? ESP8266BASE_WIFI_RETRY_FAST
         : ESP8266BASE_WIFI_RETRY_SLOW;

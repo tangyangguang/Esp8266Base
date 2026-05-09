@@ -66,7 +66,7 @@ pio run -e esp12f -t upload --upload-port /dev/cu.usbserial-120
 - 配置写入必须写前比较；高频计数使用 deferred；重启、deep sleep、OTA 成功、WDT 重启前 flush 配置和文件日志。
 - LittleFS 挂载失败默认不格式化，只有 `ESP8266BASE_CFG_FORMAT_ON_FAIL=1` 才允许。
 - 日志必须可读、字段清晰；大字节数使用 KB/MB；启动必须有 boot session 分割线。
-- WiFi 密码和配置审计值按设计明文输出，不视为 bug；Web Auth 密码不得明文输出。
+- WiFi 密码、Web Auth 密码和配置审计值按设计明文输出，不视为 bug。
 - NTP 同步后必须输出实际时间、uptime、boot time、millis 映射，并切换日志时间戳。
 - 文件日志默认关闭；默认文件等级 WARN；WARN/ERROR 立即写文件；低于 WARN 时才启用低优先级缓存。
 - WiFi 无凭证进入 AP；有凭证连接失败时保持 STA 持续重连，不自动进 AP。

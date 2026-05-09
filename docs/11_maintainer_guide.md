@@ -77,7 +77,7 @@ Config 正式配置写入必须使用安全策略：
 
 ## 六、日志与审计规则
 
-- WiFi 密码明文日志是设计要求，不按 bug 处理。
+- WiFi 密码、Web Auth 密码明文日志是设计要求，不按 bug 处理。
 - 配置审计不脱敏，直接输出 key/value。
 - WARN/ERROR 在 file sink 启用后必须进入文件。
 - NTP 同步后必须输出实际时间和 boot time 映射。

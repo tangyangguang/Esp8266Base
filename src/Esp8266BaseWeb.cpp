@@ -537,8 +537,8 @@ void Esp8266BaseWeb::_loadPersistedAuth() {
         strncpy(_authPass, pass, sizeof(_authPass) - 1);
         _authPass[sizeof(_authPass) - 1] = '\0';
     }
-    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s user_source=%s pass_source=%s password_length=%u",
-                      _authUser,
+    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s password=%s user_source=%s pass_source=%s password_length=%u",
+                      _authUser, _authPass,
                       (userFound && user[0]) ? "persisted" : "default",
                       (passFound && pass[0]) ? "persisted" : "default",
                       (unsigned)strlen(_authPass));
@@ -878,29 +878,29 @@ void Esp8266BaseWeb::_handleAuthPost() {
     strncpy(confirm, confirmArg.c_str(), sizeof(confirm) - 1);
 
     if (strcmp(current, _authPass) != 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=current_password_mismatch current_length=%u expected_length=%u",
-                          (unsigned)strlen(current), (unsigned)strlen(_authPass));
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=current_password_mismatch current=%s expected=%s",
+                          current, _authPass);
         _redirect("/auth?error=current");
         return;
     }
     if (strcmp(newPass, confirm) != 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=mismatch new_length=%u confirm_length=%u",
-                          (unsigned)strlen(newPass), (unsigned)strlen(confirm));
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=mismatch new=%s confirm=%s",
+                          newPass, confirm);
         _redirect("/auth?error=mismatch");
         return;
     }
 
     if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WEB_PASS, newPass)) {
-        ESP8266BASE_LOG_E("Web ", "web_password_update_failed password_length=%u",
-                          (unsigned)strlen(newPass));
+        ESP8266BASE_LOG_E("Web ", "web_password_update_failed password=%s password_length=%u",
+                          newPass, (unsigned)strlen(newPass));
         _redirect("/auth?error=save_failed");
         return;
     }
 
     strncpy(_authPass, newPass, sizeof(_authPass) - 1);
     _authPass[sizeof(_authPass) - 1] = '\0';
-    ESP8266BASE_LOG_I("Web ", "web_password_updated password_length=%u result=success",
-                      (unsigned)strlen(_authPass));
+    ESP8266BASE_LOG_I("Web ", "web_password_updated password=%s password_length=%u result=success",
+                      _authPass, (unsigned)strlen(_authPass));
     _redirect("/auth?saved=1");
 }
 

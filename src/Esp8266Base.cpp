@@ -155,14 +155,26 @@ void Esp8266Base::handle() {
     // 4. NTP handle（同步状态检查，每 5s 一次）
 #if ESP8266BASE_USE_NTP
     if (_ntpWasTriggered) {
+#if ESP8266BASE_USE_WATCHDOG
+        Esp8266BaseWatchdog::feed();
+#endif
         Esp8266BaseNTP::handle();
+#if ESP8266BASE_USE_WATCHDOG
+        Esp8266BaseWatchdog::feed();
+#endif
     }
 #endif
 
     // 5. mDNS handle（MDNS.update()）
 #if ESP8266BASE_USE_MDNS
     if (_mdnsWasStarted) {
+#if ESP8266BASE_USE_WATCHDOG
+        Esp8266BaseWatchdog::feed();
+#endif
         Esp8266BaseMDNS::handle();
+#if ESP8266BASE_USE_WATCHDOG
+        Esp8266BaseWatchdog::feed();
+#endif
     }
 #endif
 

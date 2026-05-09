@@ -15,7 +15,7 @@
  *   LED      — GPIO2 板载指示灯（低电平亮）：联网常亮，AP 慢闪，连接中快闪
  *
  * 首次使用：连接 AP "ESP8266-Config-XXXX" → http://192.168.4.1/ 配置 WiFi
- * 认证：admin / esp8266
+ * 认证：admin / admin
  */
 
 #include <Arduino.h>

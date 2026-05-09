@@ -2,6 +2,9 @@
 #if ESP8266BASE_USE_NTP
 #include "Esp8266BaseNTP.h"
 #include "Esp8266BaseLog.h"
+#if ESP8266BASE_USE_WATCHDOG
+#include "Esp8266BaseWatchdog.h"
+#endif
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <sntp.h>
@@ -33,6 +36,9 @@ static const char NTP_S2[] PROGMEM = ESP8266BASE_NTP_SERVER_2;
 static const char NTP_S3[] PROGMEM = ESP8266BASE_NTP_SERVER_3;
 static const char* const NTP_SERVERS[] PROGMEM = { NTP_S1, NTP_S2, NTP_S3 };
 static const uint8_t NTP_SERVER_COUNT = sizeof(NTP_SERVERS) / sizeof(NTP_SERVERS[0]);
+static char _ntpServer1[24];
+static char _ntpServer2[24];
+static char _ntpServer3[24];
 
 static void _formatIP(const IPAddress& ip, char* out, size_t len) {
     if (!out || len == 0) return;
@@ -46,12 +52,11 @@ static void _formatIP(const IPAddress& ip, char* out, size_t len) {
 bool Esp8266BaseNTP::begin() {
     // configTime 可以在 WiFi 连接前调用；SNTP 客户端会在有网络时自动同步
     // 第二参数 daylightOffset_sec = 0（不支持夏令时）
-    char s1[20], s2[20], s3[20];
-    strncpy_P(s1, NTP_S1, sizeof(s1) - 1); s1[sizeof(s1)-1] = '\0';
-    strncpy_P(s2, NTP_S2, sizeof(s2) - 1); s2[sizeof(s2)-1] = '\0';
-    strncpy_P(s3, NTP_S3, sizeof(s3) - 1); s3[sizeof(s3)-1] = '\0';
+    strncpy_P(_ntpServer1, NTP_S1, sizeof(_ntpServer1) - 1); _ntpServer1[sizeof(_ntpServer1)-1] = '\0';
+    strncpy_P(_ntpServer2, NTP_S2, sizeof(_ntpServer2) - 1); _ntpServer2[sizeof(_ntpServer2)-1] = '\0';
+    strncpy_P(_ntpServer3, NTP_S3, sizeof(_ntpServer3) - 1); _ntpServer3[sizeof(_ntpServer3)-1] = '\0';
 
-    configTime(ESP8266BASE_NTP_TIMEZONE, 0, s1, s2, s3);
+    configTime(ESP8266BASE_NTP_TIMEZONE, 0, _ntpServer1, _ntpServer2, _ntpServer3);
     _synced = false;
     _logSwitched = false;
     _lastCheckMs = 0;
@@ -65,7 +70,7 @@ bool Esp8266BaseNTP::begin() {
     _ntpUdp.begin(NTP_LOCAL_PORT);
 
     ESP8266BASE_LOG_I("NTP ", "ntp_client_started timezone=UTC+%d servers=%s,%s,%s check_interval=5s manual_udp=yes",
-                      ESP8266BASE_NTP_TIMEZONE / 3600, s1, s2, s3);
+                      ESP8266BASE_NTP_TIMEZONE / 3600, _ntpServer1, _ntpServer2, _ntpServer3);
     return true;
 }
 
@@ -169,10 +174,17 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
     strncpy_P(server, (PGM_P)pgm_read_ptr(&NTP_SERVERS[_manualServer]), sizeof(server) - 1);
     server[sizeof(server) - 1] = '\0';
 
-    if (WiFi.hostByName(server, _manualIp) != 1 || !_manualIp.isSet()) {
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+    int dnsOk = WiFi.hostByName(server, _manualIp);
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+    if (dnsOk != 1 || !_manualIp.isSet()) {
         ESP8266BASE_LOG_W("NTP ", "manual_ntp_dns_failed server=%s", server);
         _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
-        _nextManualMs = now + 5000UL;
+        _nextManualMs = millis() + 30000UL;
         return;
     }
 

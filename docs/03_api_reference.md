@@ -454,7 +454,7 @@ static bool isRunning();
 
 `setSystemInfo()` 由 `Esp8266Base::begin()` 调用，用于向内置首页传入 hostname、固件名、版本和库级 boot count。业务项目通常不需要直接调用。
 
-`setDefaultAuth()` 只设置 Web Basic Auth 默认值，必须在 `Esp8266Base::begin()` 前调用；Web 已启动后调用会被忽略。Web Auth 密码不会明文写入 Web 日志或 Config 审计日志。认证优先级为：
+`setDefaultAuth()` 只设置 Web Basic Auth 默认值，必须在 `Esp8266Base::begin()` 前调用；Web 已启动后调用会被忽略。Web Auth 密码会明文写入日志和 Config 审计，这是个人项目为了调试观察保留的设计。认证优先级为：
 
 | 优先级 | 来源 | 说明 |
 |---:|---|---|
@@ -550,8 +550,7 @@ static bool begin();
 ```cpp
 static void handle();
 ```
-WiFi 断开后主入口会调用 `reset()` 释放 UDP socket；WiFi 重连后会重新 `begin()`。对时成功后日志会输出当前实际时间，并输出 `boot_millis=0` 对应的估算实际启动时间，方便把对时前的 `[millis]` 日志换算为实际日期时间。
-检查同步状态。系统 SNTP 或库内主动 UDP NTP 任一路径成功后，都会设置系统时间，并自动调用 `Esp8266BaseLog::setTimeProvider()` 切换日志时间格式。首次同步会记录实际时间、启动后毫秒数和推算出的本次启动时间，便于换算同步前的日志。
+检查同步状态。系统 SNTP 或库内主动 UDP NTP 任一路径成功后，都会设置系统时间，并自动调用 `Esp8266BaseLog::setTimeProvider()` 切换日志时间格式。首次同步会记录实际时间、启动后毫秒数和推算出的本次启动时间，便于换算同步前的日志。WiFi 断开后主入口会调用 `reset()` 释放 UDP socket；WiFi 重连后会重新 `begin()`。
 
 ```cpp
 static bool isSynced();
@@ -766,7 +765,7 @@ void loop() {
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大注册数 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大注册数 |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
-| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 编译期默认密码 |
+| `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` | Basic Auth 编译期默认密码 |
 | `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化 |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8 = 8×3600） |
 | `ESP8266BASE_NTP_SYNC_INTERVAL` | `3600` | NTP 重新同步间隔（秒） |

@@ -54,6 +54,11 @@ def parse_define_int(text: str, name: str) -> int:
     return int(m.group(1))
 
 
+def require_token(text: str, token: str, label: str) -> None:
+    if token not in text:
+        fail(f"missing {label}: {token}")
+
+
 def test_format_bytes() -> None:
     cases = {
         0: "0 B",
@@ -189,6 +194,21 @@ def test_web_auth_contract() -> None:
             fail(f"missing Web Auth contract token: {token}")
 
 
+def test_public_default_tables() -> None:
+    readme = read("README.md")
+    api = read("docs/03_api_reference.md")
+    overview = read("docs/01_overview.md")
+
+    for text, label in [(readme, "README"), (api, "API reference"), (overview, "overview")]:
+        require_token(text, '| `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` |', f"{label} Web Auth default")
+        require_token(text, '| `ESP8266BASE_WIFI_RETRY_FAST` | `2000` |', f"{label} WiFi fast retry default")
+        require_token(text, '| `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |',
+                      f"{label} OTA/Web dependency")
+
+    require_token(readme, 'ESP8266BASE_WEB_AUTH_PASS=\\"admin\\"', "README build flag default")
+    require_token(overview, 'ESP8266BASE_WEB_AUTH_PASS=\\"admin\\"', "overview build flag default")
+
+
 def test_web_home_contract() -> None:
     web_h = read("src/Esp8266BaseWeb.h")
     web_cpp = read("src/Esp8266BaseWeb.cpp")
@@ -227,6 +247,7 @@ def main() -> None:
     test_log_segment_paths()
     test_boot_session_log_contract()
     test_web_auth_contract()
+    test_public_default_tables()
     test_web_home_contract()
     print("[logic] ok")
 

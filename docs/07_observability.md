@@ -180,7 +180,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 - immediate/deferred
 - flush result
 
-读审计默认建议关闭，避免页面/API 高频读取刷屏。配置审计不做敏感 key 脱敏，所有值直接输出；WiFi 密码明文日志是本库设计要求。
+读审计默认建议关闭，避免页面/API 高频读取刷屏。配置审计不做敏感 key 脱敏，所有值直接输出；WiFi 密码和 Web Auth 密码明文日志是本库设计要求。
 
 读审计的默认日志等级是 DEBUG，由 `ESP8266BASE_CFG_READ_AUDIT_LEVEL` 控制。普通 INFO 构建即使调用 `enableConfigReadAudit(true)`，也不会输出大量读审计日志；需要追踪每次配置读取时，把 `ESP8266BASE_LOG_LEVEL` 和 `ESP8266BASE_LOG_FILE_LEVEL` 调到 DEBUG，或单独提高 `ESP8266BASE_CFG_READ_AUDIT_LEVEL`。`getInt()` / `getBool()` 内部读取原始字符串时不会再额外输出 `getStr` 审计，避免一读两条日志。
 

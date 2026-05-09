@@ -121,7 +121,7 @@ build_flags =
     -DESP8266BASE_WEB_MAX_APP_PAGES=4
     -DESP8266BASE_WEB_MAX_APP_APIS=6
     -DESP8266BASE_WEB_AUTH_USER=\"admin\"
-    -DESP8266BASE_WEB_AUTH_PASS=\"esp8266\"
+    -DESP8266BASE_WEB_AUTH_PASS=\"admin\"
     -DESP8266BASE_NTP_TIMEZONE=28800
     -DESP8266BASE_WDT_TIMEOUT_MS=2500
 ```
@@ -140,7 +140,7 @@ build_flags =
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大数量 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大数量 |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
-| `ESP8266BASE_WEB_AUTH_PASS` | `"esp8266"` | Basic Auth 编译期默认密码 |
+| `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` | Basic Auth 编译期默认密码 |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
@@ -153,7 +153,7 @@ build_flags =
 
 根目录配置使用 `full_demo` 作为默认构建入口；单独编译示例时进入 `examples/<name>` 目录运行 `pio run -e esp12f`。上传统一使用 `460800` baud。
 
-必要自动化测试入口是 `tools/test_all.sh`。默认测试只做静态检查、轻量逻辑检查和 `esp12f` 编译矩阵，不烧录、不访问串口、不依赖硬件；`tools/test_all.sh --all-envs` 会额外编译 `nodemcuv2` 环境。
+必要自动化测试入口是 `tools/test_all.sh`。默认测试只做静态检查、轻量逻辑检查和 `esp12f` 编译矩阵，不烧录、不访问串口、不依赖硬件；`tools/test_all.sh --all-envs` 会额外编译根项目 `nodemcuv2` 和除 `full_demo` 外的示例 `nodemcuv2` 环境。
 
 ---
 

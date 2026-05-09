@@ -34,11 +34,15 @@ for token in enableFileSink ESP8266BASE_LOG_FILE_LEVEL ESP8266BASE_CFG_READ_AUDI
   rg -n "$token" README.md docs >/dev/null || fail "documentation token missing: $token"
 done
 
-echo "[static] checking Web Auth password redaction"
-if rg -n 'web_(auth_loaded|password_).*password=%s|expected=%s|new=%s|confirm=%s' src/Esp8266BaseWeb.cpp; then
-  fail "Web Auth password must not be logged in plaintext"
+echo "[static] checking default Web Auth password"
+rg -n '#define\s+ESP8266BASE_WEB_AUTH_PASS\s+"admin"' src/Esp8266BaseWeb.h >/dev/null || fail "default Web Auth password must be admin"
+if rg -n 'ESP8266BASE_WEB_AUTH_PASS=\\"esp8266\\"|admin / esp8266|admin/esp8266|`"esp8266"` \| Basic Auth 编译期默认密码' \
+  README.md docs examples platformio.ini; then
+  fail "old default Web Auth password reference found"
 fi
-rg -n '\(redacted\)' src/Esp8266BaseConfig.cpp >/dev/null || fail "web password audit redaction missing"
+if rg -n '\(redacted\)|不得明文|不会明文|只记录长度、来源和结果|敏感信息处理' src README.md docs AGENTS.md CHANGELOG.md; then
+  fail "password redaction wording found; plaintext password logging is intentional"
+fi
 
 echo "[static] checking optional Watchdog guards"
 for file in src/Esp8266BaseOTA.cpp src/Esp8266BaseSleep.cpp; do
