@@ -730,8 +730,20 @@ void Esp8266BaseWeb::_handleSystemHome() {
     char bootCount[12];
     snprintf(bootCount, sizeof(bootCount), "%lu", (unsigned long)_bootCount);
 
+    char chipId[18];
+    snprintf(chipId, sizeof(chipId), "ESP8266-%06X", (unsigned)(ESP.getChipId() & 0xFFFFFFUL));
+
+    char cpuFreq[12];
+    snprintf(cpuFreq, sizeof(cpuFreq), "%u MHz", (unsigned)ESP.getCpuFreqMHz());
+
     char flashSize[16];
     Esp8266BaseUtil::formatBytes(ESP.getFlashChipRealSize(), flashSize, sizeof(flashSize));
+
+    char sketchSize[16];
+    Esp8266BaseUtil::formatBytes(ESP.getSketchSize(), sketchSize, sizeof(sketchSize));
+
+    char otaFree[16];
+    Esp8266BaseUtil::formatBytes(ESP.getFreeSketchSpace(), otaFree, sizeof(otaFree));
 
     char uptime[32];
     _formatDuration(millis() / 1000UL, uptime, sizeof(uptime));
@@ -754,18 +766,21 @@ void Esp8266BaseWeb::_handleSystemHome() {
 #endif
 
     sendChunk("<div class=grid><section><h3>Network</h3><dl>");
+    _sendKv("Hostname", _hostname);
     _sendKv("WiFi", wifiState);
     _sendKv("SSID", ssid);
     _sendKv("IP", ip);
     _sendKv("RSSI", rssi);
     _sendKv("MAC", mac);
     sendChunk("</dl></section><section><h3>Device</h3><dl>");
-    _sendKv("Hostname", _hostname);
     _sendKv("Firmware", _fwName);
     _sendKv("Version", _fwVersion);
-    _sendKv("Boot", bootCount);
-    _sendKv("Chip", "ESP8266");
+    _sendKv("Boot count", bootCount);
+    _sendKv("Chip ID", chipId);
+    _sendKv("CPU", cpuFreq);
     _sendKv("Flash", flashSize);
+    _sendKv("Sketch", sketchSize);
+    _sendKv("OTA free", otaFree);
     sendChunk("</dl></section><section><h3>Time</h3><dl>");
     _sendKv("Uptime", uptime);
     _sendKv("NTP", ntpState);

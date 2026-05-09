@@ -483,6 +483,8 @@ static bool isRunning();
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
+系统首页的 Network 卡片显示 `Hostname/WiFi/SSID/IP/RSSI/MAC`；Device 卡片显示 `Firmware/Version/Boot count/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。
+
 `/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 
 ### 使用示例

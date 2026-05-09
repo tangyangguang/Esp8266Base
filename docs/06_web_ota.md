@@ -52,8 +52,8 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
 | 分组 | 字段 |
 |---|---|
-| Network | WiFi 状态、SSID、IP、RSSI、MAC |
-| Device | Hostname、Firmware、Version、Boot count、Chip、Flash |
+| Network | Hostname、WiFi 状态、SSID、IP、RSSI、MAC |
+| Device | Firmware、Version、Boot count、Chip ID、CPU、Flash、Sketch、OTA free |
 | Time | Uptime、NTP 状态、当前时间、Boot time |
 
 `Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
