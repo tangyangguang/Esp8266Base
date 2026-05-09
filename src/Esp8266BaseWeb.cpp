@@ -305,7 +305,9 @@ void Esp8266BaseWeb::_sendSystemLinks() {
     }
     _sendLink(systemHome, _builtinLabel(Esp8266BaseWebBuiltinLabel::HOME), nullptr);
     _sendLink("/wifi", _builtinLabel(Esp8266BaseWebBuiltinLabel::WIFI), nullptr);
+#if ESP8266BASE_USE_OTA
     _sendLink("/ota", _builtinLabel(Esp8266BaseWebBuiltinLabel::OTA), nullptr);
+#endif
     _sendLink("/logs", _builtinLabel(Esp8266BaseWebBuiltinLabel::LOGS), nullptr);
     _sendLink("/auth", _builtinLabel(Esp8266BaseWebBuiltinLabel::AUTH), nullptr);
     _sendLink("/reboot", _builtinLabel(Esp8266BaseWebBuiltinLabel::REBOOT), nullptr);
@@ -333,8 +335,10 @@ bool Esp8266BaseWeb::begin() {
     _server.on("/wifi",   HTTP_POST, _handleWiFiPost);
     _server.on("/auth",   HTTP_GET,  _handleAuthGet);
     _server.on("/auth",   HTTP_POST, _handleAuthPost);
+#if ESP8266BASE_USE_OTA
     _server.on("/ota",    HTTP_GET,  _handleOtaGet);
     // POST /ota 由 Esp8266BaseOTA::begin() 注册（需要 upload handler）
+#endif
     _server.on("/logs",   HTTP_GET,  _handleLogsGet);
     _server.on("/logs/clear", HTTP_POST, _handleLogsClearPost);
     _server.on("/reboot", HTTP_GET,  _handleRebootGet);

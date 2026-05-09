@@ -30,8 +30,8 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/wifi` | POST | Basic Auth | 保存 WiFi 凭证，提交后 303 回 GET |
 | `/auth` | GET | Basic Auth | 修改 Web Basic Auth 密码 |
 | `/auth` | POST | Basic Auth | 校验当前密码并保存 `eb_web_pass`，提交后 303 回 GET |
-| `/ota` | GET | Basic Auth | OTA 上传页，带进度显示 |
-| `/ota` | POST | Basic Auth | 固件上传，由 OTA 模块处理 |
+| `/ota` | GET | Basic Auth | OTA 上传页，带进度显示；仅 `ESP8266BASE_USE_OTA=1` 时注册 |
+| `/ota` | POST | Basic Auth | 固件上传，由 OTA 模块处理；仅 `ESP8266BASE_USE_OTA=1` 时注册 |
 | `/logs` | GET | Basic Auth | 查看文件日志状态、文件等级、缓存状态和单个日志段内容 |
 | `/logs/clear` | POST | Basic Auth | 清空文件日志；入口在 Tools 页面 |
 | `/reboot` | GET | Basic Auth | Tools 页面，包含清除文件日志和重启设备 |
@@ -206,6 +206,7 @@ http://<device-ip>/ota
 
 - `GET /ota` 需要 Basic Auth。
 - `POST /ota` 也需要 Basic Auth。
+- `ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面和导航入口，避免上传表单可见但 POST `/ota` 返回 404。
 - 上传页面使用 XMLHttpRequest 显示百分比和字节数。
 - 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。
 - OTA 上传期间暂停 Watchdog，上传完成后恢复。

@@ -84,11 +84,13 @@ mdns_started host=esp-demo.local service=http tcp_port=80
 
 - OTA 上传返回 `Unauthorized`。
 - 上传中断或失败。
+- 上传进度到 100%，最后显示 `HTTP 404 Not found`。
 
 处理：
 
 - 重新打开 `/ota` 输入 Basic Auth。
 - 确认 `ESP8266BASE_USE_WEB=1` 且 `ESP8266BASE_USE_OTA=1`。
+- 如果进度到 100% 后返回 `HTTP 404 Not found`，通常是当前运行固件没有注册 `POST /ota`：例如固件编译时 `ESP8266BASE_USE_OTA=0`，或来自旧版本 Web 页面。先用串口刷入启用 OTA 的固件，再继续用 Web OTA。
 - 确认固件适合当前分区空间。
 - 上传时保持供电和 WiFi 稳定。
 

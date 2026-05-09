@@ -473,8 +473,8 @@ static bool isRunning();
 | `/wifi` | POST | 保存凭证并重连；成功或失败后 `303` 跳回 GET 页面，避免刷新重复提交 |
 | `/auth` | GET | 修改 Web Basic Auth 密码页面（需要 Basic Auth） |
 | `/auth` | POST | 校验当前密码并保存 `eb_web_pass`，成功后 `303` 回 `/auth?saved=1` |
-| `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度） |
-| `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，强制 Basic Auth） |
+| `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度；仅 `ESP8266BASE_USE_OTA=1` 时注册） |
+| `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，强制 Basic Auth；仅 `ESP8266BASE_USE_OTA=1` 时注册） |
 | `/logs` | GET | 查看文件日志状态、大小和内容（需要 Basic Auth） |
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 Tools 页面） |
 | `/reboot` | GET | Tools 页面，包含清除文件日志和重启设备 |
@@ -511,6 +511,8 @@ void handleSensorPage() {
 头文件：`Esp8266BaseOTA.h`
 
 OTA 模块由 `Esp8266Base` 在内部初始化，应用代码通常无需直接调用。
+
+`ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面、导航入口或上传 POST 路由；如果设备仍显示 OTA 页面但上传最终返回 HTTP 404，说明当前运行固件可能来自旧版本或业务代码自定义页面，需要先通过串口刷入启用 OTA 的固件。
 
 ### 函数
 

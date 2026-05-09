@@ -318,11 +318,16 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, "Clear File Logs", "Tools page log clear action")
     require_token(web_cpp, "_redirect(ok ? \"/reboot?cleared=1\" : \"/reboot?error=clear_failed\")",
                   "log clear returns to Tools page")
+    require_token(web_cpp, "#if ESP8266BASE_USE_OTA", "OTA page/nav compile guard")
+    require_token(web_cpp, '_sendLink("/ota"', "OTA nav link")
+    require_token(web_cpp, '_server.on("/ota",    HTTP_GET,  _handleOtaGet);', "OTA GET route")
     require_token(api, "`Status/WiFi/OTA/Logs/Auth/Tools`", "API built-in nav label list")
     require_token(web_doc, "Hostname、WiFi 状态、SSID、IP、RSSI、MAC", "Web doc Network hostname fields")
     require_token(web_doc, "Boot count、Chip ID、CPU、Flash、Sketch、OTA free",
                   "Web doc Device card hardware fields")
     require_token(api, "ESP8266-XXXXXX", "API chip id display format")
+    require_token(api, "仅 `ESP8266BASE_USE_OTA=1` 时注册", "API OTA route guard doc")
+    require_token(web_doc, "不会注册 `/ota` 页面和导航入口", "Web OTA disabled route doc")
     if '_sendKv("Chip", "ESP8266")' in web_cpp:
         fail("Web home must not show a fixed Chip value")
     require_token(api, "入口在 Tools 页面", "API log clear location")

@@ -63,7 +63,7 @@
 |------|----------|-----|-------|
 | `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,096B | 313,087B |
 | `sleep_watchdog` | Sleep + WDT | 33,024B | 314,383B |
-| `custom_web` | Web + mDNS + WDT | 38,220B | 390,780B |
+| `custom_web` | Web + mDNS + WDT | 38,224B | 389,208B |
 | `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 40,912B | 412,156B |
 | `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 42,936B | 420,732B |
 
