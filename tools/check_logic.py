@@ -202,11 +202,16 @@ def test_web_auth_contract() -> None:
 def test_watchdog_and_ota_failure_contract() -> None:
     watchdog_cpp = read("src/Esp8266BaseWatchdog.cpp")
     watchdog_doc = read("docs/09_power_watchdog.md")
+    memory_doc = read("docs/04_memory_budget.md")
     ota_cpp = read("src/Esp8266BaseOTA.cpp")
 
     require_token(watchdog_cpp, "system_rtc_mem_write", "Watchdog RTC timeout marker")
     require_token(watchdog_cpp, "source=rtc", "Watchdog RTC recovery log")
+    require_token(watchdog_cpp, "if (countOk && pendingOk)", "Watchdog RTC clear after Config persistence")
     require_token(watchdog_doc, "超时时只写 RTC user memory 标记，不写 LittleFS", "Watchdog no-Flash timeout doc")
+    require_token(watchdog_doc, "64-66", "Watchdog RTC reserved words doc")
+    require_token(memory_doc, "96B DRAM + 12B RTC", "Watchdog RTC memory budget")
+    require_token(memory_doc, "RTC user memory word 64-66", "Watchdog RTC memory budget detail")
     if "Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   (int)_resetCount)" in watchdog_cpp:
         fail("Watchdog timeout branch must not write WDT count to LittleFS directly")
     require_token(ota_cpp, "Update.end();", "OTA write failure cleanup")

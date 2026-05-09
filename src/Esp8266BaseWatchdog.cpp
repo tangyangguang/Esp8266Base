@@ -75,11 +75,14 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
         } else if (_resetCount < 0xFFFFFFFFUL) {
             _resetCount++;
         }
-        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT, (int)_resetCount);
-        Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 0);
-        _clearWdtRtcState();
-        ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u source=rtc",
-                          (unsigned)_resetCount);
+        bool countOk = Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT, (int)_resetCount);
+        bool pendingOk = Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 0);
+        if (countOk && pendingOk) {
+            _clearWdtRtcState();
+        }
+        ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u source=rtc persist=%s",
+                          (unsigned)_resetCount,
+                          (countOk && pendingOk) ? "success" : "failed");
     } else if (pending && resetReasonIsWdt) {
         _wasWdtReset = true;
         // 兼容旧固件写入的 pending 标志。

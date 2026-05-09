@@ -154,7 +154,7 @@ time_synchronized actual_time=...
 
 ```text
 watchdog_timeout elapsed=... reset_count=... action=restart
-boot_after_watchdog_reset reset_count=... source=rtc
+boot_after_watchdog_reset reset_count=... source=rtc persist=success
 ```
 
 可能原因：
