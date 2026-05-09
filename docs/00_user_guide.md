@@ -119,7 +119,7 @@ http://192.168.4.1/
 
 除 `/health` 外，内置管理页面使用 Basic Auth。默认认证来自 `ESP8266BASE_WEB_AUTH_USER/PASS`，业务代码可在 `Esp8266Base::begin()` 前调用 `Esp8266BaseWeb::setDefaultAuth(user, pass)` 覆盖默认值；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。Web 已启动后再调用 `setDefaultAuth()` 会被忽略。
 
-访问 `/auth` 可修改 Web 密码。页面会校验当前密码、新密码和确认值，保存成功后写入 `eb_web_pass` 并立即使用新密码；`clearAll()` 后恢复默认认证。
+访问 `/auth` 可修改 Web 密码。页面会校验当前密码、新密码和确认值，保存成功后写入 `eb_web_pass` 并立即使用新密码；`clearAll()` 后恢复默认认证。Web Auth 密码不会明文写入 Web 日志或 Config 审计日志。
 
 表单页面使用轻量 JS 防重复提交，POST 后尽量重定向回 GET，避免刷新重复提交。
 
@@ -194,7 +194,7 @@ Esp8266BaseConfig::setIntDeferred("my_count", count + 1);
 - string value 最长 96 字节。
 - 库保留 key 使用 `eb_` 前缀，业务项目不要使用这个前缀。
 - 高频计数使用 deferred 写入；默认每 5000ms 最多刷 1 条，同 key 高频更新只保留最新 pending 值。
-- deep sleep 或重启前调用 `Esp8266BaseConfig::flush()`。
+- deep sleep 或重启前调用 `Esp8266BaseConfig::flush()`，并检查返回值；返回 `false` 表示至少一条 deferred 配置未写入成功。
 
 配置存储细节见 `docs/05_config_storage.md`。
 

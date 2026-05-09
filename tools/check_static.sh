@@ -34,4 +34,17 @@ for token in enableFileSink ESP8266BASE_LOG_FILE_LEVEL ESP8266BASE_CFG_READ_AUDI
   rg -n "$token" README.md docs >/dev/null || fail "documentation token missing: $token"
 done
 
+echo "[static] checking Web Auth password redaction"
+if rg -n 'web_(auth_loaded|password_).*password=%s|expected=%s|new=%s|confirm=%s' src/Esp8266BaseWeb.cpp; then
+  fail "Web Auth password must not be logged in plaintext"
+fi
+rg -n '\(redacted\)' src/Esp8266BaseConfig.cpp >/dev/null || fail "web password audit redaction missing"
+
+echo "[static] checking optional Watchdog guards"
+for file in src/Esp8266BaseOTA.cpp src/Esp8266BaseSleep.cpp; do
+  if rg -n 'Esp8266BaseWatchdog::(pause|resume)\(' "$file" >/dev/null; then
+    rg -n '#if ESP8266BASE_USE_WATCHDOG' "$file" >/dev/null || fail "Watchdog call without feature guard in $file"
+  fi
+done
+
 echo "[static] ok"

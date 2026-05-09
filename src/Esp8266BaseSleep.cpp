@@ -82,7 +82,9 @@ void Esp8266BaseSleep::deepSleep(uint32_t sleepSec) {
                       (unsigned)sleepSec, heapBuf);
 
     // 预飞：暂停看门狗
+#if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::pause();
+#endif
 
     // 预飞：flush Config（确保待写数据落盘）
     Esp8266BaseConfig::flush();

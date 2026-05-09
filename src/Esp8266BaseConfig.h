@@ -76,7 +76,7 @@ public:
     // 每轮 loop 调用，到达间隔后最多写 1 条 pending 到 Flash
     static void handle();
 
-    // 强制写完所有 pending（deep sleep / 重启前调用）
+    // 强制写完所有 pending（deep sleep / 重启前调用）。失败项会保留 pending。
     static bool flush();
 
     // 删除所有 /cfg_* 配置文件（恢复出厂配置前调用）

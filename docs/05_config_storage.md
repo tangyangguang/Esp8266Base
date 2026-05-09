@@ -116,7 +116,7 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 `handle()` 到达 deferred flush 间隔后最多处理 1 条 deferred，不在单次 handle 中批量写多条。业务每轮更新同一个 deferred key 时，只覆盖内存 pending 值，不会每轮写 Flash。
 
 **规则 4：深睡/重启前 flush**  
-进入 deep sleep 或调用 `ESP.restart()` 前，必须调用 `Esp8266BaseConfig::flush()` 写完所有 pending。
+进入 deep sleep 或调用 `ESP.restart()` 前，必须调用 `Esp8266BaseConfig::flush()` 写完所有 pending，并检查返回值。只有全部 pending 写入成功才返回 `true`；失败项会保留在 deferred 队列中，等待后续 `handle()` 或下一次 `flush()` 重试。
 
 ---
 

@@ -228,7 +228,7 @@ static void handle();
 ```cpp
 static bool flush();
 ```
-强制写完所有 pending 写入。在 deep sleep 或 `ESP.restart()` 前调用。
+强制写完所有 pending 写入。在 deep sleep 或 `ESP.restart()` 前调用。只有全部 pending 写入成功才返回 `true`；任一写入失败时返回 `false`，失败项会保留在 deferred 队列中，等待后续 `handle()` 或下一次 `flush()` 重试。
 
 ```cpp
 static bool clearAll();
@@ -400,7 +400,7 @@ static bool addPage(const char* path, const char* title, Esp8266BaseWebHandler h
 static bool addApi (const char* path, Esp8266BaseWebHandler handler);
 static bool addNavItem(const char* path, const char* title);
 ```
-注册应用路由。必须在 `Esp8266Base::begin()` 之后调用。`addPage` 注册 GET 并默认加入业务导航；带 `title` 的重载用于设置导航标签。`addNavItem` 用于覆盖已注册页面的导航标签。`addApi` 同时响应 GET 和 POST。路径最长 24 字符，上限分别 4 / 6 个。
+注册应用路由。必须在 `Esp8266Base::begin()` 之后调用。`addPage` 注册 GET 并默认加入业务导航；带 `title` 的重载用于设置导航标签。`addNavItem` 用于覆盖已注册页面的导航标签。`addApi` 同时响应 GET 和 POST。路径必须以 `/` 开头，长度小于 24 字符，只允许字母、数字、`/`、`-`、`_`、`.`；上限分别 4 / 6 个。
 
 ```cpp
 static void setDeviceName(const char* name);
@@ -454,7 +454,7 @@ static bool isRunning();
 
 `setSystemInfo()` 由 `Esp8266Base::begin()` 调用，用于向内置首页传入 hostname、固件名、版本和库级 boot count。业务项目通常不需要直接调用。
 
-`setDefaultAuth()` 只设置 Web Basic Auth 默认值，必须在 `Esp8266Base::begin()` 前调用；Web 已启动后调用会被忽略。认证优先级为：
+`setDefaultAuth()` 只设置 Web Basic Auth 默认值，必须在 `Esp8266Base::begin()` 前调用；Web 已启动后调用会被忽略。Web Auth 密码不会明文写入 Web 日志或 Config 审计日志。认证优先级为：
 
 | 优先级 | 来源 | 说明 |
 |---:|---|---|
@@ -527,10 +527,10 @@ OTA 上传是否正在进行。
 
 1. GET /ota 页面使用 Web Basic Auth；页面内用 XMLHttpRequest 上传并显示进度
 2. POST /ota 在上传开始时强制验证 Basic Auth；未认证请求返回 `401 Unauthorized`
-3. 上传开始：`Esp8266BaseWatchdog::pause()`，调用 `Update.begin(ESP.getFreeSketchSpace())`
+3. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，然后调用 `Update.begin(ESP.getFreeSketchSpace())`
 4. 上传期间：分块写入固件，每块后 `yield()`
-5. 上传完成：`Esp8266BaseWatchdog::resume()`，延迟 500ms 后 `ESP.restart()`
-6. 上传失败或中止：`Esp8266BaseWatchdog::resume()`，返回简短错误信息
+5. 上传完成：启用 Watchdog 时 `resume()`，延迟 500ms 后 `ESP.restart()`
+6. 上传失败或中止：启用 Watchdog 时 `resume()`，返回简短错误信息
 
 OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。
 
@@ -638,7 +638,7 @@ static void deepSleep(uint32_t sleepSec);
 ```
 进入 deep sleep（单位：秒，最大 3600）。内部自动执行：
 
-1. `Esp8266BaseWatchdog::pause()`
+1. 启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`
 2. `Esp8266BaseConfig::flush()`
 3. `WiFi.disconnect()` + `WiFi.mode(WIFI_OFF)`
 4. 延迟 100ms

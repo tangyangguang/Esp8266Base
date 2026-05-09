@@ -246,16 +246,22 @@ bool Esp8266BaseConfig::_setStrInternal(const char* op, const char* key, const c
     bool changed = !hadOld || strcmp(oldVal, value) != 0;
     if (!changed) {
         if (_auditEnabled) {
+            bool redact = key && strcmp(key, ESP8266BASE_CFG_KEY_WEB_PASS) == 0;
             ESP8266BASE_LOG_I("Cfg ", "config_audit op=%s key=%s old=%s new=%s changed=no_change mode=immediate result=skipped",
-                              op, key, oldVal, value);
+                              op, key,
+                              redact ? "(redacted)" : oldVal,
+                              redact ? "(redacted)" : value);
         }
         return true;
     }
 
     bool ok = _writeRaw(path, value);
     if (_auditEnabled || !ok) {
+        bool redact = key && strcmp(key, ESP8266BASE_CFG_KEY_WEB_PASS) == 0;
         ESP8266BASE_LOG_I("Cfg ", "config_audit op=%s key=%s old=%s new=%s changed=changed mode=immediate result=%s",
-                          op, key, hadOld ? oldVal : "(none)", value,
+                          op, key,
+                          redact ? "(redacted)" : (hadOld ? oldVal : "(none)"),
+                          redact ? "(redacted)" : value,
                           ok ? "success" : "failed");
     }
     return ok;
@@ -264,11 +270,12 @@ bool Esp8266BaseConfig::_setStrInternal(const char* op, const char* key, const c
 void Esp8266BaseConfig::_auditRead(const char* op, const char* key, const char* value, bool found) {
     if (!_readAuditEnabled) return;
 #if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_CFG_READ_AUDIT_LEVEL
+    bool redact = key && strcmp(key, ESP8266BASE_CFG_KEY_WEB_PASS) == 0;
     Esp8266BaseLog::log(ESP8266BASE_CFG_READ_AUDIT_LEVEL,
                         "Cfg ",
                         "config_audit op=%s key=%s found=%s value=%s",
                         op, key ? key : "(null)", found ? "yes" : "no",
-                        value ? value : "");
+                        redact ? "(redacted)" : (value ? value : ""));
 #endif
 }
 
@@ -396,6 +403,7 @@ void Esp8266BaseConfig::handle() {
 
 bool Esp8266BaseConfig::flush() {
     if (!_ready) return false;
+    bool allOk = true;
     for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
         if (_deferred[i].used) {
             bool ok = false;
@@ -405,11 +413,15 @@ bool Esp8266BaseConfig::flush() {
                 ESP8266BASE_LOG_I("Cfg ", "config_audit op=flush key=%s result=%s",
                                   _deferred[i].key, ok ? "success" : "failed");
             }
-            _deferred[i].used = false;
+            if (ok) {
+                _deferred[i].used = false;
+            } else {
+                allOk = false;
+            }
             _lastDeferredFlushMs = millis();
         }
     }
-    return true;
+    return allOk;
 }
 
 bool Esp8266BaseConfig::clearAll() {

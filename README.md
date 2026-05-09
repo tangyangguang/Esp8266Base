@@ -180,11 +180,11 @@ build_flags =
 
 WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。需要重新进入 AP 配网时，先清除 WiFi 凭证再重启。
 
-Web Auth 策略：认证默认值按 `ESP8266BASE_WEB_AUTH_USER/PASS` → `Esp8266BaseWeb::setDefaultAuth()` 的顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。内置 `/auth` 页面可修改密码，保存后立即使用新密码，`clearAll()` 后恢复默认值。
+Web Auth 策略：认证默认值按 `ESP8266BASE_WEB_AUTH_USER/PASS` → `Esp8266BaseWeb::setDefaultAuth()` 的顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。内置 `/auth` 页面可修改密码，保存后立即使用新密码，`clearAll()` 后恢复默认值。Web Auth 密码不会明文写入 Web 日志或 Config 审计日志。
 
 OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
 
-日志策略：WiFi 相关日志会有意输出 SSID 和密码明文，并同时输出 `password_length`。这是为了现场观察和调试连接问题的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
+日志策略：WiFi 相关日志会有意输出 SSID 和密码明文，并同时输出 `password_length`。这是为了现场观察和调试连接问题的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。Web Auth 密码按敏感信息处理，只记录长度、来源和结果。
 
 可选文件日志和配置审计：
 

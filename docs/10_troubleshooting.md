@@ -197,7 +197,7 @@ verify_failed
 - key <= 24 字符。
 - string value <= 96 字节。
 - 高频写入使用 deferred，但队列只有 4 条。
-- deep sleep/restart 前调用 `Esp8266BaseConfig::flush()`。
+- deep sleep/restart 前调用 `Esp8266BaseConfig::flush()` 并检查返回值。
 
 ---
 

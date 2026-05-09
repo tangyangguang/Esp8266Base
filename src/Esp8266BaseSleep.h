@@ -10,7 +10,7 @@
 //                       ⚠ 需要 GPIO16 连接 RST 引脚
 //
 // deepSleep 前自动执行预飞检查：
-//   Log 诊断 → pause Watchdog → flush Config → WiFi disconnect → ESP.deepSleep()
+//   Log 诊断 → pause Watchdog(启用时) → flush Config → WiFi disconnect → ESP.deepSleep()
 //
 // RAM 预算：<= 48B
 // ----------------------------------------------------------------------------

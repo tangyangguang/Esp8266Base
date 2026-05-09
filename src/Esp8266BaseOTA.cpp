@@ -44,7 +44,9 @@ bool Esp8266BaseOTA::isInProgress() {
 // ----------------------------------------------------------------------------
 void Esp8266BaseOTA::_handleUploadComplete() {
     _inProgress = false;
+#if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::resume();
+#endif
 
     if (!_started && _status != 401) {
         _status = 400;
@@ -96,7 +98,9 @@ void Esp8266BaseOTA::_handleUploadChunk() {
 
         _started = true;
         _inProgress = true;
+#if ESP8266BASE_USE_WATCHDOG
         Esp8266BaseWatchdog::pause();
+#endif
         char heapBuf[16];
         char spaceBuf[16];
         Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
@@ -139,7 +143,9 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         _rejected = true;
         _status = 499;
         _inProgress = false;
+#if ESP8266BASE_USE_WATCHDOG
         Esp8266BaseWatchdog::resume();
+#endif
         ESP8266BASE_LOG_W("OTA ", "upload_aborted");
     }
 }

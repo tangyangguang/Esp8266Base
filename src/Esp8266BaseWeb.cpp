@@ -187,6 +187,7 @@ static void _sendAttrEscaped(const char* s) {
         const char* repl = nullptr;
         switch (*s) {
             case '&':  repl = "&amp;"; break;
+            case '\'': repl = "&#39;"; break;
             case '"':  repl = "&quot;"; break;
             case '<':  repl = "&lt;"; break;
             case '>':  repl = "&gt;"; break;
@@ -237,7 +238,7 @@ static void _sendLogSection(const char* label, const char* path, uint32_t size) 
     Esp8266BaseWeb::sendChunk("\n\n----- ");
     Esp8266BaseWeb::sendChunk(label);
     Esp8266BaseWeb::sendChunk(" file=");
-    Esp8266BaseWeb::sendChunk(path);
+    _sendAttrEscaped(path);
     Esp8266BaseWeb::sendChunk(" size=");
     Esp8266BaseWeb::sendChunk(sizeBuf);
     Esp8266BaseWeb::sendChunk(" -----\n");
@@ -253,7 +254,16 @@ static void _redirect(const char* url) {
 static bool _isValidPath(const char* path) {
     if (!path || path[0] != '/') return false;
     size_t len = strlen(path);
-    return len > 1 && len < 24;
+    if (len <= 1 || len >= 24) return false;
+    for (size_t i = 1; i < len; i++) {
+        char c = path[i];
+        bool ok = (c >= 'a' && c <= 'z') ||
+                  (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') ||
+                  c == '/' || c == '-' || c == '_' || c == '.';
+        if (!ok) return false;
+    }
+    return true;
 }
 
 const char* Esp8266BaseWeb::_builtinLabel(Esp8266BaseWebBuiltinLabel label) {
@@ -262,11 +272,12 @@ const char* Esp8266BaseWeb::_builtinLabel(Esp8266BaseWebBuiltinLabel label) {
 
 void Esp8266BaseWeb::_sendLink(const char* path, const char* title, const char* cls) {
     Esp8266BaseWeb::sendChunk("<a href='");
-    Esp8266BaseWeb::sendChunk(path);
+    _sendAttrEscaped(path);
     Esp8266BaseWeb::sendChunk("'");
     if (cls && cls[0]) {
-        Esp8266BaseWeb::sendChunk(" class=");
-        Esp8266BaseWeb::sendChunk(cls);
+        Esp8266BaseWeb::sendChunk(" class='");
+        _sendAttrEscaped(cls);
+        Esp8266BaseWeb::sendChunk("'");
     }
     Esp8266BaseWeb::sendChunk(">");
     _sendAttrEscaped(title);
@@ -526,8 +537,8 @@ void Esp8266BaseWeb::_loadPersistedAuth() {
         strncpy(_authPass, pass, sizeof(_authPass) - 1);
         _authPass[sizeof(_authPass) - 1] = '\0';
     }
-    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s password=%s user_source=%s pass_source=%s password_length=%u",
-                      _authUser, _authPass,
+    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s user_source=%s pass_source=%s password_length=%u",
+                      _authUser,
                       (userFound && user[0]) ? "persisted" : "default",
                       (passFound && pass[0]) ? "persisted" : "default",
                       (unsigned)strlen(_authPass));
@@ -692,8 +703,9 @@ void Esp8266BaseWeb::_handleSystemHome() {
     }
     if (!checkAuth()) return;
     sendHeader();
-    snprintf(_wb, sizeof(_wb), "<h2>%s</h2>", _brandTitle());
-    sendChunk(_wb);
+    sendChunk("<h2>");
+    _sendAttrEscaped(_brandTitle());
+    sendChunk("</h2>");
 
     const char* wifiState = "Connecting";
     const char* ssid = Esp8266BaseWiFi::ssid();
@@ -866,29 +878,29 @@ void Esp8266BaseWeb::_handleAuthPost() {
     strncpy(confirm, confirmArg.c_str(), sizeof(confirm) - 1);
 
     if (strcmp(current, _authPass) != 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=current_password_mismatch current=%s expected=%s",
-                          current, _authPass);
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=current_password_mismatch current_length=%u expected_length=%u",
+                          (unsigned)strlen(current), (unsigned)strlen(_authPass));
         _redirect("/auth?error=current");
         return;
     }
     if (strcmp(newPass, confirm) != 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=mismatch new=%s confirm=%s",
-                          newPass, confirm);
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=mismatch new_length=%u confirm_length=%u",
+                          (unsigned)strlen(newPass), (unsigned)strlen(confirm));
         _redirect("/auth?error=mismatch");
         return;
     }
 
     if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WEB_PASS, newPass)) {
-        ESP8266BASE_LOG_E("Web ", "web_password_update_failed password=%s password_length=%u",
-                          newPass, (unsigned)strlen(newPass));
+        ESP8266BASE_LOG_E("Web ", "web_password_update_failed password_length=%u",
+                          (unsigned)strlen(newPass));
         _redirect("/auth?error=save_failed");
         return;
     }
 
     strncpy(_authPass, newPass, sizeof(_authPass) - 1);
     _authPass[sizeof(_authPass) - 1] = '\0';
-    ESP8266BASE_LOG_I("Web ", "web_password_updated password=%s password_length=%u result=success",
-                      _authPass, (unsigned)strlen(_authPass));
+    ESP8266BASE_LOG_I("Web ", "web_password_updated password_length=%u result=success",
+                      (unsigned)strlen(_authPass));
     _redirect("/auth?saved=1");
 }
 
@@ -917,7 +929,7 @@ void Esp8266BaseWeb::_handleLogsGet() {
     Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkMaxBytes() * Esp8266BaseLog::fileSinkRotateFiles(),
                                  totalBuf, sizeof(totalBuf));
     sendChunk("<p>File sink: enabled<br>Path: ");
-    sendChunk(Esp8266BaseLog::fileSinkPath());
+    _sendAttrEscaped(Esp8266BaseLog::fileSinkPath());
     snprintf(_wb, sizeof(_wb), "<br>Rotation files: %u<br>File level: %s (%u)",
              (unsigned)Esp8266BaseLog::fileSinkRotateFiles(),
              Esp8266BaseLog::fileSinkLevelName(),

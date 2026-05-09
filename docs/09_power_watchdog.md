@@ -106,7 +106,7 @@ Esp8266BaseWatchdog::pause();
 Esp8266BaseWatchdog::resume();
 ```
 
-`resume()` 会重置计时，避免暂停期间累计时间导致误触发。
+`resume()` 会重置计时，避免暂停期间累计时间导致误触发。`ESP8266BASE_USE_WATCHDOG=0` 时，OTA 和 deep sleep 路径会跳过 Watchdog pause/resume。
 
 ---
 

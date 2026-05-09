@@ -6,7 +6,7 @@
 //
 // 依赖 Esp8266BaseWeb 已通过 begin() 启动
 // 注册 POST /ota 路由（与 GET /ota 由 Web 模块处理的页面配合）
-// 上传期间自动 pause/resume Watchdog，每块后调用 yield()
+// 上传期间在 Watchdog 启用时自动 pause/resume，每块后调用 yield()
 // /ota 页面和上传 POST 都使用 Esp8266BaseWeb 的 Basic Auth
 //
 // RAM 预算：<= 136B

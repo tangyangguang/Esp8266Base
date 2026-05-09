@@ -34,6 +34,20 @@
 
 没有内容的小节可以省略。
 
+## 2026-05-08
+
+### 修复
+
+- 修复 `ESP8266BASE_USE_OTA=1` 且 `ESP8266BASE_USE_WATCHDOG=0` 时 OTA 模块引用 Watchdog pause/resume 导致链接失败的问题。
+- 修复 `ESP8266BASE_USE_SLEEP=1` 且 `ESP8266BASE_USE_WATCHDOG=0` 时 deep sleep 路径引用 Watchdog pause 导致链接失败的问题。
+- Web Auth 日志不再输出明文密码；只记录来源、长度和结果。`eb_web_pass` 在 Config 读写审计日志中也会显示为 `(redacted)`。
+- Web 内置导航和系统首页对应用配置的路径、标题、日志路径做更严格的 HTML 输出处理，应用路由路径限制为 `/` 开头且仅包含字母、数字、`/`、`-`、`_`、`.`。
+- `Esp8266BaseConfig::flush()` 现在会聚合返回写入结果；任一 pending 写入失败时返回 `false`，并保留失败项，避免重启或 deep sleep 前静默丢失 deferred 配置。
+
+### 优化
+
+- 精简项目 `AGENTS.md` 到 100 行以内，保留核心规则并将细节继续交给 `README.md` 和 `docs/`。
+
 ## 2026-05-07
 
 ### 新增

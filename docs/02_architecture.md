@@ -54,8 +54,8 @@ Esp8266Base（主入口）
   │     └── Esp8266BaseOTA  （依赖 Web server 已启动；GET 页面使用 Web Basic Auth）
   ├── Esp8266BaseNTP        （WiFi 连接后由 handle() 触发 begin()；SNTP + 主动 UDP NTP 双路径对时）
   ├── Esp8266BaseMDNS       （WiFi 连接后由 handle() 触发 begin()；WiFi 掉线后重置，重连自动重启）
-  ├── Esp8266BaseSleep      （deepSleep 前调用 Config::flush() 和 Watchdog::pause()）
-  └── Esp8266BaseWatchdog   （OTA 期间自动 pause/resume；handle() 最后执行，确保其他模块已运行）
+  ├── Esp8266BaseSleep      （deepSleep 前调用 Config::flush()；启用 Watchdog 时先 pause）
+  └── Esp8266BaseWatchdog   （启用时 OTA 期间自动 pause/resume；handle() 最后执行，确保其他模块已运行）
 ```
 
 依赖方向：单向，下层不反向依赖上层。
@@ -87,14 +87,15 @@ Esp8266Base（主入口）
 
 ```text
 1. Esp8266BaseConfig::handle()      — 刷新 deferred 写入（每轮最多 1 条）
-2. Esp8266BaseWiFi::handle()        — 状态机推进
-3. NTP 触发检测                      — WiFi 已连接且 NTP 未启动：调用 Esp8266BaseNTP::begin()
-4. mDNS 触发检测                     — WiFi 已连接且 mDNS 未启动：调用 Esp8266BaseMDNS::begin()
+2. Esp8266BaseLog::handle()         — 低优先级文件日志缓存到期刷新
+3. Esp8266BaseWiFi::handle()        — 状态机推进
+4. NTP 触发检测                      — WiFi 已连接且 NTP 未启动：调用 Esp8266BaseNTP::begin()
+5. mDNS 触发检测                     — WiFi 已连接且 mDNS 未启动：调用 Esp8266BaseMDNS::begin()
                                        WiFi 掉线时：重置 mDNS 状态，等待重连后重启
-5. Esp8266BaseNTP::handle()         — `ESP8266BASE_USE_NTP=1` 时
-6. Esp8266BaseMDNS::handle()        — `ESP8266BASE_USE_MDNS=1` 时
-7. Esp8266BaseWeb::handle()         — `ESP8266BASE_USE_WEB=1` 时，请求前后喂库级 WDT
-8. Esp8266BaseWatchdog::handle()    — `ESP8266BASE_USE_WATCHDOG=1` 时
+6. Esp8266BaseNTP::handle()         — `ESP8266BASE_USE_NTP=1` 时
+7. Esp8266BaseMDNS::handle()        — `ESP8266BASE_USE_MDNS=1` 时
+8. Esp8266BaseWeb::handle()         — `ESP8266BASE_USE_WEB=1` 时，请求前后喂库级 WDT
+9. Esp8266BaseWatchdog::handle()    — `ESP8266BASE_USE_WATCHDOG=1` 时
    Esp8266BaseWatchdog::feed()      — 本轮完成后喂狗
 ```
 
@@ -150,6 +151,8 @@ ESP8266WebServer（端口 80）
         _apis [0..5]   GET+POST      （最多 6 个）
 ```
 
+应用路由路径必须以 `/` 开头，长度小于 24 字符，并且只允许字母、数字、`/`、`-`、`_`、`.`。内置导航和系统首页会对应用提供的路径、标题和日志路径做 HTML 输出转义。
+
 路由表内存结构：
 
 ```cpp
@@ -193,7 +196,7 @@ struct DeferredEntry {
 static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 ```
 
-`handle()` 到达 `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` 后最多写 1 条；同 key 高频更新只覆盖内存 pending 值。`flush()` 强制写完所有 pending（deep sleep / restart 前调用）。
+`handle()` 到达 `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` 后最多写 1 条；同 key 高频更新只覆盖内存 pending 值。`flush()` 强制写完所有 pending（deep sleep / restart 前调用），只有全部 pending 写入成功才返回 `true`；失败项会保留在队列中，避免静默丢失 deferred 配置。
 
 ---
 
@@ -201,11 +204,11 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 
 | 模块 | 静态 RAM 预算 | 包含内容 |
 |------|--------------|----------|
-| Esp8266BaseLog | <= 160B | level(1B) + fn ptr(4B)；格式缓冲 128B 在栈上 |
-| Esp8266BaseConfig | <= 512B | deferred 队列 4×34B + 状态标志 + deferred flush 计时器 + 读写缓冲 97B |
+| Esp8266BaseLog | <= 240B 默认；INFO/DEBUG 文件缓存另加 <=512B | level/timeFn/hook/file sink path/current size；格式缓冲 128B 在栈上 |
+| Esp8266BaseConfig | <= 432B | deferred 队列 + 状态标志 + deferred flush 计时器 |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器 + _apSSID(28B) + _ip(16B) + _staSSID/Pass(128B) |
-| Esp8266BaseWeb（路由表） | <= 800B | AppRoute 数组 480B + auth(48B) + device/home/title(96B) + labels(96B) + request trace(37B) + 状态 |
-| Esp8266BaseOTA | <= 128B | _inProgress(1B) |
+| Esp8266BaseWeb（路由表） | <= 880B | AppRoute 数组 480B + auth(48B) + device/home/title(96B) + labels(96B) + request trace(37B) + 状态 |
+| Esp8266BaseOTA | <= 136B | _inProgress/_rejected/_started/_status |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + 标志(2B) |
