@@ -34,6 +34,12 @@
 
 没有内容的小节可以省略。
 
+## 2026-05-09
+
+### 行为变化 / 使用建议
+
+- Watchdog 移除 `eb_wdt_pending` 配置 key 和对应兼容识别路径；WDT 超时只通过 RTC user memory 标记，下一次正常启动阶段只补写 `eb_wdt_count`。业务项目不要读取、写入或依赖 `eb_wdt_pending`。
+
 ## 2026-05-08
 
 ### 修复

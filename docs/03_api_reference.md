@@ -223,7 +223,7 @@ static bool setBoolDeferred(const char* key, bool value);
 ```cpp
 static void handle();
 ```
-到达 `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` 间隔后最多刷 1 条 pending 写入。通过 `Esp8266Base::handle()` 自动调用。默认间隔 5000ms；设为 0 可恢复每轮最多刷 1 条的旧行为。
+到达 `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` 间隔后最多刷 1 条 pending 写入。通过 `Esp8266Base::handle()` 自动调用。默认间隔 5000ms；设为 0 表示每轮 `handle()` 最多刷 1 条，不等待时间间隔。
 
 ```cpp
 static bool flush();
@@ -269,7 +269,6 @@ static void enableConfigReadAudit(bool enabled);
 | `eb_web_user` | Web Auth 持久化用户名，覆盖默认用户名 |
 | `eb_web_pass` | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 |
 | `eb_wdt_count` | WDT 重启累计次数 |
-| `eb_wdt_pending` | 上次是否 WDT 重启 |
 | `eb_boot_count` | 启动次数，无符号十进制字符串，最大 4,294,967,295，达到上限后饱和 |
 
 ### 使用示例
@@ -708,7 +707,7 @@ static bool wasWatchdogReset();
 static uint32_t resetCount();
 static void clearResetCount();
 ```
-WDT 重启累计次数查询与清零。超时路径先写 RTC 标记并重启，下一次正常启动阶段补写 Config key `eb_wdt_count`；`eb_wdt_pending` 仅用于兼容旧固件残留标记。
+WDT 重启累计次数查询与清零。超时路径先写 RTC 标记并重启，下一次正常启动阶段补写 Config key `eb_wdt_count`。
 
 ### 默认配置
 

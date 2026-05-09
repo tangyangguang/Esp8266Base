@@ -25,7 +25,6 @@
 ├── cfg_eb_wifi_ssid    → "IOTHOME"
 ├── cfg_eb_wifi_pass    → "secret123"
 ├── cfg_eb_wdt_count    → "5"
-├── cfg_eb_wdt_pending  → "0"
 └── cfg_<key>        → <value>
 ```
 
@@ -99,7 +98,6 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | `eb_web_user` | string | Web Auth 持久化用户名，覆盖默认用户名 | 立即 |
 | `eb_web_pass` | string | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 | 立即 |
 | `eb_wdt_count` | int32 | WDT 重启累计次数，超时重启后的正常启动阶段补写 | immediate |
-| `eb_wdt_pending` | bool | 旧固件兼容标记，新超时路径不再写入 | 立即 |
 | `eb_boot_count` | uint32 string | 启动次数，库自动维护，达到 4,294,967,295 后饱和 | immediate |
 
 ---

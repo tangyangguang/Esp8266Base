@@ -20,9 +20,14 @@ if rg -n '#define\s+ESP8266BASE_CFG_KEY_.*"(wifi_ssid|wifi_pass|ap_pass|hostname
   fail "reserved config key without eb_ prefix found"
 fi
 
-for key in eb_wifi_ssid eb_wifi_pass eb_boot_count eb_wdt_count eb_wdt_pending; do
+for key in eb_wifi_ssid eb_wifi_pass eb_boot_count eb_wdt_count; do
   rg -n "$key" src docs README.md >/dev/null || fail "required reserved key/reference missing: $key"
 done
+
+if rg -n 'eb_wdt_pending|ESP8266BASE_CFG_KEY_WDT_PENDING|旧行为|旧固件|旧无前缀|兼容旧|兼容标记' \
+  src README.md docs; then
+  fail "historical compatibility wording or WDT pending compatibility key found"
+fi
 
 echo "[static] checking example log levels"
 if rg -n 'ESP8266BASE_LOG_LEVEL=0' examples platformio.ini; then

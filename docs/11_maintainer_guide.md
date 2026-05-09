@@ -128,4 +128,4 @@ tools/test_all.sh
 rg -n 'eb_wifi_ssid|eb_wifi_pass|eb_boot_count|enableFileSink|rotateFiles|/logs/clear' README.md docs
 ```
 
-旧无前缀 key 不应作为库保留 key 出现在文档或代码中。
+无前缀 key 不应作为库保留 key 出现在文档或代码中。

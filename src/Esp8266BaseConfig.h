@@ -46,7 +46,6 @@
 #define ESP8266BASE_CFG_KEY_WEB_USER     "eb_web_user"
 #define ESP8266BASE_CFG_KEY_WEB_PASS     "eb_web_pass"
 #define ESP8266BASE_CFG_KEY_WDT_COUNT    "eb_wdt_count"
-#define ESP8266BASE_CFG_KEY_WDT_PENDING  "eb_wdt_pending"
 #define ESP8266BASE_CFG_KEY_BOOT_COUNT   "eb_boot_count"
 
 class Esp8266BaseConfig {
