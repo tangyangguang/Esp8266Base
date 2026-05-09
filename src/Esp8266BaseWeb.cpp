@@ -32,7 +32,7 @@ char                     Esp8266BaseWeb::_titleBuf[48] = "ESP8266";
 char                     Esp8266BaseWeb::_activeUri[32] = "";
 char                     Esp8266BaseWeb::_activeMethod[5] = "";
 char                     Esp8266BaseWeb::_builtinLabels[6][16] = {
-    "Home", "WiFi", "OTA", "Logs", "Auth", "Reboot"
+    "Status", "WiFi", "OTA", "Logs", "Auth", "Tools"
 };
 Esp8266BaseWebHomeMode Esp8266BaseWeb::_homeMode = Esp8266BaseWebHomeMode::DEFAULT_SYSTEM_HOME;
 Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSystemNavMode::TOP_NAV;
@@ -43,7 +43,7 @@ Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSyste
 static const char WEB_HEAD[] PROGMEM =
     "<meta charset=UTF-8><meta name=viewport content=width=device-width>"
     "<style>"
-    "body{font-family:Arial,Helvetica,sans-serif;padding:12px;max-width:760px;margin:0 auto;"
+    "body{font-family:Arial,Helvetica,sans-serif;padding:12px;max-width:920px;margin:0 auto;"
     "font-size:15px;font-weight:normal;color:#222;line-height:1.45}"
     "h2{margin:0 0 14px;font-size:22px;font-weight:600;line-height:1.25}"
     "p{margin:0 0 12px}"
@@ -56,11 +56,11 @@ static const char WEB_HEAD[] PROGMEM =
     "input.danger{background:#c23b35}"
     "nav{margin-bottom:16px;border-bottom:1px solid #e5e5e5;padding-bottom:10px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
     "nav a{font-size:14px}.brand{background:transparent;color:#222;font-weight:600;padding-left:0}"
-    ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:14px 0}"
-    "section{border:1px solid #e5e5e5;border-radius:4px;padding:12px;background:#fafafa}"
+    ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:14px 0}"
+    "section{border:1px solid #e5e5e5;border-radius:4px;padding:12px;background:#fafafa;min-width:0}"
     "h3{margin:0 0 10px;font-size:16px;font-weight:600;line-height:1.25}"
-    "dl{margin:0;display:grid;grid-template-columns:88px 1fr;gap:6px 8px;font-size:15px}"
-    "dt{color:#666}dd{margin:0;overflow-wrap:anywhere}"
+    "dl{margin:0;display:grid;grid-template-columns:80px minmax(0,1fr);gap:5px 10px;font-size:14px}"
+    "dt{color:#666;min-width:0}dd{margin:0;min-width:0;overflow-wrap:break-word}"
     "pre{font-size:13px;font-weight:normal;line-height:1.35;overflow-x:auto}"
     ".sysnav{margin-top:14px;padding-top:8px;border-top:1px solid #e5e5e5;display:flex;flex-wrap:wrap;gap:4px}"
     ".tabs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
@@ -142,23 +142,27 @@ static const char WEB_AUTH_FORM[] PROGMEM =
     "<input type=submit value='Update Password'>"
     "</form>";
 
-static const char WEB_REBOOT_CONFIRM[] PROGMEM =
-    "<h2>Reboot</h2>"
-    "<p>Are you sure you want to reboot the device?</p>"
-    "<form method=post onsubmit=\"return confirm('Reboot device now?')&&once(this)\">"
-    "<input class=danger type=submit value='Confirm Reboot'>"
-    " <a href='/'>Cancel</a>"
-    "</form>";
+static const char WEB_TOOLS_PAGE[] PROGMEM =
+    "<h2>Tools</h2>"
+    "<div class=grid>"
+    "<section><h3>File Logs</h3>"
+    "<p>Clear all rotated file log segments.</p>"
+    "<form method=post action='/logs/clear' onsubmit=\"return confirm('Clear file logs?')&&once(this)\">"
+    "<input class=danger type=submit value='Clear File Logs'>"
+    "</form></section>"
+    "<section><h3>Reboot</h3>"
+    "<p>Flush pending config and file logs, then restart the device.</p>"
+    "<form method=post action='/reboot' onsubmit=\"return confirm('Reboot device now?')&&once(this)\">"
+    "<input class=danger type=submit value='Reboot Device'>"
+    "</form></section>"
+    "</div>";
 
 static const char WEB_REBOOTING[] PROGMEM =
     "<h2>Rebooting...</h2>"
     "<p>Device is restarting. Please wait a few seconds, then <a href='/'>reload</a>.</p>";
 
 static const char WEB_LOGS_PRE[] PROGMEM =
-    "<h2>Logs</h2>"
-    "<form method=post action='/logs/clear' onsubmit=\"return confirm('Clear log file?')&&once(this)\">"
-    "<input class=danger type=submit value='Clear Log'>"
-    "</form>";
+    "<h2>Logs</h2>";
 
 // 内部共享小缓冲（用于 sendContent_P 和动态内容，非重入）
 static char _wb[160];
@@ -726,6 +730,9 @@ void Esp8266BaseWeb::_handleSystemHome() {
     char bootCount[12];
     snprintf(bootCount, sizeof(bootCount), "%lu", (unsigned long)_bootCount);
 
+    char flashSize[16];
+    Esp8266BaseUtil::formatBytes(ESP.getFlashChipRealSize(), flashSize, sizeof(flashSize));
+
     char uptime[32];
     _formatDuration(millis() / 1000UL, uptime, sizeof(uptime));
 
@@ -757,6 +764,8 @@ void Esp8266BaseWeb::_handleSystemHome() {
     _sendKv("Firmware", _fwName);
     _sendKv("Version", _fwVersion);
     _sendKv("Boot", bootCount);
+    _sendKv("Chip", "ESP8266");
+    _sendKv("Flash", flashSize);
     sendChunk("</dl></section><section><h3>Time</h3><dl>");
     _sendKv("Uptime", uptime);
     _sendKv("NTP", ntpState);
@@ -1021,13 +1030,22 @@ void Esp8266BaseWeb::_handleLogsClearPost() {
     _markRequest();
     bool ok = Esp8266BaseLog::clearFileSink();
     ESP8266BASE_LOG_I("Web ", "log_file_clear_requested result=%s", ok ? "success" : "failed");
-    _redirect(ok ? "/logs?cleared=1" : "/logs?error=clear_failed");
+    _redirect(ok ? "/reboot?cleared=1" : "/reboot?error=clear_failed");
 }
 
 void Esp8266BaseWeb::_handleRebootGet() {
     if (!checkAuth()) return;
     sendHeader();
-    sendContent_P(WEB_REBOOT_CONFIRM);
+    if (_server.hasArg("cleared")) {
+        sendChunk("<p class=ok>File logs cleared.</p>");
+    } else if (_server.hasArg("error")) {
+        char err[24] = "";
+        strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
+        if (strcmp(err, "clear_failed") == 0) {
+            sendChunk("<p class=err>Failed to clear file logs.</p>");
+        }
+    }
+    sendContent_P(WEB_TOOLS_PAGE);
     sendFooter();
 }
 

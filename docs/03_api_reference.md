@@ -409,7 +409,7 @@ static void setHomeMode(Esp8266BaseWebHomeMode mode);
 static void setSystemNavMode(Esp8266BaseWebSystemNavMode mode);
 static void setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const char* title);
 ```
-配置 Web 信息架构，通常在 `Esp8266Base::begin()` 前调用。`setDeviceName` 设置导航品牌显示名。`setHomePath` 设置业务首页路径。`setBuiltinLabel` 可覆盖 `Home/WiFi/OTA/Logs/Auth/Reboot` 的导航标签，便于中文本地化。
+配置 Web 信息架构，通常在 `Esp8266Base::begin()` 前调用。`setDeviceName` 设置导航品牌显示名。`setHomePath` 设置业务首页路径。`setBuiltinLabel` 可覆盖 `Status/WiFi/OTA/Logs/Auth/Tools` 的导航标签，便于中文本地化。
 
 首页模式：
 
@@ -477,8 +477,8 @@ static bool isRunning();
 | `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度） |
 | `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，强制 Basic Auth） |
 | `/logs` | GET | 查看文件日志状态、大小和内容（需要 Basic Auth） |
-| `/logs/clear` | POST | 清空文件日志（需要 Basic Auth） |
-| `/reboot` | GET | 重启确认页 |
+| `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 Tools 页面） |
+| `/reboot` | GET | Tools 页面，包含清除文件日志和重启设备 |
 | `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
 
@@ -527,12 +527,12 @@ OTA 上传是否正在进行。
 
 1. GET /ota 页面使用 Web Basic Auth；页面内用 XMLHttpRequest 上传并显示进度
 2. POST /ota 在上传开始时强制验证 Basic Auth；未认证请求返回 `401 Unauthorized`
-3. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，然后调用 `Update.begin(ESP.getFreeSketchSpace())`
-4. 上传期间：分块写入固件，每块后 `yield()`
-5. 上传完成：启用 Watchdog 时 `resume()`，延迟 500ms 后 `ESP.restart()`
-6. 上传失败或中止：启用 Watchdog 时 `resume()`，返回简短错误信息
+3. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，然后调用 `Update.begin(ESP.getFreeSketchSpace())`，日志输出 `upload_started`
+4. 上传期间：分块写入固件，每块后 `yield()`，按 10% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
+5. 上传完成：输出 `upload_finished`，启用 Watchdog 时 `resume()`，成功后输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
+6. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed` 和 `average_speed`，返回简短错误信息
 
-OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。
+OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。当前不计算 SHA256；接收是否成功由 `Update.write()` 和 `Update.end(true)` 的写入与镜像校验结果决定。
 
 ---
 

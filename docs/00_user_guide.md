@@ -113,8 +113,8 @@ http://192.168.4.1/
 | `/auth` | 修改 Web 密码 |
 | `/ota` | OTA 上传 |
 | `/logs` | 文件日志查看 |
-| `/logs/clear` | 清空文件日志 |
-| `/reboot` | 重启确认 |
+| `/logs/clear` | 清空文件日志；入口在 Tools 页面 |
+| `/reboot` | Tools 页面：清除文件日志、重启设备 |
 | `/health` | 健康信息 JSON |
 
 除 `/health` 外，内置管理页面使用 Basic Auth。默认认证来自 `ESP8266BASE_WEB_AUTH_USER/PASS`，业务代码可在 `Esp8266Base::begin()` 前调用 `Esp8266BaseWeb::setDefaultAuth(user, pass)` 覆盖默认值；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。Web 已启动后再调用 `setDefaultAuth()` 会被忽略。

@@ -33,8 +33,8 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/ota` | GET | Basic Auth | OTA 上传页，带进度显示 |
 | `/ota` | POST | Basic Auth | 固件上传，由 OTA 模块处理 |
 | `/logs` | GET | Basic Auth | 查看文件日志状态、文件等级、缓存状态和单个日志段内容 |
-| `/logs/clear` | POST | Basic Auth | 清空文件日志 |
-| `/reboot` | GET | Basic Auth | 重启确认页 |
+| `/logs/clear` | POST | Basic Auth | 清空文件日志；入口在 Tools 页面 |
+| `/reboot` | GET | Basic Auth | Tools 页面，包含清除文件日志和重启设备 |
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
 | `/health` | GET | 无 | JSON 健康信息 |
 
@@ -53,7 +53,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | 分组 | 字段 |
 |---|---|
 | Network | WiFi 状态、SSID、IP、RSSI、MAC |
-| Device | Hostname、Firmware、Version、Boot count |
+| Device | Hostname、Firmware、Version、Boot count、Chip、Flash |
 | Time | Uptime、NTP 状态、当前时间、Boot time |
 
 `Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
@@ -65,11 +65,11 @@ Esp8266BaseWeb::setDeviceName("Sensor Node");
 Esp8266BaseWeb::setHomePath("/sensor");
 Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);
 Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode::FOOTER_COMPACT);
-Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "System");
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "Status");
 Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::WIFI, "Network");
 Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::OTA, "Update");
-Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::AUTH, "Password");
-Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Restart");
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::AUTH, "Auth");
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Tools");
 
 Esp8266Base::begin();
 Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
@@ -91,7 +91,7 @@ Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
 | `BOTTOM_NAV` | 基础功能入口在页面内容下方，降低视觉层级 |
 | `FOOTER_COMPACT` | 基础功能入口在 footer 中与 `Free heap` 同区，小字号、可换行，适合业务应用主界面 |
 
-`FOOTER_COMPACT` 不输出 “System Tools” 标题，不使用 `details/summary`，也不显示展开图标。桌面端系统入口和 `Free heap` 尽量同一行；窄屏下自然换行，避免横向滚动。
+`FOOTER_COMPACT` 不输出额外工具标题，不使用 `details/summary`，也不显示展开图标。桌面端状态入口和 `Free heap` 尽量同一行；窄屏下自然换行，避免横向滚动。
 
 ---
 
@@ -207,9 +207,11 @@ http://<device-ip>/ota
 - `GET /ota` 需要 Basic Auth。
 - `POST /ota` 也需要 Basic Auth。
 - 上传页面使用 XMLHttpRequest 显示百分比和字节数。
+- 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。
 - OTA 上传期间暂停 Watchdog，上传完成后恢复。
 - 使用 `Update.begin(ESP.getFreeSketchSpace())`。
 - 成功后 flush 响应并重启。
+- 当前不计算 SHA256；OTA 依赖 `Update.write()` / `Update.end(true)` 的写入与镜像校验结果决定是否接受固件。
 
 如果出现 `Unauthorized`，先确认浏览器当前会话已经通过 Basic Auth，或重新打开 `/ota` 输入用户名密码。
 

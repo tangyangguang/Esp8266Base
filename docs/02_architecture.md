@@ -141,8 +141,8 @@ ESP8266WebServer（端口 80）
   │     GET  /ota
   │     POST /ota        ──► Esp8266BaseOTA 处理（强制 Basic Auth）
   │     GET  /logs
-  │     POST /logs/clear ──► 清空文件日志
-  │     GET  /reboot      ──► 确认页
+  │     POST /logs/clear ──► 清空文件日志（入口在 Tools 页面）
+  │     GET  /reboot      ──► Tools 页面：清除文件日志、重启设备
   │     POST /reboot      ──► flush Config 后重启
   │     GET  /health
   │

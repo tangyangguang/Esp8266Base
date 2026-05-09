@@ -40,7 +40,7 @@
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb（路由表） | <= 880B | AppRoute 4×48+6×48=480B + _authUser/Pass(48B) + _deviceName/_homePath(48B) + hostname/firmware/version/title/boot(116B) + labels(96B) + _activeUri/Method(37B) + 状态 |
-| Esp8266BaseOTA | <= 136B | _inProgress/_rejected/_started/_status |
+| Esp8266BaseOTA | <= 160B | _inProgress/_rejected/_started/_status + 上传计时、字节数和 10% 进度日志状态 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
@@ -63,9 +63,9 @@
 |------|----------|-----|-------|
 | `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,096B | 313,087B |
 | `sleep_watchdog` | Sleep + WDT | 33,156B | 314,691B |
-| `custom_web` | Web + mDNS + WDT | 38,192B | 390,192B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 40,496B | 410,428B |
-| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 42,520B | 419,004B |
+| `custom_web` | Web + mDNS + WDT | 38,300B | 390,756B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 40,976B | 412,284B |
+| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 42,988B | 420,856B |
 
 Arduino SDK 内部开销（不可控，参考值）：
 

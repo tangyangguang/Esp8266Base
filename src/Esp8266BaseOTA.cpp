@@ -15,6 +15,40 @@ bool Esp8266BaseOTA::_inProgress = false;
 bool Esp8266BaseOTA::_rejected = false;
 bool Esp8266BaseOTA::_started = false;
 uint16_t Esp8266BaseOTA::_status = 200;
+uint32_t Esp8266BaseOTA::_startedMs = 0;
+uint32_t Esp8266BaseOTA::_uploadedBytes = 0;
+uint32_t Esp8266BaseOTA::_requestBytes = 0;
+uint8_t  Esp8266BaseOTA::_lastProgressPct = 0;
+
+static uint32_t _elapsedMs(uint32_t startedMs) {
+    return startedMs ? (uint32_t)(millis() - startedMs) : 0;
+}
+
+static void _formatSeconds(uint32_t ms, char* out, size_t len) {
+    if (!out || len == 0) return;
+    uint32_t centis = (ms + 5UL) / 10UL;
+    snprintf(out, len, "%lu.%02lus",
+             (unsigned long)(centis / 100UL),
+             (unsigned long)(centis % 100UL));
+}
+
+static void _formatRate(uint32_t bytes, uint32_t ms, char* out, size_t len) {
+    if (!out || len == 0) return;
+    if (ms == 0) {
+        strncpy(out, "0 B/s", len - 1);
+        out[len - 1] = '\0';
+        return;
+    }
+    uint32_t bps = (uint32_t)(((uint64_t)bytes * 1000ULL) / (uint64_t)ms);
+    if (bps < 1024UL) {
+        snprintf(out, len, "%lu B/s", (unsigned long)bps);
+    } else {
+        uint32_t kb10 = (uint32_t)(((uint64_t)bps * 10ULL + 512ULL) / 1024ULL);
+        snprintf(out, len, "%lu.%lu KB/s",
+                 (unsigned long)(kb10 / 10UL),
+                 (unsigned long)(kb10 % 10UL));
+    }
+}
 
 // ----------------------------------------------------------------------------
 // begin — 注册 POST /ota
@@ -66,15 +100,31 @@ void Esp8266BaseOTA::_handleUploadComplete() {
 
     if (ok) {
         char heapBuf[16];
+        char uploadedBuf[16];
+        char elapsedBuf[16];
+        char rateBuf[20];
+        uint32_t elapsed = _elapsedMs(_startedMs);
         Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
-        ESP8266BASE_LOG_I("OTA ", "upload_success free_heap=%s action=reboot", heapBuf);
+        Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
+        _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
+        _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
+        ESP8266BASE_LOG_I("OTA ", "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s action=reboot",
+                          uploadedBuf, elapsedBuf, rateBuf, heapBuf);
         Esp8266BaseConfig::flush();
         Esp8266BaseLog::flushFileSink();
         delay(500);
         ESP.restart();
     } else {
-        ESP8266BASE_LOG_E("OTA ", "upload_failed status=%u error=%s",
-                          (unsigned)_status, Update.getErrorString().c_str());
+        char uploadedBuf[16];
+        char elapsedBuf[16];
+        char rateBuf[20];
+        uint32_t elapsed = _elapsedMs(_startedMs);
+        Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
+        _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
+        _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
+        ESP8266BASE_LOG_E("OTA ", "upload_failed status=%u uploaded=%s elapsed=%s average_speed=%s error=%s",
+                          (unsigned)_status, uploadedBuf, elapsedBuf, rateBuf,
+                          Update.getErrorString().c_str());
     }
     _started = false;
 }
@@ -89,6 +139,10 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         _rejected = false;
         _started = false;
         _status = 200;
+        _startedMs = 0;
+        _uploadedBytes = 0;
+        _requestBytes = 0;
+        _lastProgressPct = 0;
         if (!Esp8266BaseWeb::verifyAuth()) {
             _rejected = true;
             _status = 401;
@@ -98,15 +152,20 @@ void Esp8266BaseOTA::_handleUploadChunk() {
 
         _started = true;
         _inProgress = true;
+        _startedMs = millis();
+        _requestBytes = (uint32_t)upload.contentLength;
 #if ESP8266BASE_USE_WATCHDOG
         Esp8266BaseWatchdog::pause();
 #endif
         char heapBuf[16];
         char spaceBuf[16];
+        char requestBuf[16];
         Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
         Esp8266BaseUtil::formatBytes(ESP.getFreeSketchSpace(), spaceBuf, sizeof(spaceBuf));
-        ESP8266BASE_LOG_I("OTA ", "upload_started file=%s free_heap=%s sketch_space=%s",
-                          upload.filename.c_str(), heapBuf, spaceBuf);
+        Esp8266BaseUtil::formatBytes(_requestBytes, requestBuf, sizeof(requestBuf));
+        ESP8266BASE_LOG_I("OTA ", "upload_started file=%s request_total=%s started_ms=%lu free_heap=%s sketch_space=%s",
+                          upload.filename.c_str(), requestBuf,
+                          (unsigned long)_startedMs, heapBuf, spaceBuf);
         if (!Update.begin(ESP.getFreeSketchSpace())) {
             _rejected = true;
             _inProgress = false;
@@ -119,13 +178,41 @@ void Esp8266BaseOTA::_handleUploadChunk() {
 
     } else if (upload.status == UPLOAD_FILE_WRITE) {
         if (_rejected) return;
+        uint32_t uploadedNow = (uint32_t)(upload.totalSize + upload.currentSize);
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
             _rejected = true;
             _status = 500;
             Update.end();
-            char totalBuf[16];
-            Esp8266BaseUtil::formatBytes(upload.totalSize, totalBuf, sizeof(totalBuf));
-            ESP8266BASE_LOG_E("OTA ", "update_write_failed written=%s", totalBuf);
+            _uploadedBytes = uploadedNow;
+            char uploadedBuf[16];
+            char elapsedBuf[16];
+            char rateBuf[20];
+            uint32_t elapsed = _elapsedMs(_startedMs);
+            Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
+            _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
+            _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
+            ESP8266BASE_LOG_E("OTA ", "update_write_failed uploaded=%s elapsed=%s average_speed=%s",
+                              uploadedBuf, elapsedBuf, rateBuf);
+        } else {
+            _uploadedBytes = uploadedNow;
+            if (_requestBytes > 0) {
+                uint8_t progress = (uint8_t)(((uint64_t)_uploadedBytes * 100ULL) / (uint64_t)_requestBytes);
+                if (progress > 100) progress = 100;
+                if (progress >= 10 && progress / 10 > _lastProgressPct / 10) {
+                    _lastProgressPct = (progress / 10) * 10;
+                    char uploadedBuf[16];
+                    char requestBuf[16];
+                    char elapsedBuf[16];
+                    char rateBuf[20];
+                    uint32_t elapsed = _elapsedMs(_startedMs);
+                    Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
+                    Esp8266BaseUtil::formatBytes(_requestBytes, requestBuf, sizeof(requestBuf));
+                    _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
+                    _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
+                    ESP8266BASE_LOG_I("OTA ", "upload_progress progress=%u%% bytes=%s request_total=%s speed=%s elapsed=%s",
+                                      (unsigned)_lastProgressPct, uploadedBuf, requestBuf, rateBuf, elapsedBuf);
+                }
+            }
         }
         yield();  // 每块写入后让出 CPU，防止 Soft WDT
 
@@ -137,16 +224,33 @@ void Esp8266BaseOTA::_handleUploadChunk() {
 #endif
             return;
         }
+        if (upload.totalSize > _uploadedBytes) {
+            _uploadedBytes = (uint32_t)upload.totalSize;
+        }
         if (Update.end(true)) {
-            char totalBuf[16];
+            char uploadedBuf[16];
             char heapBuf[16];
-            Esp8266BaseUtil::formatBytes(upload.totalSize, totalBuf, sizeof(totalBuf));
+            char elapsedBuf[16];
+            char rateBuf[20];
+            uint32_t elapsed = _elapsedMs(_startedMs);
+            Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
             Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
-            ESP8266BASE_LOG_I("OTA ", "upload_finished total_size=%s free_heap=%s", totalBuf, heapBuf);
+            _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
+            _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
+            ESP8266BASE_LOG_I("OTA ", "upload_finished uploaded=%s elapsed=%s average_speed=%s free_heap=%s",
+                              uploadedBuf, elapsedBuf, rateBuf, heapBuf);
         } else {
             _rejected = true;
             _status = 500;
-            ESP8266BASE_LOG_E("OTA ", "update_end_failed error=%s", Update.getErrorString().c_str());
+            char uploadedBuf[16];
+            char elapsedBuf[16];
+            char rateBuf[20];
+            uint32_t elapsed = _elapsedMs(_startedMs);
+            Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
+            _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
+            _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
+            ESP8266BASE_LOG_E("OTA ", "update_end_failed uploaded=%s elapsed=%s average_speed=%s error=%s",
+                              uploadedBuf, elapsedBuf, rateBuf, Update.getErrorString().c_str());
         }
 #if ESP8266BASE_USE_WATCHDOG
         Esp8266BaseWatchdog::resume();
@@ -157,10 +261,21 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         _rejected = true;
         _status = 499;
         _inProgress = false;
+        if (upload.totalSize > _uploadedBytes) {
+            _uploadedBytes = (uint32_t)upload.totalSize;
+        }
 #if ESP8266BASE_USE_WATCHDOG
         Esp8266BaseWatchdog::resume();
 #endif
-        ESP8266BASE_LOG_W("OTA ", "upload_aborted");
+        char uploadedBuf[16];
+        char elapsedBuf[16];
+        char rateBuf[20];
+        uint32_t elapsed = _elapsedMs(_startedMs);
+        Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
+        _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
+        _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
+        ESP8266BASE_LOG_W("OTA ", "upload_aborted uploaded=%s elapsed=%s average_speed=%s",
+                          uploadedBuf, elapsedBuf, rateBuf);
     }
 }
 #endif

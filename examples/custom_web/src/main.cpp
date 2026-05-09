@@ -118,10 +118,10 @@ void setup() {
     Esp8266BaseWeb::setHomePath("/sensor");
     Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);
     Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode::FOOTER_COMPACT);
-    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "System");
+    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "Status");
     Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::WIFI, "Network");
     Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::OTA, "Update");
-    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Restart");
+    Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Tools");
 
     Esp8266Base::begin();
 

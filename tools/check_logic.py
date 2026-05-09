@@ -215,6 +215,16 @@ def test_watchdog_and_ota_failure_contract() -> None:
     if "Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   (int)_resetCount)" in watchdog_cpp:
         fail("Watchdog timeout branch must not write WDT count to LittleFS directly")
     require_token(ota_cpp, "Update.end();", "OTA write failure cleanup")
+    require_token(ota_cpp, "upload_progress progress=%u%% bytes=%s request_total=%s speed=%s elapsed=%s",
+                  "OTA progress diagnostics")
+    require_token(ota_cpp, "upload_finished uploaded=%s elapsed=%s average_speed=%s free_heap=%s",
+                  "OTA finish diagnostics")
+    require_token(ota_cpp, "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s action=reboot",
+                  "OTA success diagnostics")
+    require_token(ota_cpp, "_startedMs", "OTA elapsed state")
+    require_token(ota_cpp, "_uploadedBytes", "OTA uploaded byte state")
+    require_token(ota_cpp, "_requestBytes", "OTA request byte state")
+    require_token(ota_cpp, "_lastProgressPct", "OTA progress step state")
 
 
 def test_public_default_tables() -> None:
@@ -238,7 +248,12 @@ def test_public_default_tables() -> None:
     require_token(web_doc, "路径字符集", "Web route path charset table")
     require_token(web_doc, "addPage()` / `addApi()` 返回 `false`", "Web invalid route path behavior")
     require_token(web_doc, "Web Auth 改密成功和失败路径都会", "Web Auth plaintext change logs")
+    require_token(web_doc, "upload_progress", "Web OTA progress log doc")
+    require_token(web_doc, "average_speed", "Web OTA speed log doc")
+    require_token(api, "upload_finished", "API OTA finish log doc")
+    require_token(api, "average_speed", "API OTA speed log doc")
     require_token(memory, "它不是运行时 free heap 实测", "memory build RAM scope")
+    require_token(memory, "Esp8266BaseOTA | <= 160B", "OTA memory budget with diagnostics")
 
     if "| LittleFS | ~2-3KB |" in architecture or "| Arduino Core | ~3-4KB |" in architecture:
         fail("architecture doc must not keep orphan RAM table rows")
@@ -252,6 +267,12 @@ def test_web_home_contract() -> None:
     wifi_h = read("src/Esp8266BaseWiFi.h")
     api = read("docs/03_api_reference.md")
     web_doc = read("docs/06_web_ota.md")
+    user_guide = read("docs/00_user_guide.md")
+    architecture = read("docs/02_architecture.md")
+    observability = read("docs/07_observability.md")
+    maintainer = read("docs/11_maintainer_guide.md")
+    custom_web = read("examples/custom_web/src/main.cpp")
+    full_demo = read("examples/full_demo/src/main.cpp")
 
     for token in [
         "setSystemInfo",
@@ -274,6 +295,40 @@ def test_web_home_contract() -> None:
         fail("old Web title-only API must not remain")
     if "系统首页以轻量分组展示" not in web_doc:
         fail("Web doc must describe system home information groups")
+
+    require_token(web_cpp, '"Status", "WiFi", "OTA", "Logs", "Auth", "Tools"', "default Web nav labels")
+    require_token(web_cpp, 'max-width:920px', "Web home wider card layout")
+    require_token(web_cpp, 'grid-template-columns:repeat(auto-fit,minmax(240px,1fr))', "Web home card min width")
+    require_token(web_cpp, 'ESP.getFlashChipRealSize()', "Web home flash size")
+    require_token(web_cpp, '_sendKv("Chip", "ESP8266")', "Web home chip field")
+    require_token(web_cpp, '_sendKv("Flash", flashSize)', "Web home flash field")
+    require_token(web_cpp, "<h2>Tools</h2>", "Tools page heading")
+    require_token(web_cpp, "Clear File Logs", "Tools page log clear action")
+    require_token(web_cpp, "_redirect(ok ? \"/reboot?cleared=1\" : \"/reboot?error=clear_failed\")",
+                  "log clear returns to Tools page")
+    require_token(api, "`Status/WiFi/OTA/Logs/Auth/Tools`", "API built-in nav label list")
+    require_token(web_doc, "Boot count、Chip、Flash", "Web doc Device card chip/flash fields")
+    require_token(api, "入口在 Tools 页面", "API log clear location")
+    require_token(web_doc, "入口在 Tools 页面", "Web doc log clear location")
+    require_token(user_guide, "入口在 Tools 页面", "user guide log clear location")
+    require_token(architecture, "入口在 Tools 页面", "architecture log clear location")
+    require_token(observability, "Tools 页面中的清除文件日志按钮", "observability log clear location")
+    require_token(maintainer, "Tools 页面可通过 `/logs/clear` 清空日志", "maintainer log clear location")
+    if "Clear Log" in web_cpp:
+        fail("Logs page must not keep the old Clear Log action")
+    if "重启确认页" in api or "重启确认页" in web_doc or "重启确认" in user_guide:
+        fail("docs must describe /reboot as Tools, not the old reboot-only page")
+    require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "Status");',
+                  "Web doc Status nav label")
+    require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::AUTH, "Auth");',
+                  "Web doc Auth nav label")
+    require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Tools");',
+                  "Web doc Tools nav label")
+    for text, label in [(custom_web, "custom_web"), (full_demo, "full_demo")]:
+        if 'Esp8266BaseWebBuiltinLabel::HOME, "System"' in text:
+            fail(f"{label} must not use old System nav label")
+        if 'Esp8266BaseWebBuiltinLabel::REBOOT, "Restart"' in text:
+            fail(f"{label} must not use old Restart nav label")
 
 
 def main() -> None:

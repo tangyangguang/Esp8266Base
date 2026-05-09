@@ -118,7 +118,7 @@ tools/test_all.sh
 - OTA 页面可上传。
 - NTP 输出 `time_synchronized` 和 `time_mapping`。
 - `/logs` 显示 4 段文件状态。
-- `/logs/clear` 可清空日志。
+- Tools 页面可通过 `/logs/clear` 清空日志。
 - GPIO0 长按清配置有效。
 - Watchdog 清零和 deep sleep 页面有确认。
 

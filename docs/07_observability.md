@@ -142,7 +142,7 @@ app.log 重新创建为空
 
 ## 七、清除日志
 
-`POST /logs/clear` 会清除：
+Tools 页面中的清除文件日志按钮会提交 `POST /logs/clear`，清除：
 
 ```text
 /logs/app.log

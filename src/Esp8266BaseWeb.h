@@ -6,6 +6,7 @@
 // Esp8266BaseWeb — 极简管理 Web
 //
 // 内置路由：GET / GET /esp8266base GET/POST /wifi GET/POST /auth GET/POST /ota GET /logs POST /logs/clear GET/POST /reboot GET /health
+// /reboot 是 Tools 页面，包含重启和清除文件日志等维护操作
 // 应用扩展：最多 4 页面 + 6 API（静态数组，不动态分配）
 // Basic Auth 默认开启
 // HTML 全部放 PROGMEM，动态响应分段发送
@@ -120,7 +121,7 @@ private:
     static char             _titleBuf[48];                      // "hostname (fw ver)" 48B
     static char             _activeUri[32];                     // 当前请求 URI，用于慢请求日志
     static char             _activeMethod[5];                   // GET/POST
-    static char             _builtinLabels[6][16];              // Home/WiFi/OTA/Logs/Auth/Reboot
+    static char             _builtinLabels[6][16];              // Status/WiFi/OTA/Logs/Auth/Tools
     static Esp8266BaseWebHomeMode      _homeMode;
     static Esp8266BaseWebSystemNavMode _systemNavMode;
 
