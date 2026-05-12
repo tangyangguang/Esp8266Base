@@ -319,6 +319,9 @@ static bool connect(const char* ssid, const char* pass);
 ```
 保存新凭证到 Config 并更新内存缓存，立即尝试连接。Web `/wifi` POST 时调用。
 
+写入 Config 前会校验凭证长度：SSID 必须为 1-32 字节，密码必须为 0-63 字节。超限会拒绝保存并记录 `connect_rejected reason=ssid_too_long` 或 `reason=password_too_long`，避免 Config 中保存的值与实际 `WiFi.begin()` 使用的截断值不一致。
+空密码合法，用于连接开放 WiFi；内置 `/wifi` 页面同样允许密码为空。
+
 ```cpp
 static bool clearCredentials();
 ```
@@ -537,7 +540,7 @@ OTA 上传是否正在进行。
 7. 上传完成：输出 `upload_finished`，启用 Watchdog 时 `resume()`，成功后输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
 8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息
 
-OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。当前不计算 SHA256；页面预检和服务端 ESP8266 镜像头快速校验用于提前拒绝明显错误平台的固件，接收是否成功由 `Update.write()` 和 `Update.end(true)` 的写入与镜像校验结果决定。浏览器进度条表示上传进度，不代表服务端已经接受固件。
+OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。当前不计算 SHA256；页面预检和服务端 ESP8266 镜像头快速校验用于提前拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，接收是否成功由 `Update.write()` 和 `Update.end(true)` 的写入与镜像校验结果决定。浏览器进度条表示上传进度，不代表服务端已经接受固件。
 
 ---
 
@@ -550,7 +553,7 @@ OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZ
 ```cpp
 static bool begin();
 ```
-配置 NTP 服务器和时区，启动系统 SNTP 客户端，并启用库内主动 UDP NTP 查询。由 `Esp8266Base::handle()` 在 WiFi 首次连接时自动调用。
+配置 NTP 服务器和时区，启动系统 SNTP 客户端，并启用库内主动 UDP NTP 查询。由 `Esp8266Base::handle()` 在 WiFi 首次连接时自动调用。主动 UDP NTP 只在等待响应期间接受数据包，并校验响应来源 IP、端口、mode、stratum，避免局域网无关 UDP 包改写系统时间。
 
 ```cpp
 static void handle();

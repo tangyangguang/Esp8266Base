@@ -27,7 +27,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/` | GET | Basic Auth | 首页；可配置为跳转业务首页 |
 | `/esp8266base` | GET | Basic Auth | 基础库系统首页；融合模式下作为系统入口保留 |
 | `/wifi` | GET | Basic Auth | WiFi 配置页，回显 SSID/密码 |
-| `/wifi` | POST | Basic Auth | 保存 WiFi 凭证，提交后 303 回 GET |
+| `/wifi` | POST | Basic Auth | 保存 WiFi 凭证，密码可为空以连接开放网络，提交后 303 回 GET |
 | `/auth` | GET | Basic Auth | 修改 Web Basic Auth 密码 |
 | `/auth` | POST | Basic Auth | 校验当前密码并保存 `eb_web_pass`，提交后 303 回 GET |
 | `/ota` | GET | Basic Auth | OTA 上传页，带进度显示；仅 `ESP8266BASE_USE_OTA=1` 时注册 |
@@ -213,9 +213,9 @@ http://<device-ip>/ota
 - 上传页面使用 XMLHttpRequest 显示百分比和字节数；进度条表示浏览器上传进度，不代表服务端已经接受固件。
 - 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。
 - OTA 上传期间暂停 Watchdog，上传完成后恢复。
-- 服务端首个数据块也会做同一类 ESP8266 固件头快速校验，作为 curl 或绕过页面上传时的兜底；校验通过后才调用 `Update.begin(ESP.getFreeSketchSpace())` 并写入 Flash。
+- 服务端首个数据块也会做同一类 ESP8266 固件头快速校验，作为 curl 或绕过页面上传时的兜底；它用于拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，校验通过后才调用 `Update.begin(ESP.getFreeSketchSpace())` 并写入 Flash。
 - 成功后 flush 响应并重启。
-- 当前不计算 SHA256；OTA 依赖页面预检、服务端头部兜底校验，以及 `Update.write()` / `Update.end(true)` 的写入与镜像校验结果决定是否接受固件。
+- 当前不计算 SHA256；OTA 依赖页面预检、服务端头部兜底校验，以及 `Update.write()` / `Update.end(true)` 的写入与镜像校验结果决定是否接受固件。头部快速校验不是完整签名机制，不承诺识别所有同平台非 app 镜像。
 
 如果出现 `Unauthorized`，先确认浏览器当前会话已经通过 Basic Auth，或重新打开 `/ota` 输入用户名密码。
 

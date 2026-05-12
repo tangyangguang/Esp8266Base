@@ -129,8 +129,25 @@ void Esp8266BaseNTP::reset() {
 bool Esp8266BaseNTP::_pollManual(uint32_t now) {
     int packetSize = _ntpUdp.parsePacket();
     if (packetSize >= 48) {
+        IPAddress remoteIp = _ntpUdp.remoteIP();
+        uint16_t remotePort = _ntpUdp.remotePort();
         uint8_t pkt[48];
         _ntpUdp.read(pkt, sizeof(pkt));
+        uint8_t mode = pkt[0] & 0x07;
+        uint8_t leap = (pkt[0] >> 6) & 0x03;
+        uint8_t stratum = pkt[1];
+        if (!_manualWaiting || remoteIp != _manualIp || remotePort != NTP_PORT ||
+            mode != 4 || leap == 3 || stratum == 0 || stratum > 15) {
+            char remote[16];
+            char expected[16];
+            _formatIP(remoteIp, remote, sizeof(remote));
+            _formatIP(_manualIp, expected, sizeof(expected));
+            ESP8266BASE_LOG_W("NTP ", "manual_ntp_packet_rejected remote=%s port=%u expected=%s mode=%u leap=%u stratum=%u waiting=%s",
+                              remote, (unsigned)remotePort, expected,
+                              (unsigned)mode, (unsigned)leap, (unsigned)stratum,
+                              _manualWaiting ? "yes" : "no");
+            return false;
+        }
         uint32_t ntpSec = ((uint32_t)pkt[40] << 24)
                         | ((uint32_t)pkt[41] << 16)
                         | ((uint32_t)pkt[42] << 8)

@@ -27,6 +27,9 @@ NTP 和 mDNS 不在 `begin()` 中启动，而是在 `handle()` 中检测到 WiFi
 
 WiFi 密码会在日志中明文输出，并带 `password_length`，用于现场观察和调试。
 
+`Esp8266BaseWiFi::connect()` 在保存前校验凭证长度：SSID 必须为 1-32 字节，密码必须为 0-63 字节。超限会拒绝保存并输出 `connect_rejected reason=ssid_too_long` 或 `reason=password_too_long`，避免 Config 保存值与实际连接缓存发生截断不一致。
+密码可以为空，用于连接开放 WiFi；内置 `/wifi` 配网页也允许空密码。
+
 ---
 
 ## 三、首次启动和 AP 配网
@@ -147,6 +150,8 @@ log_timestamp_mode=absolute_datetime
 ```
 
 这用于把对时前的 `millis()` 日志换算为实际日期时间。
+
+库内主动 UDP NTP 只接受当前等待服务器的响应，并校验来源 IP、端口 123、server mode、stratum 和 leap indicator。无关 UDP 包会记录 `manual_ntp_packet_rejected` 并丢弃，不会改写系统时间。
 
 ---
 

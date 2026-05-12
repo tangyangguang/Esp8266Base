@@ -87,14 +87,13 @@ static const char WEB_FOOT_POST[]  PROGMEM = "</span></footer></body></html>";
 static const char WEB_WIFI_FORM_PRE[] PROGMEM =
     "<h2>WiFi Settings</h2>"
     "<form method=post onsubmit=\""
-    "var s=this.ssid.value.trim(),p=this.pass.value.trim();"
+    "var s=this.ssid.value.trim();"
     "if(!s){alert('SSID cannot be empty');return false;}"
-    "if(!p){alert('Password cannot be empty');return false;}"
     "return once(this);\">"
     "SSID<input type=text name=ssid maxlength=32 autocomplete=off required value=\"";
 
 static const char WEB_WIFI_FORM_MID[] PROGMEM =
-    "\">Password<input id=wp type=password name=pass maxlength=64 required value=\"";
+    "\">Password<input id=wp type=password name=pass maxlength=63 value=\"";
 
 static const char WEB_WIFI_FORM_POST[] PROGMEM =
     "\"><input type=button value='Show/Hide Password' onclick=\""
@@ -386,8 +385,16 @@ bool Esp8266BaseWeb::addPage(const char* path, Esp8266BaseWebHandler handler) {
 
 bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWebHandler handler) {
     if (!path || !handler) return false;
-    if (!_isValidPath(path)) { ESP8266BASE_LOG_W("Web ", "addPage invalid path"); return false; }
-    if (_pageCount >= ESP8266BASE_WEB_MAX_APP_PAGES) { ESP8266BASE_LOG_W("Web ", "addPage table full"); return false; }
+    if (!_isValidPath(path)) {
+        ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
+                          path, (unsigned)_pageCount, (unsigned)ESP8266BASE_WEB_MAX_APP_PAGES);
+        return false;
+    }
+    if (_pageCount >= ESP8266BASE_WEB_MAX_APP_PAGES) {
+        ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=table_full path=%s count=%u max=%u",
+                          path, (unsigned)_pageCount, (unsigned)ESP8266BASE_WEB_MAX_APP_PAGES);
+        return false;
+    }
 
     strncpy(_pages[_pageCount].path, path, 23);
     _pages[_pageCount].path[23]    = '\0';
@@ -417,8 +424,16 @@ bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWeb
 
 bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     if (!path || !handler) return false;
-    if (!_isValidPath(path)) { ESP8266BASE_LOG_W("Web ", "addApi invalid path"); return false; }
-    if (_apiCount >= ESP8266BASE_WEB_MAX_APP_APIS) { ESP8266BASE_LOG_W("Web ", "addApi table full"); return false; }
+    if (!_isValidPath(path)) {
+        ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=invalid_path path=%s count=%u max=%u",
+                          path, (unsigned)_apiCount, (unsigned)ESP8266BASE_WEB_MAX_APP_APIS);
+        return false;
+    }
+    if (_apiCount >= ESP8266BASE_WEB_MAX_APP_APIS) {
+        ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=table_full path=%s count=%u max=%u",
+                          path, (unsigned)_apiCount, (unsigned)ESP8266BASE_WEB_MAX_APP_APIS);
+        return false;
+    }
 
     strncpy(_apis[_apiCount].path, path, 23);
     _apis[_apiCount].path[23]    = '\0';
@@ -811,8 +826,6 @@ void Esp8266BaseWeb::_handleWiFiGet() {
         strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
         if (strcmp(err, "missing_ssid") == 0) {
             sendChunk("<p class=err>SSID cannot be empty.</p>");
-        } else if (strcmp(err, "missing_password") == 0) {
-            sendChunk("<p class=err>Password cannot be empty.</p>");
         } else if (strcmp(err, "save_failed") == 0) {
             sendChunk("<p class=err>Failed to save WiFi credentials.</p>");
         } else {
@@ -843,7 +856,7 @@ void Esp8266BaseWeb::_handleWiFiPost() {
     _trimWhitespace(ssid);
     _trimWhitespace(pass);
 
-    if (strlen(ssid) > 0 && strlen(pass) > 0) {
+    if (strlen(ssid) > 0) {
         // Intentionally log the WiFi password in plaintext for field debugging.
         ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=%s password_length=%u",
                           ssid, pass, (unsigned)strlen(pass));
@@ -854,8 +867,6 @@ void Esp8266BaseWeb::_handleWiFiPost() {
         }
     } else if (strlen(ssid) == 0) {
         _redirect("/wifi?error=missing_ssid");
-    } else {
-        _redirect("/wifi?error=missing_password");
     }
 }
 

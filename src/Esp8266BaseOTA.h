@@ -26,6 +26,7 @@ private:
     static bool _rejected;    // 1B：认证或 Update 初始化失败后拒绝后续块
     static bool _started;     // 1B：本次 POST 是否收到固件起始块
     static bool _watchdogPaused; // 1B：本次 OTA 是否已暂停 Watchdog
+    static bool _updateStarted;  // 1B：Update.begin() 是否已成功
     static uint16_t _status;  // 2B：上传完成时返回的 HTTP 状态码
     static uint32_t _startedMs;       // 4B：上传开始 millis
     static uint32_t _uploadedBytes;   // 4B：已写入固件字节数
@@ -38,4 +39,5 @@ private:
     static void _handleUploadChunk();
     static void _pauseWatchdog();
     static void _resumeWatchdog();
+    static void _failUpload(uint16_t status, const char* message, bool abortUpdate);
 };

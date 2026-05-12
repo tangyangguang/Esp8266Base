@@ -15,6 +15,7 @@ bool Esp8266BaseOTA::_inProgress = false;
 bool Esp8266BaseOTA::_rejected = false;
 bool Esp8266BaseOTA::_started = false;
 bool Esp8266BaseOTA::_watchdogPaused = false;
+bool Esp8266BaseOTA::_updateStarted = false;
 uint16_t Esp8266BaseOTA::_status = 200;
 uint32_t Esp8266BaseOTA::_startedMs = 0;
 uint32_t Esp8266BaseOTA::_uploadedBytes = 0;
@@ -134,6 +135,18 @@ void Esp8266BaseOTA::_resumeWatchdog() {
 #endif
 }
 
+void Esp8266BaseOTA::_failUpload(uint16_t status, const char* message, bool abortUpdate) {
+    _rejected = true;
+    _status = status;
+    _failureMessage = message ? message : "Upload failed";
+    _inProgress = false;
+    if (abortUpdate && _updateStarted) {
+        Update.end();
+        _updateStarted = false;
+    }
+    _resumeWatchdog();
+}
+
 // ----------------------------------------------------------------------------
 // 上传完成处理（HTTP 响应）
 // ----------------------------------------------------------------------------
@@ -204,6 +217,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         _requestBytes = 0;
         _lastProgressPct = 0;
         _watchdogPaused = false;
+        _updateStarted = false;
         _failureMessage = "Upload failed";
         if (!Esp8266BaseWeb::verifyAuth()) {
             _rejected = true;
@@ -234,30 +248,20 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         if (_uploadedBytes == 0) {
             const char* reason = "unknown";
             if (!_isLikelyEsp8266Firmware(upload.buf, upload.currentSize, &reason)) {
-                _rejected = true;
-                _inProgress = false;
-                _status = 400;
-                _failureMessage = "Invalid firmware: not an ESP8266 app image";
-                _resumeWatchdog();
+                _failUpload(400, "Invalid firmware: not an ESP8266 app image", false);
                 ESP8266BASE_LOG_E("OTA ", "upload_rejected reason=%s detail=not_esp8266_firmware", reason);
                 return;
             }
             if (!Update.begin(ESP.getFreeSketchSpace())) {
-                _rejected = true;
-                _inProgress = false;
-                _status = 500;
-                _failureMessage = "Update failed: begin failed";
-                _resumeWatchdog();
+                _failUpload(500, "Update failed: begin failed", false);
                 ESP8266BASE_LOG_E("OTA ", "update_begin_failed error=%s", Update.getErrorString().c_str());
                 return;
             }
+            _updateStarted = true;
         }
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-            _rejected = true;
-            _status = 500;
-            _failureMessage = "Update failed: write failed";
-            Update.end();
             _uploadedBytes = uploadedNow;
+            _failUpload(500, "Update failed: write failed", true);
             char uploadedBuf[16];
             char elapsedBuf[16];
             char rateBuf[20];
@@ -265,8 +269,8 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
             _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
             _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-            ESP8266BASE_LOG_E("OTA ", "update_write_failed uploaded=%s elapsed=%s average_speed=%s",
-                              uploadedBuf, elapsedBuf, rateBuf);
+            ESP8266BASE_LOG_E("OTA ", "update_write_failed uploaded=%s elapsed=%s average_speed=%s error=%s",
+                              uploadedBuf, elapsedBuf, rateBuf, _failureMessage);
         } else {
             _uploadedBytes = uploadedNow;
             if (_requestBytes > 0) {
@@ -300,6 +304,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             _uploadedBytes = (uint32_t)upload.totalSize;
         }
         if (Update.end(true)) {
+            _updateStarted = false;
             char uploadedBuf[16];
             char heapBuf[16];
             char elapsedBuf[16];
@@ -312,9 +317,8 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             ESP8266BASE_LOG_I("OTA ", "upload_finished uploaded=%s elapsed=%s average_speed=%s free_heap=%s",
                               uploadedBuf, elapsedBuf, rateBuf, heapBuf);
         } else {
-            _rejected = true;
-            _status = 500;
-            _failureMessage = "Update failed: end failed";
+            _updateStarted = false;
+            _failUpload(500, "Update failed: end failed", false);
             char uploadedBuf[16];
             char elapsedBuf[16];
             char rateBuf[20];
@@ -328,15 +332,10 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         _resumeWatchdog();
 
     } else if (upload.status == UPLOAD_FILE_ABORTED) {
-        if (!_rejected) Update.end();
-        _rejected = true;
-        _status = 499;
-        _failureMessage = "Upload aborted";
-        _inProgress = false;
         if (upload.totalSize > _uploadedBytes) {
             _uploadedBytes = (uint32_t)upload.totalSize;
         }
-        _resumeWatchdog();
+        _failUpload(499, "Upload aborted", !_rejected);
         char uploadedBuf[16];
         char elapsedBuf[16];
         char rateBuf[20];

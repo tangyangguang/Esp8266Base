@@ -115,6 +115,8 @@ def test_log_file_buffer_rules() -> None:
 def test_wifi_retry_rules() -> None:
     wifi_h = read("src/Esp8266BaseWiFi.h")
     wifi_cpp = read("src/Esp8266BaseWiFi.cpp")
+    networking = read("docs/08_networking.md")
+    api = read("docs/03_api_reference.md")
     fast = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RETRY_FAST")
     fast_count = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RETRY_FAST_COUNT")
     slow = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RETRY_SLOW")
@@ -134,6 +136,28 @@ def test_wifi_retry_rules() -> None:
         fail("stuck restart must not replace the full connect timeout")
     if "stuck_disconnected=%lus" not in wifi_cpp:
         fail("wifi_retry_policy must include stuck_disconnected")
+    require_token(wifi_cpp, "reason=ssid_too_long", "WiFi SSID length validation")
+    require_token(wifi_cpp, "reason=password_too_long", "WiFi password length validation")
+    require_token(wifi_cpp, "max=32", "WiFi SSID length limit log")
+    require_token(wifi_cpp, "max=63", "WiFi password length limit log")
+    require_token(networking, "SSID 必须为 1-32 字节，密码必须为 0-63 字节",
+                  "WiFi credential length doc")
+    require_token(networking, "密码可以为空，用于连接开放 WiFi", "WiFi open network doc")
+    require_token(api, "避免 Config 中保存的值与实际 `WiFi.begin()` 使用的截断值不一致",
+                  "WiFi credential truncation doc")
+
+
+def test_ntp_manual_packet_validation() -> None:
+    ntp_cpp = read("src/Esp8266BaseNTP.cpp")
+    networking = read("docs/08_networking.md")
+    api = read("docs/03_api_reference.md")
+    require_token(ntp_cpp, "remoteIp != _manualIp", "NTP manual response IP validation")
+    require_token(ntp_cpp, "remotePort != NTP_PORT", "NTP manual response port validation")
+    require_token(ntp_cpp, "mode != 4", "NTP manual server mode validation")
+    require_token(ntp_cpp, "stratum == 0 || stratum > 15", "NTP manual stratum validation")
+    require_token(ntp_cpp, "manual_ntp_packet_rejected", "NTP invalid manual packet log")
+    require_token(networking, "主动 UDP NTP 只接受当前等待服务器", "NTP manual validation doc")
+    require_token(api, "校验响应来源 IP、端口、mode、stratum", "API NTP validation doc")
 
 
 def test_config_deferred_rules() -> None:
@@ -174,7 +198,7 @@ def test_ota_header_guard() -> None:
     require_token(ota_cpp, "if (!Update.begin(ESP.getFreeSketchSpace()))", "OTA begin after header guard")
     require_token(api, "内置 OTA 页用 `FileReader`", "API OTA browser preflight doc")
     require_token(api, "浏览器进度条表示上传进度，不代表服务端已经接受固件", "API OTA progress meaning doc")
-    require_token(web_doc, "服务端首个数据块也会做同一类 ESP8266 固件头快速校验", "Web OTA server guard doc")
+    require_token(web_doc, "不承诺识别所有同平台非 app 镜像", "Web OTA heuristic limit doc")
     require_token(web_doc, "进度条表示浏览器上传进度", "Web OTA progress meaning doc")
     require_token(troubleshooting, "页面立即提示 `Invalid firmware: not an ESP8266 app image`",
                   "troubleshooting OTA browser rejection doc")
@@ -276,6 +300,10 @@ def test_watchdog_and_ota_failure_contract() -> None:
     require_token(ota_cpp, "_lastProgressPct", "OTA progress step state")
     require_token(ota_cpp, "_resumeWatchdog();", "OTA watchdog resume helper")
     require_token(ota_cpp, "_watchdogPaused", "OTA watchdog resume state")
+    require_token(ota_cpp, "_failUpload(", "OTA single failure closeout helper")
+    require_token(ota_cpp, "_updateStarted", "OTA Update.begin state")
+    require_token(ota_cpp, '_failUpload(500, "Update failed: write failed", true)',
+                  "OTA write failure immediate closeout")
 
 
 def test_public_default_tables() -> None:
@@ -348,6 +376,10 @@ def test_web_home_contract() -> None:
         fail("Web doc must describe system home information groups")
 
     require_token(web_cpp, '"Status", "WiFi", "OTA", "Logs", "Auth", "Tools"', "default Web nav labels")
+    require_token(web_cpp, "Password<input id=wp type=password name=pass maxlength=63 value=", "WiFi password optional form")
+    if "Password cannot be empty" in web_cpp or "missing_password" in web_cpp:
+        fail("WiFi Web form must allow empty password for open networks")
+    require_token(web_doc, "密码可为空以连接开放网络", "Web WiFi open network doc")
     require_token(web_cpp, 'max-width:920px', "Web home wider card layout")
     require_token(web_cpp, 'grid-template-columns:repeat(auto-fit,minmax(240px,1fr))', "Web home card min width")
     require_token(web_cpp, '_sendKv("Hostname", _hostname)', "Web home hostname field")
@@ -367,6 +399,10 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, "Clear File Logs", "Tools page log clear action")
     require_token(web_cpp, "_redirect(ok ? \"/reboot?cleared=1\" : \"/reboot?error=clear_failed\")",
                   "log clear returns to Tools page")
+    require_token(web_cpp, "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
+                  "Web addPage diagnostic rejection")
+    require_token(web_cpp, "addApi_rejected reason=table_full path=%s count=%u max=%u",
+                  "Web addApi table full diagnostic")
     require_token(web_cpp, "#if ESP8266BASE_USE_OTA", "OTA page/nav compile guard")
     require_token(web_cpp, '_sendLink("/ota"', "OTA nav link")
     require_token(web_cpp, '_server.on("/ota",    HTTP_GET,  _handleOtaGet);', "OTA GET route")
@@ -406,6 +442,7 @@ def main() -> None:
     test_format_bytes()
     test_log_file_buffer_rules()
     test_wifi_retry_rules()
+    test_ntp_manual_packet_validation()
     test_config_deferred_rules()
     test_log_segment_paths()
     test_ota_header_guard()

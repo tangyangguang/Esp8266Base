@@ -158,17 +158,30 @@ void Esp8266BaseWiFi::handle() {
 // connect — 保存新凭证并立即重连
 // ----------------------------------------------------------------------------
 bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
-    if (!ssid || strlen(ssid) == 0) {
+    size_t ssidLen = ssid ? strlen(ssid) : 0;
+    if (ssidLen == 0) {
         ESP8266BASE_LOG_W("WiFi", "connect_rejected reason=empty_ssid");
+        return false;
+    }
+    if (ssidLen > 32) {
+        ESP8266BASE_LOG_W("WiFi", "connect_rejected reason=ssid_too_long length=%u max=32",
+                          (unsigned)ssidLen);
         return false;
     }
 
     const char* safePass = pass ? pass : "";
+    size_t passLen = strlen(safePass);
+    if (passLen > 63) {
+        ESP8266BASE_LOG_W("WiFi", "connect_rejected reason=password_too_long length=%u max=63",
+                          (unsigned)passLen);
+        return false;
+    }
+
     bool ssidSaved = Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid);
     bool passSaved = Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_PASS, safePass);
     // Intentionally log the WiFi password in plaintext for field debugging.
     ESP8266BASE_LOG_I("WiFi", "saving_wifi_credentials ssid=%s password=%s password_length=%u ssid_saved=%s password_saved=%s",
-                      ssid, safePass, (unsigned)strlen(safePass),
+                      ssid, safePass, (unsigned)passLen,
                       ssidSaved ? "yes" : "no", passSaved ? "yes" : "no");
     if (!ssidSaved || !passSaved) {
         ESP8266BASE_LOG_E("WiFi", "connect_rejected reason=failed_to_save_credentials");
