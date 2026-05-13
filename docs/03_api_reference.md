@@ -506,7 +506,7 @@ static bool isRunning();
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
-系统首页先显示摘要行 `WiFi/IP/RSSI/Heap/Up`，再用 Connection、Runtime、Firmware、Time 四组展示状态。Connection 显示 `Hostname/mDNS/WiFi/SSID/IP/RSSI/MAC`；Runtime 显示 `Free heap/Max block/Uptime/Boot count`，启用 Watchdog 时显示 `WDT resets`，启用 Sleep 时显示 `Wake reason`；Firmware 显示 `Firmware/Version/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap/Max block` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
+系统首页用 Connection、Runtime、Firmware、Time 四组展示状态。Connection 显示 `Hostname/WiFi/SSID/IP/RSSI(dBm)/STA MAC`；Runtime 显示 `Free heap/Max block/Boot count`，启用 Watchdog 时显示 `WDT resets` 累计次数，启用 Sleep 时显示 `Wake` 英文状态和简短中文说明；Time 显示 `Uptime/NTP/Now/Boot time`；Firmware 显示 `Firmware/Version/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap/Max block` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
 
 `/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 

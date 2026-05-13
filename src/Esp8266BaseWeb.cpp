@@ -78,8 +78,6 @@ static const char WEB_HEAD[] PROGMEM =
     ".tabs a,.tabs b{background:#f4f4f4;color:#333;padding:4px 7px;border-radius:3px;"
     "font-size:13px;text-decoration:none;margin:0;font-weight:normal;white-space:nowrap}"
     ".tabs b{background:#333;color:#fff;font-weight:normal}"
-    ".summary{font-size:14px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:4px;"
-    "padding:8px 10px;margin:0 0 12px;overflow-wrap:break-word}"
     ".ok{color:#188038}.err{color:#c5221f}"
     "footer{color:#777;font-size:12px;margin-top:16px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}"
     "footer .tools{flex:1 1 auto;display:flex;flex-wrap:wrap;gap:4px}"
@@ -340,6 +338,24 @@ static const char* _validatedDefaultHostname() {
         ? ESP8266BASE_DEFAULT_HOSTNAME
         : "esp8266base";
 }
+
+#if ESP8266BASE_USE_SLEEP
+static const char* _wakeReasonText(const char* reason) {
+    if (strcmp(reason, "power-on") == 0) {
+        return "power-on (上电启动)";
+    }
+    if (strcmp(reason, "deep-sleep") == 0) {
+        return "deep-sleep (深睡唤醒)";
+    }
+    if (strcmp(reason, "soft-restart") == 0) {
+        return "soft-restart (软件重启)";
+    }
+    if (strcmp(reason, "wdt-reset") == 0) {
+        return "wdt-reset (看门狗重启)";
+    }
+    return "unknown (未知)";
+}
+#endif
 
 static void _sendHostnameSystemSection() {
     char persisted[33] = "";
@@ -812,9 +828,9 @@ void Esp8266BaseWeb::sendFooter() {
     }
     char uptime[16];
     _formatFooterUptime(millis() / 1000UL, uptime, sizeof(uptime));
-    char rssi[8] = "-";
+    char rssi[12] = "-";
     if (Esp8266BaseWiFi::isConnected()) {
-        snprintf(rssi, sizeof(rssi), "%d", Esp8266BaseWiFi::rssi());
+        snprintf(rssi, sizeof(rssi), "%d dBm", Esp8266BaseWiFi::rssi());
     }
     sendContent_P(WEB_FOOT_HEAP_PRE);
     Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), _wb, sizeof(_wb));
@@ -939,39 +955,24 @@ void Esp8266BaseWeb::_handleSystemHome() {
     }
 #endif
 
-    sendChunk("<p class=summary>");
-    sendChunk("WiFi: ");
-    _sendAttrEscaped(wifiState);
-    sendChunk(" &middot; IP: ");
-    _sendAttrEscaped(ip);
-    sendChunk(" &middot; RSSI: ");
-    _sendAttrEscaped(rssi);
-    sendChunk(" &middot; Heap: ");
-    sendChunk(freeHeap);
-    sendChunk(" &middot; Up: ");
-    _sendAttrEscaped(uptime);
-    sendChunk("</p>");
-
     sendChunk("<div class=grid><section><h3>Connection</h3><dl>");
     _sendKv("Hostname", _hostname);
-    snprintf(_wb, sizeof(_wb), "%s.local", _hostname);
-    _sendKv("mDNS", _wb);
     _sendKv("WiFi", wifiState);
     _sendKv("SSID", ssid);
     _sendKv("IP", ip);
     _sendKv("RSSI", rssi);
-    _sendKv("MAC", mac);
+    _sendKv("STA MAC", mac);
     sendChunk("</dl></section><section><h3>Runtime</h3><dl>");
     _sendKv("Free heap", freeHeap);
     _sendKv("Max block", maxBlock);
-    _sendKv("Uptime", uptime);
     _sendKv("Boot count", bootCount);
 #if ESP8266BASE_USE_WATCHDOG
-    snprintf(_wb, sizeof(_wb), "%lu", (unsigned long)Esp8266BaseWatchdog::resetCount());
-    _sendKv("WDT resets", _wb);
+    char wdtResets[12];
+    snprintf(wdtResets, sizeof(wdtResets), "%lu", (unsigned long)Esp8266BaseWatchdog::resetCount());
+    _sendKv("WDT resets", wdtResets);
 #endif
 #if ESP8266BASE_USE_SLEEP
-    _sendKv("Wake reason", Esp8266BaseSleep::wakeReason());
+    _sendKv("Wake", _wakeReasonText(Esp8266BaseSleep::wakeReason()));
 #endif
     sendChunk("</dl></section><section><h3>Firmware</h3><dl>");
     _sendKv("Firmware", _fwName);
@@ -982,6 +983,7 @@ void Esp8266BaseWeb::_handleSystemHome() {
     _sendKv("Sketch", sketchSize);
     _sendKv("OTA free", otaFree);
     sendChunk("</dl></section><section><h3>Time</h3><dl>");
+    _sendKv("Uptime", uptime);
     _sendKv("NTP", ntpState);
     _sendKv("Now", currentTime);
     _sendKv("Boot time", bootTime);
