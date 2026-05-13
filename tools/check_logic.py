@@ -425,6 +425,7 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, '_sendKv("Boot count", bootCount)', "Web home boot count label")
     require_token(web_cpp, '_sendKv("Free heap", freeHeap)', "Web home free heap field")
     require_token(web_cpp, '_sendKv("Max block", maxBlock)', "Web home max block field")
+    require_token(web_cpp, '"%lu since clear"', "Web home watchdog reset clear scope")
     require_token(web_cpp, '_sendKv("WDT resets", wdtResets)', "Web home watchdog reset field")
     require_token(web_cpp, '_sendKv("Wake reason", _wakeReasonText(Esp8266BaseSleep::wakeReason()))', "Web home wake reason field")
     require_token(web_cpp, 'ESP.getChipId()', "Web home chip id source")
@@ -473,6 +474,7 @@ def test_web_home_contract() -> None:
                   "Web doc Connection fields")
     require_token(web_doc, "Runtime | Free heap、Max block、Boot count、Watchdog resets、Wake reason",
                   "Web doc Runtime fields")
+    require_token(web_doc, "`N since clear`", "Web doc watchdog reset clear scope")
     require_token(web_doc, "Firmware | Firmware、Version、Chip ID、CPU、Flash、Sketch、OTA free",
                   "Web doc Firmware fields")
     require_token(api, "ESP8266-XXXXXX", "API chip id display format")

@@ -967,8 +967,9 @@ void Esp8266BaseWeb::_handleSystemHome() {
     _sendKv("Max block", maxBlock);
     _sendKv("Boot count", bootCount);
 #if ESP8266BASE_USE_WATCHDOG
-    char wdtResets[12];
-    snprintf(wdtResets, sizeof(wdtResets), "%lu", (unsigned long)Esp8266BaseWatchdog::resetCount());
+    char wdtResets[28];
+    snprintf(wdtResets, sizeof(wdtResets), "%lu since clear",
+             (unsigned long)Esp8266BaseWatchdog::resetCount());
     _sendKv("WDT resets", wdtResets);
 #endif
 #if ESP8266BASE_USE_SLEEP
