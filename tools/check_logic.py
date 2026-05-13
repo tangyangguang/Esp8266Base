@@ -383,10 +383,12 @@ def test_web_home_contract() -> None:
         "setSystemInfo",
         "_formatDuration",
         "Boot time",
-        "Network",
-        "Device",
+        "Connection",
+        "Runtime",
+        "Firmware",
         "Time",
         "margin:0 auto",
+        "class=summary",
         "%Y-%m-%d %H:%M:%S",
     ]:
         if token not in web_cpp and token not in web_h:
@@ -403,7 +405,7 @@ def test_web_home_contract() -> None:
                         (custom_web, "custom_web"), (full_demo, "full_demo")]:
         if "setHostname(" in text:
             fail(f"setHostname must not remain in {label}")
-    if "系统首页以轻量分组展示" not in web_doc:
+    if "系统首页以摘要优先、轻量分组展示" not in web_doc:
         fail("Web doc must describe system home information groups")
 
     require_token(web_cpp, '"Status", "Logs", "System"', "default Web nav labels")
@@ -413,8 +415,14 @@ def test_web_home_contract() -> None:
     require_token(web_doc, "密码可为空以连接开放网络", "Web WiFi open network doc")
     require_token(web_cpp, 'max-width:920px', "Web home wider card layout")
     require_token(web_cpp, 'grid-template-columns:repeat(auto-fit,minmax(240px,1fr))', "Web home card min width")
+    require_token(web_cpp, "WiFi: ", "Web home summary WiFi field")
+    require_token(web_cpp, "_sendKv(\"mDNS\", _wb)", "Web home mDNS field")
     require_token(web_cpp, '_sendKv("Hostname", _hostname)', "Web home hostname field")
     require_token(web_cpp, '_sendKv("Boot count", bootCount)', "Web home boot count label")
+    require_token(web_cpp, '_sendKv("Free heap", freeHeap)', "Web home free heap field")
+    require_token(web_cpp, '_sendKv("Max block", maxBlock)', "Web home max block field")
+    require_token(web_cpp, '_sendKv("WDT resets", _wb)', "Web home watchdog reset field")
+    require_token(web_cpp, '_sendKv("Wake reason", Esp8266BaseSleep::wakeReason())', "Web home wake reason field")
     require_token(web_cpp, 'ESP.getChipId()', "Web home chip id source")
     require_token(web_cpp, '"ESP8266-%06X"', "Web home chip id format")
     require_token(web_cpp, 'ESP.getCpuFreqMHz()', "Web home CPU frequency")
@@ -457,9 +465,12 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, "#if ESP8266BASE_USE_OTA", "OTA page/System entry compile guard")
     require_token(web_cpp, '_server.on("/ota",    HTTP_GET,  _handleOtaGet);', "OTA GET route")
     require_token(api, "`Status/Logs/System`", "API built-in nav label list")
-    require_token(web_doc, "Hostname、WiFi 状态、SSID、IP、RSSI、MAC", "Web doc Network hostname fields")
-    require_token(web_doc, "Boot count、Chip ID、CPU、Flash、Sketch、OTA free",
-                  "Web doc Device card hardware fields")
+    require_token(web_doc, "Connection | Hostname、mDNS、WiFi 状态、SSID、IP、RSSI、MAC",
+                  "Web doc Connection fields")
+    require_token(web_doc, "Runtime | Free heap、Max block、Uptime、Boot count、Watchdog resets、Wake reason",
+                  "Web doc Runtime fields")
+    require_token(web_doc, "Firmware | Firmware、Version、Chip ID、CPU、Flash、Sketch、OTA free",
+                  "Web doc Firmware fields")
     require_token(api, "ESP8266-XXXXXX", "API chip id display format")
     require_token(api, "仅 `ESP8266BASE_USE_OTA=1` 时注册", "API OTA route guard doc")
     require_token(web_doc, "不会注册 `/ota` 页面、System 页面 OTA 入口或上传 POST 路由", "Web OTA disabled route doc")

@@ -51,17 +51,19 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
 默认不配置时，`/` 和 `/esp8266base` 都显示 Esp8266Base 系统首页，顶部导航包含内置系统页和应用页面。
 
-系统首页以轻量分组展示当前设备状态：
+系统首页以摘要优先、轻量分组展示当前设备状态：
 
 | 分组 | 字段 |
 |---|---|
-| Network | Hostname、WiFi 状态、SSID、IP、RSSI、MAC |
-| Device | Firmware、Version、Boot count、Chip ID、CPU、Flash、Sketch、OTA free |
-| Time | Uptime、NTP 状态、当前时间、Boot time |
+| Summary | WiFi、IP、RSSI、Free heap、Uptime |
+| Connection | Hostname、mDNS、WiFi 状态、SSID、IP、RSSI、MAC |
+| Runtime | Free heap、Max block、Uptime、Boot count、Watchdog resets、Wake reason |
+| Firmware | Firmware、Version、Chip ID、CPU、Flash、Sketch、OTA free |
+| Time | NTP 状态、当前时间、Boot time |
 
-`Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
+`Watchdog resets` 仅启用 Watchdog 时显示，`Wake reason` 仅启用 Sleep 时显示。`Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
 
-`Flash`、`Sketch`、`OTA free` 和 footer 的 `Free heap` 等字节数统一保留两位小数。Footer 常驻紧凑状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63` 顺序显示；`Up` 不显示秒，`RSSI` 仅 STA 已连接时显示数值，未连接或 AP 配网模式显示 `-`。`OTA free` 直接显示 `ESP.getFreeSketchSpace()` 的结果，表示当前 Flash map、OTA slot、bootloader 和对齐规则下可写入新固件的空间；它不是 `2MB - Sketch` 的简单差值。
+`Flash`、`Sketch`、`OTA free`、`Free heap` 和 `Max block` 等字节数统一保留两位小数。Footer 常驻紧凑状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63` 顺序显示；`Up` 不显示秒，`RSSI` 仅 STA 已连接时显示数值，未连接或 AP 配网模式显示 `-`。`OTA free` 直接显示 `ESP.getFreeSketchSpace()` 的结果，表示当前 Flash map、OTA slot、bootloader 和对齐规则下可写入新固件的空间；它不是 `2MB - Sketch` 的简单差值。
 
 业务项目希望业务页面成为主界面时，在 `Esp8266Base::begin()` 前配置首页和导航模型，在 `begin()` 后注册页面：
 
