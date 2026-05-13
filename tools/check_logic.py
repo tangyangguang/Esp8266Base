@@ -418,12 +418,13 @@ def test_web_home_contract() -> None:
     if re.search(r"_sendKv\([^\n]+_wb", web_cpp):
         fail("Web status fields must not pass shared _wb as a value buffer")
     require_token(web_cpp, '_sendKv("STA MAC", mac)', "Web home STA MAC field")
-    require_token(web_cpp, '"%d dBm"', "Web home RSSI unit")
+    if web_cpp.count('"%d dBm"') < 2:
+        fail("Web status card and footer RSSI must both include dBm")
     require_token(web_cpp, '_sendKv("Boot count", bootCount)', "Web home boot count label")
     require_token(web_cpp, '_sendKv("Free heap", freeHeap)', "Web home free heap field")
     require_token(web_cpp, '_sendKv("Max block", maxBlock)', "Web home max block field")
     require_token(web_cpp, '_sendKv("WDT resets", wdtResets)', "Web home watchdog reset field")
-    require_token(web_cpp, '_sendKv("Wake", _wakeReasonText(Esp8266BaseSleep::wakeReason()))', "Web home wake reason field")
+    require_token(web_cpp, '_sendKv("Wake reason", _wakeReasonText(Esp8266BaseSleep::wakeReason()))', "Web home wake reason field")
     require_token(web_cpp, 'ESP.getChipId()', "Web home chip id source")
     require_token(web_cpp, '"ESP8266-%06X"', "Web home chip id format")
     require_token(web_cpp, 'ESP.getCpuFreqMHz()', "Web home CPU frequency")
@@ -468,7 +469,7 @@ def test_web_home_contract() -> None:
     require_token(api, "`Status/Logs/System`", "API built-in nav label list")
     require_token(web_doc, "Connection | Hostname、WiFi 状态、SSID、IP、RSSI(dBm)、STA MAC",
                   "Web doc Connection fields")
-    require_token(web_doc, "Runtime | Free heap、Max block、Boot count、Watchdog resets、Wake",
+    require_token(web_doc, "Runtime | Free heap、Max block、Boot count、Watchdog resets、Wake reason",
                   "Web doc Runtime fields")
     require_token(web_doc, "Firmware | Firmware、Version、Chip ID、CPU、Flash、Sketch、OTA free",
                   "Web doc Firmware fields")

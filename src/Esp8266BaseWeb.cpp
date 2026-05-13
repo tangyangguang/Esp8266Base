@@ -898,13 +898,13 @@ void Esp8266BaseWeb::_handleSystemHome() {
     const char* wifiState = "Connecting";
     const char* ssid = Esp8266BaseWiFi::ssid();
     const char* ip = "-";
-    char rssi[8] = "-";
+    char rssi[12] = "-";
     char mac[18] = "";
     Esp8266BaseWiFi::macAddressTo(mac, sizeof(mac));
     if (Esp8266BaseWiFi::isConnected()) {
         wifiState = "Connected";
         ip = Esp8266BaseWiFi::ip();
-        snprintf(rssi, sizeof(rssi), "%d", Esp8266BaseWiFi::rssi());
+        snprintf(rssi, sizeof(rssi), "%d dBm", Esp8266BaseWiFi::rssi());
     } else if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG) {
         wifiState = "AP Mode";
         ssid = Esp8266BaseWiFi::apSSID();
@@ -972,7 +972,7 @@ void Esp8266BaseWeb::_handleSystemHome() {
     _sendKv("WDT resets", wdtResets);
 #endif
 #if ESP8266BASE_USE_SLEEP
-    _sendKv("Wake", _wakeReasonText(Esp8266BaseSleep::wakeReason()));
+    _sendKv("Wake reason", _wakeReasonText(Esp8266BaseSleep::wakeReason()));
 #endif
     sendChunk("</dl></section><section><h3>Firmware</h3><dl>");
     _sendKv("Firmware", _fwName);
