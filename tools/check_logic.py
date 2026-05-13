@@ -414,6 +414,8 @@ def test_web_home_contract() -> None:
     require_token(web_doc, "密码可为空以连接开放网络", "Web WiFi open network doc")
     require_token(web_cpp, 'max-width:920px', "Web home wider card layout")
     require_token(web_cpp, 'grid-template-columns:repeat(auto-fit,minmax(240px,1fr))', "Web home card min width")
+    require_token(web_cpp, 'grid-template-columns:104px minmax(0,1fr)', "Web status label column width")
+    require_token(web_cpp, 'white-space:nowrap', "Web status label no-wrap")
     require_token(web_cpp, '_sendKv("Hostname", _hostname)', "Web home hostname field")
     if re.search(r"_sendKv\([^\n]+_wb", web_cpp):
         fail("Web status fields must not pass shared _wb as a value buffer")
