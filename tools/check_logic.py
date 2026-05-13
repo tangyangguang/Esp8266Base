@@ -157,6 +157,8 @@ def test_wifi_retry_rules() -> None:
     require_token(web_cpp, "ssidArg.length() > 32", "Web WiFi raw SSID length validation")
     require_token(web_cpp, "passArg.length() > 63", "Web WiFi raw password length validation")
     require_token(web_cpp, "reason=password_too_long length=%u max=63", "Web WiFi password too long log")
+    require_token(web_cpp, "Maximum is 32 bytes.", "Web WiFi SSID too long message")
+    require_token(web_cpp, "Maximum is 63 bytes.", "Web WiFi password too long message")
     require_token(networking, "SSID 必须为 1-32 字节，密码必须为 0-63 字节",
                   "WiFi credential length doc")
     require_token(networking, "密码可以为空，用于连接开放 WiFi", "WiFi open network doc")
@@ -368,6 +370,12 @@ def test_public_default_tables() -> None:
     require_token(api, "average_speed", "API OTA speed log doc")
     require_token(memory, "它不是运行时 free heap 实测", "memory build RAM scope")
     require_token(memory, "Esp8266BaseOTA | <= 160B", "OTA memory budget with diagnostics")
+    require_token(memory, "Esp8266BaseWeb | <= 1.36KB", "memory Web budget")
+    require_token(memory, "核心裁剪目标（自有）", "memory core profile budget")
+    require_token(memory, "全模块默认目标（自有）", "memory full default profile budget")
+    require_token(memory, "全模块 INFO FileLog 目标（自有）", "memory full INFO FileLog profile budget")
+    if "**< 2.5KB**" in memory or "控制在 2.5KB" in read("AGENTS.md"):
+        fail("memory budget must not keep the obsolete single <2.5KB full-library target")
 
     if "| LittleFS | ~2-3KB |" in architecture or "| Arduino Core | ~3-4KB |" in architecture:
         fail("architecture doc must not keep orphan RAM table rows")

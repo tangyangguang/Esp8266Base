@@ -46,7 +46,9 @@
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
 | Esp8266BaseWatchdog | <= 96B DRAM + 12B RTC | timeout(4B) + 计时器(8B) + pause(1B) + count(4B)；RTC user memory word 64-66 保存 WDT 超时标记 |
-| **库总计（自有）** | **< 2.5KB** | 不含 Arduino SDK 内部开销 |
+| **核心裁剪目标（自有）** | **< 1.25KB** | Log + Config + WiFi + Sleep + Watchdog + 默认 FileLog，不含 Web/OTA/NTP/mDNS 和 Arduino SDK 内部开销 |
+| **全模块默认目标（自有）** | **<= 2.9KB** | Web/OTA/NTP/mDNS/Sleep/Watchdog 全开，默认 WARN FileLog，无 INFO 缓存 |
+| **全模块 INFO FileLog 目标（自有）** | **<= 3.4KB** | 全模块默认目标 + INFO 文件日志缓存，缓存上限仍为单个静态缓冲 512B |
 
 库保留 RTC user memory：
 
@@ -62,11 +64,11 @@
 
 | 示例 | 启用模块 | RAM | Flash |
 |------|----------|-----|-------|
-| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,212B | 313,251B |
-| `sleep_watchdog` | Sleep + WDT | 33,028B | 314,419B |
-| `custom_web` | Web + mDNS + WDT | 38,428B | 389,348B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 41,568B | 414,028B |
-| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 43,580B | 422,616B |
+| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,888B | 314,959B |
+| `sleep_watchdog` | Sleep + WDT | 33,708B | 316,003B |
+| `custom_web` | Web + mDNS + WDT | 40,512B | 395,112B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 43,652B | 419,872B |
+| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 45,696B | 428,220B |
 
 Arduino SDK 内部开销（不可控，参考值）：
 

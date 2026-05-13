@@ -1003,9 +1003,9 @@ void Esp8266BaseWeb::_handleWiFiGet() {
         if (strcmp(err, "missing_ssid") == 0) {
             sendChunk("<p class=err>SSID cannot be empty.</p>");
         } else if (strcmp(err, "ssid_too_long") == 0) {
-            sendChunk("<p class=err>SSID is too long.</p>");
+            sendChunk("<p class=err>SSID is too long. Maximum is 32 bytes.</p>");
         } else if (strcmp(err, "password_too_long") == 0) {
-            sendChunk("<p class=err>Password is too long.</p>");
+            sendChunk("<p class=err>Password is too long. Maximum is 63 bytes.</p>");
         } else if (strcmp(err, "save_failed") == 0) {
             sendChunk("<p class=err>Failed to save WiFi credentials.</p>");
         } else {

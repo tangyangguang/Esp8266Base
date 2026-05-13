@@ -51,7 +51,7 @@ pio run -e esp12f -t upload --upload-port /dev/cu.usbserial-120
 
 ## 6. RAM 与实现硬约束
 
-- 库自身全局静态 RAM 目标控制在 2.5KB 内。
+- 库自身全局静态 RAM 按 profile 控制：核心裁剪 <1.25KB，全模块默认 <=2.9KB，全模块 INFO FileLog <=3.4KB。
 - 禁止单个全局/静态缓冲超过 512B。
 - HTML 必须放 `PROGMEM`，不得放 DRAM。
 - Web 必须用 `sendContent_P()` / `sendChunk()` 流式输出，不拼整页 `String`。
