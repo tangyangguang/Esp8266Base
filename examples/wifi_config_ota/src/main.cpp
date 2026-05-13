@@ -2,7 +2,7 @@
  * wifi_config_ota — Web + OTA 完整示例
  *
  * 功能演示：
- *   - 通过 http://esp-ota.local/ 访问 Web 控制台（Basic Auth: admin/admin）
+ *   - 通过 http://esp8266base-ota.local/ 访问 Web 控制台（Basic Auth: admin/admin）
  *   - 通过 /wifi 修改 WiFi 凭证
  *   - 通过 /ota  上传固件并自动重启
  *   - 自定义页面 /status 显示实时运行状态
@@ -13,7 +13,7 @@
  *   pio run -e esp12f -t upload
  *
  * OTA 更新方法：
- *   curl -u admin:admin -F "firmware=@.pio/build/esp12f/firmware.bin" http://esp-ota.local/ota
+ *   curl -u admin:admin -F "firmware=@.pio/build/esp12f/firmware.bin" http://esp8266base-ota.local/ota
  */
 
 #include <Arduino.h>
@@ -83,7 +83,6 @@ void setup() {
     delay(100);
 
     Esp8266Base::setFirmwareInfo("wifi-ota", "0.2.0");
-    Esp8266Base::setHostname("esp-ota");
 
     Esp8266Base::begin();
 

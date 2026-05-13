@@ -10,11 +10,11 @@
  *   - POST 请求参数解析示例
  *
  * 访问方式（设备连上 WiFi 后）：
- *   http://esp-sensor.local/             业务首页（传感器页面）
- *   http://esp-sensor.local/sensor       传感器页面
- *   http://esp-sensor.local/esp8266base  基础库系统首页
- *   http://esp-sensor.local/api/sensor   JSON 数据接口
- *   http://esp-sensor.local/api/control  控制接口（POST ?value=1）
+ *   http://esp8266base-sensor.local/             业务首页（传感器页面）
+ *   http://esp8266base-sensor.local/sensor       传感器页面
+ *   http://esp8266base-sensor.local/esp8266base  基础库系统首页
+ *   http://esp8266base-sensor.local/api/sensor   JSON 数据接口
+ *   http://esp8266base-sensor.local/api/control  控制接口（POST ?value=1）
  *
  * 烧录方法（PlatformIO）：
  *   pio run -e esp12f -t upload
@@ -113,7 +113,6 @@ void setup() {
     delay(100);
 
     Esp8266Base::setFirmwareInfo("custom-web", "0.2.0");
-    Esp8266Base::setHostname("esp-sensor");
     Esp8266BaseWeb::setDeviceName("Sensor Node");
     Esp8266BaseWeb::setHomePath("/sensor");
     Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);

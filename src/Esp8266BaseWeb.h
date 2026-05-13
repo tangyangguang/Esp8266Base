@@ -5,7 +5,7 @@
 // ----------------------------------------------------------------------------
 // Esp8266BaseWeb — 极简管理 Web
 //
-// 内置路由：GET / GET /esp8266base GET /system GET/POST /wifi GET/POST /auth GET/POST /ota GET /logs POST /logs/clear POST /system/filelog POST /reboot GET /health
+// 内置路由：GET / GET /esp8266base GET /system GET/POST /wifi GET/POST /auth GET/POST /ota GET /logs POST /logs/clear POST /system/filelog POST /system/hostname GET/POST /api/system/hostname POST /reboot GET /health
 // /system 是维护入口页面；/reboot 只保留 POST 重启动作
 // 应用扩展：最多 4 页面 + 6 API（静态数组，不动态分配）
 // Basic Auth 默认开启
@@ -111,11 +111,11 @@ private:
     static char             _authPass[24];                      // 24B
     static char             _deviceName[24];                    // 24B
     static char             _homePath[24];                      // 24B
-    static char             _hostname[24];                      // 24B
+    static char             _hostname[33];                      // 33B
     static char             _fwName[24];                        // 24B
     static char             _fwVersion[16];                     // 16B
     static uint32_t         _bootCount;                         // 4B
-    static char             _titleBuf[48];                      // "hostname (fw ver)" 48B
+    static char             _titleBuf[80];                      // "hostname (fw ver)" 80B
     static char             _activeUri[32];                     // 当前请求 URI，用于慢请求日志
     static char             _activeMethod[5];                   // GET/POST
     static char             _builtinLabels[3][16];              // Status/Logs/System
@@ -146,6 +146,9 @@ private:
     static void _handleLogsGet();
     static void _handleLogsClearPost();
     static void _handleFileLogPost();
+    static void _handleHostnamePost();
+    static void _handleHostnameApiGet();
+    static void _handleHostnameApiPost();
     static void _handleSystemGet();
     static void _handleRebootPost();
     static void _handleHealth();

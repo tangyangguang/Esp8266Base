@@ -142,9 +142,11 @@ ESP8266WebServer（端口 80）
   │     GET  /ota
   │     POST /ota        ──► Esp8266BaseOTA 处理（强制 Basic Auth）
   │     GET  /logs
-  │     GET  /system     ──► System 页面：WiFi、Auth、OTA、FileLog、清日志、重启入口
+  │     GET  /system     ──► System 页面：Hostname、WiFi、Auth、OTA、FileLog、清日志、重启入口
   │     POST /system/filelog ─► 保存 FileLog 模式（入口在 System 页面）
   │     POST /logs/clear ──► 清空文件日志（入口在 System 页面）
+  │     POST /system/hostname ──► 保存 eb_hostname，重启生效
+  │     GET/POST /api/system/hostname ──► hostname JSON API
   │     POST /reboot      ──► flush Config 后重启
   │     GET  /health
   │
@@ -178,6 +180,7 @@ struct AppRoute {
 /
 ├── cfg_eb_wifi_ssid    → "IOTHOME"
 ├── cfg_eb_wifi_pass    → "secret123"
+├── cfg_eb_hostname     → "sensor-node-01"
 ├── cfg_eb_wdt_count    → "3"
 └── cfg_<key>        → <value>
 ```

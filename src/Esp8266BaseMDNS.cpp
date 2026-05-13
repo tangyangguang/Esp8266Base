@@ -13,7 +13,7 @@ bool Esp8266BaseMDNS::_running = false;
 // begin
 // ----------------------------------------------------------------------------
 bool Esp8266BaseMDNS::begin(const char* hostname) {
-    if (!hostname || strlen(hostname) == 0 || strlen(hostname) > 24) {
+    if (!hostname || strlen(hostname) == 0 || strlen(hostname) > 32) {
         ESP8266BASE_LOG_E("mDNS", "Invalid hostname");
         return false;
     }

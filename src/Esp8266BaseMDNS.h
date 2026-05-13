@@ -6,7 +6,7 @@
 //
 // WiFi 连接后由 Esp8266Base::handle() 首次触发 begin()
 // 广播 hostname.local + _http._tcp:80
-// hostname 由 Esp8266Base::setHostname() 提供，最长 24 字符
+// hostname 由 Esp8266Base 启动时解析，最长 32 字符
 //
 // RAM 预算：<= 96B
 // ----------------------------------------------------------------------------

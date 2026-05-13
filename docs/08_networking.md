@@ -113,7 +113,7 @@ http://<ip>/
 http://<hostname>.local/
 ```
 
-访问 Web 管理页面。`hostname` 由 `Esp8266Base::setHostname()` 设置。
+访问 Web 管理页面。hostname 由基础库启动期统一解析：合法持久化配置 `eb_hostname` 优先，其次使用编译期宏 `ESP8266BASE_DEFAULT_HOSTNAME`，兜底为 `esp8266base`。hostname 必须为 1-32 位小写字母、数字或短横线，不能以短横线开头或结尾，不允许 `.` 或 `.local`。System 页面和 `/api/system/hostname` 可以保存新的 `eb_hostname`，重启后对 mDNS、Web 标题和设备发现生效。
 
 ---
 
@@ -122,7 +122,7 @@ http://<hostname>.local/
 mDNS 在 WiFi STA 连接后启动：
 
 ```text
-mdns_started host=esp-demo.local service=http tcp_port=80
+mdns_started host=esp8266base-full.local service=http tcp_port=80
 ```
 
 注意：

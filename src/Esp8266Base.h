@@ -45,9 +45,6 @@ public:
     // 设置固件名称和版本，用于日志和 /health 响应
     static void setFirmwareInfo(const char* name, const char* version);
 
-    // 设置设备 hostname（mDNS + AP SSID 后缀），最长 24 字符
-    static void setHostname(const char* hostname);
-
     // ---- 核心 API ----
 
     // 按序初始化：Log → Sleep → Config → FileLog → WiFi → Watchdog → Web → OTA → 诊断日志
@@ -64,11 +61,14 @@ public:
     static const char* firmwareName();
     static const char* firmwareVersion();
     static const char* hostname();
+    static bool isValidHostname(const char* hostname);
 
 private:
     static char _fwName[24];     // 24B
     static char _fwVersion[16];  // 16B
-    static char _hostname[24];   // 24B
+    static char _hostname[33];   // 33B
+
+    static void _resolveHostname();
 
 #if ESP8266BASE_USE_NTP
     static bool _ntpWasTriggered;  // 1B：WiFi 连接后 NTP 已触发

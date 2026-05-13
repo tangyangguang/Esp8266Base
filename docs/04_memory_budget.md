@@ -40,7 +40,7 @@
 | Esp8266BaseFileLog | <= 80B 默认；INFO 文件缓存另加 <=512B | mode/path/current size/dir state；默认 WARN 时不编译低优先级缓存 |
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
-| Esp8266BaseWeb（路由表） | <= 880B | AppRoute 4×48+6×48=480B + _authUser/Pass(48B) + _deviceName/_homePath(48B) + hostname/firmware/version/title/boot(116B) + labels(96B) + _activeUri/Method(37B) + 状态 |
+| Esp8266BaseWeb（路由表） | <= 920B | AppRoute 4×48+6×48=480B + _authUser/Pass(48B) + _deviceName/_homePath(48B) + hostname/firmware/version/title/boot(153B) + labels(96B) + _activeUri/Method(37B) + 状态 |
 | Esp8266BaseOTA | <= 160B | _inProgress/_rejected/_started/_status + 上传计时、字节数和 10% 进度日志状态 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
@@ -126,7 +126,7 @@ std::vector<AppRoute> _pages;
 
 ```cpp
 // 正确
-static char _hostname[24];
+static char _hostname[33];
 
 // 错误
 static String _hostname;

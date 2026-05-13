@@ -6,6 +6,7 @@
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWiFi.h"
 #include "Esp8266BaseUtil.h"
+#include "Esp8266Base.h"
 #if ESP8266BASE_USE_NTP
 #include "Esp8266BaseNTP.h"
 #endif
@@ -25,11 +26,11 @@ char                     Esp8266BaseWeb::_authUser[24] = ESP8266BASE_WEB_AUTH_US
 char                     Esp8266BaseWeb::_authPass[24] = ESP8266BASE_WEB_AUTH_PASS;
 char                     Esp8266BaseWeb::_deviceName[24] = "";
 char                     Esp8266BaseWeb::_homePath[24] = "";
-char                     Esp8266BaseWeb::_hostname[24] = "esp8266";
+char                     Esp8266BaseWeb::_hostname[33] = "esp8266base";
 char                     Esp8266BaseWeb::_fwName[24] = "esp8266base";
 char                     Esp8266BaseWeb::_fwVersion[16] = "1.0.0";
 uint32_t                 Esp8266BaseWeb::_bootCount = 0;
-char                     Esp8266BaseWeb::_titleBuf[48] = "ESP8266";
+char                     Esp8266BaseWeb::_titleBuf[80] = "ESP8266";
 char                     Esp8266BaseWeb::_activeUri[32] = "";
 char                     Esp8266BaseWeb::_activeMethod[5] = "";
 char                     Esp8266BaseWeb::_builtinLabels[3][16] = {
@@ -152,6 +153,23 @@ static const char WEB_AUTH_FORM[] PROGMEM =
     "Confirm new password<input type=password name=confirm maxlength=23 autocomplete=new-password required>"
     "<input type=submit value='Update Password'>"
     "</form>";
+
+static const char WEB_HOSTNAME_FORM_PRE[] PROGMEM =
+    "<section><h3>Hostname</h3>"
+    "<p>Current hostname: ";
+
+static const char WEB_HOSTNAME_FORM_MID[] PROGMEM =
+    "</p><form method=post action='/system/hostname' onsubmit=\""
+    "var h=this.hostname.value.trim();"
+    "if(!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(h)){"
+    "alert('Hostname must be 1-32 lowercase letters, numbers, or hyphens, and cannot start or end with hyphen.');return false;}"
+    "return once(this);\">"
+    "Hostname<input type=text name=hostname maxlength=32 autocomplete=off required value=\"";
+
+static const char WEB_HOSTNAME_FORM_POST[] PROGMEM =
+    "\"><p>Reboot to apply mDNS, OTA discovery, and Web title changes.</p>"
+    "<input type=submit value='Save Hostname'>"
+    "</form></section>";
 
 static const char WEB_SYSTEM_PAGE[] PROGMEM =
     "<section><h3>Network</h3>"
@@ -309,6 +327,33 @@ static bool _fileLogModeFromArg(const String& raw, Esp8266BaseFileLog::Mode& mod
     return false;
 }
 
+static const char* _validatedDefaultHostname() {
+    return Esp8266Base::isValidHostname(ESP8266BASE_DEFAULT_HOSTNAME)
+        ? ESP8266BASE_DEFAULT_HOSTNAME
+        : "esp8266base";
+}
+
+static void _sendHostnameSystemSection() {
+    char persisted[33] = "";
+    bool found = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_HOSTNAME, persisted, sizeof(persisted), "");
+    bool persistedValid = found && persisted[0] && Esp8266Base::isValidHostname(persisted);
+    const char* formValue = persistedValid ? persisted : Esp8266BaseWeb::server().hasArg("hostname") ? "" : Esp8266Base::hostname();
+
+    Esp8266BaseWeb::sendContent_P(WEB_HOSTNAME_FORM_PRE);
+    _sendAttrEscaped(Esp8266Base::hostname());
+    Esp8266BaseWeb::sendChunk("<br>mDNS: ");
+    _sendAttrEscaped(Esp8266Base::hostname());
+    Esp8266BaseWeb::sendChunk(".local");
+    if (persistedValid && strcmp(persisted, Esp8266Base::hostname()) != 0) {
+        Esp8266BaseWeb::sendChunk("<br>Saved hostname: ");
+        _sendAttrEscaped(persisted);
+        Esp8266BaseWeb::sendChunk(" (reboot required)");
+    }
+    Esp8266BaseWeb::sendContent_P(WEB_HOSTNAME_FORM_MID);
+    _sendAttrEscaped(formValue);
+    Esp8266BaseWeb::sendContent_P(WEB_HOSTNAME_FORM_POST);
+}
+
 static void _sendFileLogSystemSection() {
     Esp8266BaseWeb::sendChunk("<section><h3>File Log Mode</h3><p>Current mode: ");
     Esp8266BaseWeb::sendChunk(Esp8266BaseFileLog::modeName());
@@ -406,13 +451,16 @@ bool Esp8266BaseWeb::begin() {
     _server.on("/logs/clear", HTTP_POST, _handleLogsClearPost);
     _server.on("/system", HTTP_GET,  _handleSystemGet);
     _server.on("/system/filelog", HTTP_POST, _handleFileLogPost);
+    _server.on("/system/hostname", HTTP_POST, _handleHostnamePost);
+    _server.on("/api/system/hostname", HTTP_GET, _handleHostnameApiGet);
+    _server.on("/api/system/hostname", HTTP_POST, _handleHostnameApiPost);
     _server.on("/reboot", HTTP_POST, _handleRebootPost);
     _server.on("/health", HTTP_GET,  _handleHealth);
     _server.onNotFound(_handleNotFound);
 
     _server.begin();
     _running = true;
-    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=14 app_pages_registered=%d/%d app_apis_registered=%d/%d",
+    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=17 app_pages_registered=%d/%d app_apis_registered=%d/%d",
                       (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES,
                       (int)_apiCount,  ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
@@ -1167,6 +1215,79 @@ void Esp8266BaseWeb::_handleFileLogPost() {
     _redirect(ok ? "/system?filelog_saved=1" : "/system?error=filelog_save_failed");
 }
 
+void Esp8266BaseWeb::_handleHostnamePost() {
+    if (!checkAuth()) return;
+    _markRequest();
+
+    char hostname[33] = "";
+    strncpy(hostname, _server.arg("hostname").c_str(), sizeof(hostname) - 1);
+    _trimWhitespace(hostname);
+
+    if (!Esp8266Base::isValidHostname(hostname)) {
+        ESP8266BASE_LOG_W("Web ", "hostname_update_rejected reason=invalid value=%s", hostname);
+        _redirect("/system?error=hostname_invalid");
+        return;
+    }
+
+    if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_HOSTNAME, hostname)) {
+        ESP8266BASE_LOG_E("Web ", "hostname_update_failed hostname=%s", hostname);
+        _redirect("/system?error=hostname_save_failed");
+        return;
+    }
+
+    ESP8266BASE_LOG_I("Web ", "hostname_saved hostname=%s reboot_required=yes", hostname);
+    _redirect("/system?hostname_saved=1");
+}
+
+void Esp8266BaseWeb::_handleHostnameApiGet() {
+    _markRequest();
+    if (!verifyAuth()) {
+        _server.send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
+        return;
+    }
+
+    char persisted[33] = "";
+    bool found = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_HOSTNAME, persisted, sizeof(persisted), "");
+    bool persistedValid = found && persisted[0] && Esp8266Base::isValidHostname(persisted);
+    const char* defaultHostname = _validatedDefaultHostname();
+    bool rebootRequired = persistedValid && strcmp(persisted, Esp8266Base::hostname()) != 0;
+
+    snprintf(_wb, sizeof(_wb),
+             "{\"hostname\":\"%s\",\"persisted\":\"%s\",\"default\":\"%s\",\"rebootRequired\":%s}",
+             Esp8266Base::hostname(),
+             persistedValid ? persisted : "",
+             defaultHostname,
+             rebootRequired ? "true" : "false");
+    _server.send(200, "application/json", _wb);
+}
+
+void Esp8266BaseWeb::_handleHostnameApiPost() {
+    _markRequest();
+    if (!verifyAuth()) {
+        _server.send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
+        return;
+    }
+
+    char hostname[33] = "";
+    strncpy(hostname, _server.arg("hostname").c_str(), sizeof(hostname) - 1);
+    _trimWhitespace(hostname);
+
+    if (!Esp8266Base::isValidHostname(hostname)) {
+        ESP8266BASE_LOG_W("Web ", "hostname_api_update_rejected reason=invalid value=%s", hostname);
+        _server.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_hostname\"}");
+        return;
+    }
+
+    if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_HOSTNAME, hostname)) {
+        ESP8266BASE_LOG_E("Web ", "hostname_api_update_failed hostname=%s", hostname);
+        _server.send(500, "application/json", "{\"ok\":false,\"error\":\"save_failed\"}");
+        return;
+    }
+
+    ESP8266BASE_LOG_I("Web ", "hostname_api_saved hostname=%s reboot_required=yes", hostname);
+    _server.send(200, "application/json", "{\"ok\":true,\"rebootRequired\":true}");
+}
+
 void Esp8266BaseWeb::_handleSystemGet() {
     if (!checkAuth()) return;
     sendHeader();
@@ -1174,6 +1295,8 @@ void Esp8266BaseWeb::_handleSystemGet() {
         sendChunk("<p class=ok>File logs cleared.</p>");
     } else if (_server.hasArg("filelog_saved")) {
         sendChunk("<p class=ok>File log mode saved.</p>");
+    } else if (_server.hasArg("hostname_saved")) {
+        sendChunk("<p class=ok>Hostname saved. Reboot to apply network discovery changes.</p>");
     } else if (_server.hasArg("error")) {
         char err[24] = "";
         strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
@@ -1183,9 +1306,14 @@ void Esp8266BaseWeb::_handleSystemGet() {
             sendChunk("<p class=err>Invalid file log mode.</p>");
         } else if (strcmp(err, "filelog_save_failed") == 0) {
             sendChunk("<p class=err>Failed to save file log mode.</p>");
+        } else if (strcmp(err, "hostname_invalid") == 0) {
+            sendChunk("<p class=err>Invalid hostname.</p>");
+        } else if (strcmp(err, "hostname_save_failed") == 0) {
+            sendChunk("<p class=err>Failed to save hostname.</p>");
         }
     }
     sendChunk("<h2>System</h2><div class=grid>");
+    _sendHostnameSystemSection();
     _sendFileLogSystemSection();
     sendContent_P(WEB_SYSTEM_PAGE);
     sendFooter();

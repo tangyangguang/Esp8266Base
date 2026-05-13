@@ -55,13 +55,13 @@ station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECT
 
 现象：
 
-- `http://esp-demo.local/` 打不开。
+- `http://esp8266base-full.local/` 打不开。
 - IP 可以访问。
 
 重点日志：
 
 ```text
-mdns_started host=esp-demo.local service=http tcp_port=80
+mdns_started host=esp8266base-full.local service=http tcp_port=80
 ```
 
 可能原因：

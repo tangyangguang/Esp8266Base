@@ -112,6 +112,7 @@ lib_deps =
 
 build_flags =
     -DESP8266BASE_LOG_LEVEL=1
+    -DESP8266BASE_DEFAULT_HOSTNAME=\"esp8266base-full\"
     -DESP8266BASE_USE_WEB=1
     -DESP8266BASE_USE_OTA=1
     -DESP8266BASE_USE_NTP=1
@@ -131,6 +132,7 @@ build_flags =
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 0=D, 1=I, 2=W, 3=E, 4=关闭 |
+| `ESP8266BASE_DEFAULT_HOSTNAME` | `"esp8266base"` | 编译期默认 hostname，合法 `eb_hostname` 优先 |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |

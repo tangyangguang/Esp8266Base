@@ -48,16 +48,16 @@ static void setFirmwareInfo(const char* name, const char* version);
 设置固件名称和版本号（显示在启动日志和 Web 标题中）。必须在 `begin()` 前调用。
 
 ```cpp
-static void setHostname(const char* hostname);
+static const char* hostname();
+static bool isValidHostname(const char* hostname);
 ```
-设置设备 hostname，用于 AP SSID 后缀、mDNS 名称、Web 页面标题。最长 24 字符。必须在 `begin()` 前调用。
+`hostname()` 查询启动时解析出的最终 hostname。默认值来自 `ESP8266BASE_DEFAULT_HOSTNAME`，合法持久化值 `eb_hostname` 会覆盖默认值。`isValidHostname()` 使用库统一规则校验：1-32 位，只允许小写字母、数字和短横线，不能以短横线开头或结尾，不允许 `.` 或 `.local`。
 
 ```cpp
 static const char* firmwareName();
 static const char* firmwareVersion();
-static const char* hostname();
 ```
-查询已设置的固件信息和 hostname。
+查询已设置的固件信息。
 
 ### 使用示例
 
@@ -67,7 +67,6 @@ static const char* hostname();
 void setup() {
     Serial.begin(115200);
     Esp8266Base::setFirmwareInfo("fan-ctrl", "1.0.0");
-    Esp8266Base::setHostname("esp-fan");
     Esp8266Base::begin();
 
     Esp8266BaseWeb::addPage("/fan", handleFanPage);
@@ -285,7 +284,7 @@ static void enableConfigReadAudit(bool enabled);
 | `eb_wifi_ssid` | WiFi STA SSID |
 | `eb_wifi_pass` | WiFi STA 密码 |
 | `eb_ap_pass` | AP 配网密码 |
-| `eb_hostname` | 设备 hostname |
+| `eb_hostname` | 设备持久化 hostname，覆盖 `ESP8266BASE_DEFAULT_HOSTNAME` |
 | `eb_web_user` | Web Auth 持久化用户名，覆盖默认用户名 |
 | `eb_web_pass` | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 |
 | `eb_wdt_count` | WDT 重启累计次数 |
@@ -498,6 +497,9 @@ static bool isRunning();
 | `/logs` | GET | 查看文件日志状态、模式、大小和内容（需要 Basic Auth） |
 | `/system` | GET | System 页面，聚合 WiFi、Auth、OTA、FileLog、清日志和重启入口 |
 | `/system/filelog` | POST | 保存 FileLog 模式（需要 Basic Auth，入口在 System 页面） |
+| `/system/hostname` | POST | 保存 hostname（需要 Basic Auth，入口在 System 页面，重启生效） |
+| `/api/system/hostname` | GET | 查询 hostname JSON（需要 Basic Auth） |
+| `/api/system/hostname` | POST | 保存 hostname 表单参数 `hostname`（需要 Basic Auth，重启生效） |
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
 | `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
@@ -631,7 +633,7 @@ static bool isRunning();
 
 ### 约束
 
-- hostname 最长 24 字符，来自 `Esp8266Base::setHostname()`
+- hostname 最长 32 字符，来自启动期解析结果：合法 `eb_hostname` > 合法 `ESP8266BASE_DEFAULT_HOSTNAME` > `esp8266base`
 - 不支持运行时改名并自动重启
 - 不支持复杂 TXT 记录管理
 
@@ -778,6 +780,7 @@ void loop() {
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 日志等级：0=D, 1=I, 2=W, 3=E, 4=关闭 |
+| `ESP8266BASE_DEFAULT_HOSTNAME` | `"esp8266base"` | 编译期默认 hostname，合法 `eb_hostname` 优先 |
 | `ESP8266BASE_FILELOG_DEFAULT_MODE` | `ESP8266BASE_FILELOG_MODE_WARN` | 文件日志默认运行模式：OFF/WARN/INFO |
 | `ESP8266BASE_FILELOG_PATH` | `"/logs/app.log"` | 文件日志路径 |
 | `ESP8266BASE_FILELOG_MAX_BYTES` | `16KB` | 文件日志单段最大字节数 |

@@ -33,8 +33,10 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/ota` | GET | Basic Auth | OTA 上传页，带进度显示；仅 `ESP8266BASE_USE_OTA=1` 时注册 |
 | `/ota` | POST | Basic Auth | 固件上传，由 OTA 模块处理；仅 `ESP8266BASE_USE_OTA=1` 时注册 |
 | `/logs` | GET | Basic Auth | 查看文件日志状态、模式、缓存状态和单个日志段内容 |
-| `/system` | GET | Basic Auth | System 页面，聚合 WiFi、Auth、OTA、FileLog、清日志和重启入口 |
+| `/system` | GET | Basic Auth | System 页面，聚合 Hostname、WiFi、Auth、OTA、FileLog、清日志和重启入口 |
 | `/system/filelog` | POST | Basic Auth | 保存 FileLog 模式；入口在 System 页面 |
+| `/system/hostname` | POST | Basic Auth | 保存 `eb_hostname`；入口在 System 页面，重启生效 |
+| `/api/system/hostname` | GET/POST | Basic Auth | 查询或保存 hostname；POST 使用表单参数 `hostname`，重启生效 |
 | `/logs/clear` | POST | Basic Auth | 清空文件日志；入口在 System 页面 |
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
 | `/health` | GET | 无 | JSON 健康信息 |

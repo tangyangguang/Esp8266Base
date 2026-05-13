@@ -20,8 +20,19 @@ if rg -n '#define\s+ESP8266BASE_CFG_KEY_.*"(wifi_ssid|wifi_pass|ap_pass|hostname
   fail "reserved config key without eb_ prefix found"
 fi
 
-for key in eb_wifi_ssid eb_wifi_pass eb_boot_count eb_wdt_count; do
+for key in eb_wifi_ssid eb_wifi_pass eb_hostname eb_boot_count eb_wdt_count; do
   rg -n "$key" src docs README.md >/dev/null || fail "required reserved key/reference missing: $key"
+done
+
+rg -n 'ESP8266BASE_DEFAULT_HOSTNAME' src docs README.md examples platformio.ini >/dev/null || \
+  fail "default hostname macro reference missing"
+
+if rg -n 'setHostname\s*\(' src examples README.md docs; then
+  fail "setHostname API/reference must not remain"
+fi
+
+for token in '/system/hostname' '/api/system/hostname' '重启生效'; do
+  rg -n "$token" src docs README.md >/dev/null || fail "hostname Web/API documentation token missing: $token"
 done
 
 if rg -n 'eb_wdt_pending|ESP8266BASE_CFG_KEY_WDT_PENDING|旧行为|旧固件|旧无前缀|兼容旧|兼容标记' \

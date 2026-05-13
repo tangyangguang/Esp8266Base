@@ -8,7 +8,7 @@
  *   Web      — 2 页面 /demo /ctrl + 2 API /api/demo /api/ctrl
  *   OTA      — 内置 /ota 页面，Web 刷机
  *   NTP      — 网络对时，状态页显示当前时间
- *   mDNS     — http://esp-demo.local/
+ *   mDNS     — http://esp8266base-full.local/
  *   Sleep    — 唤醒原因显示 + Web 触发深度睡眠
  *   Watchdog — WDT 重启计数显示 + Web 清零
  *   Button   — GPIO0 长按 1 秒清除全部 /cfg_* 配置并重启
@@ -412,7 +412,6 @@ void setup() {
     setBoardLed(false);
 
     Esp8266Base::setFirmwareInfo("full-demo", "1.0.0");
-    Esp8266Base::setHostname("esp-demo");
     Esp8266BaseWeb::setDeviceName("Full Demo");
     Esp8266BaseWeb::setHomePath("/demo");
     Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);

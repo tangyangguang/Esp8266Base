@@ -325,15 +325,27 @@ def test_public_default_tables() -> None:
     web_doc = read("docs/06_web_ota.md")
     architecture = read("docs/02_architecture.md")
     memory = read("docs/04_memory_budget.md")
+    options_h = read("src/Esp8266BaseOptions.h")
+    base_h = read("src/Esp8266Base.h")
+    base_cpp = read("src/Esp8266Base.cpp")
 
     for text, label in [(readme, "README"), (api, "API reference"), (overview, "overview")]:
         require_token(text, '| `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` |', f"{label} Web Auth default")
         require_token(text, '| `ESP8266BASE_WIFI_RETRY_FAST` | `2000` |', f"{label} WiFi fast retry default")
         require_token(text, '| `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |',
                       f"{label} OTA/Web dependency")
+        require_token(text, '| `ESP8266BASE_DEFAULT_HOSTNAME` | `"esp8266base"` |',
+                      f"{label} default hostname")
 
+    require_token(options_h, '#define ESP8266BASE_DEFAULT_HOSTNAME "esp8266base"', "default hostname macro")
+    require_token(base_h, "static bool isValidHostname(const char* hostname);", "hostname validation API")
+    require_token(base_cpp, "ESP8266BASE_CFG_KEY_HOSTNAME", "hostname persisted key usage")
+    require_token(base_cpp, "default_hostname_invalid", "invalid default hostname diagnostic")
+    require_token(base_cpp, "persisted_hostname_invalid", "invalid persisted hostname diagnostic")
     require_token(readme, 'ESP8266BASE_WEB_AUTH_PASS=\\"admin\\"', "README build flag default")
+    require_token(readme, 'ESP8266BASE_DEFAULT_HOSTNAME=\\"esp8266base-full\\"', "README hostname build flag")
     require_token(overview, 'ESP8266BASE_WEB_AUTH_PASS=\\"admin\\"', "overview build flag default")
+    require_token(overview, 'ESP8266BASE_DEFAULT_HOSTNAME=\\"esp8266base-full\\"', "overview hostname build flag")
     require_token(readme, "/wifi` GET 表单也会回显已保存密码", "README plaintext WiFi password echo")
     require_token(readme, "硬件运行时目标", "README free heap target scope")
     require_token(web_doc, "路径字符集", "Web route path charset table")
@@ -355,6 +367,8 @@ def test_public_default_tables() -> None:
 def test_web_home_contract() -> None:
     web_h = read("src/Esp8266BaseWeb.h")
     web_cpp = read("src/Esp8266BaseWeb.cpp")
+    base_h = read("src/Esp8266Base.h")
+    base_cpp = read("src/Esp8266Base.cpp")
     wifi_h = read("src/Esp8266BaseWiFi.h")
     api = read("docs/03_api_reference.md")
     web_doc = read("docs/06_web_ota.md")
@@ -384,6 +398,11 @@ def test_web_home_contract() -> None:
 
     if "setTitle" in web_h or "setTitle" in api:
         fail("old Web title-only API must not remain")
+    for text, label in [(base_h, "base_h"), (base_cpp, "base_cpp"), (web_h, "web_h"),
+                        (web_cpp, "web_cpp"), (api, "api"), (web_doc, "web_doc"),
+                        (custom_web, "custom_web"), (full_demo, "full_demo")]:
+        if "setHostname(" in text:
+            fail(f"setHostname must not remain in {label}")
     if "系统首页以轻量分组展示" not in web_doc:
         fail("Web doc must describe system home information groups")
 
@@ -417,6 +436,17 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, "<p><a href='/wifi'>WiFi Settings</a></p>", "System WiFi entry")
     require_token(web_cpp, "<p><a href='/auth'>Auth Password</a></p>", "System Auth entry")
     require_token(web_cpp, "<p><a href='/ota'>OTA Update</a></p>", "System OTA entry")
+    require_token(web_cpp, '_server.on("/system/hostname", HTTP_POST, _handleHostnamePost);',
+                  "hostname System POST route")
+    require_token(web_cpp, '_server.on("/api/system/hostname", HTTP_GET, _handleHostnameApiGet);',
+                  "hostname API GET route")
+    require_token(web_cpp, '_server.on("/api/system/hostname", HTTP_POST, _handleHostnameApiPost);',
+                  "hostname API POST route")
+    require_token(web_cpp, "Hostname saved. Reboot to apply network discovery changes.",
+                  "hostname reboot notice")
+    require_token(web_cpp, "invalid_hostname", "hostname API invalid error")
+    require_token(web_doc, "/api/system/hostname", "hostname API doc")
+    require_token(api, "/system/hostname", "hostname System POST doc")
     require_token(web_cpp, "Clear File Logs", "System page log clear action")
     require_token(web_cpp, "_redirect(ok ? \"/system?cleared=1\" : \"/system?error=clear_failed\")",
                   "log clear returns to System page")

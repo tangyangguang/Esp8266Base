@@ -37,7 +37,6 @@ void setup() {
     Serial.begin(115200);
 
     Esp8266Base::setFirmwareInfo("my-device", "1.0.0");
-    Esp8266Base::setHostname("esp-device");  // 访问 http://esp-device.local/
     Esp8266BaseWeb::setDeviceName("Sensor Node");
     Esp8266BaseWeb::setHomePath("/sensor");
     Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);
@@ -138,6 +137,7 @@ lib_deps             = LittleFS
 
 build_flags =
     -DESP8266BASE_LOG_LEVEL=1
+    -DESP8266BASE_DEFAULT_HOSTNAME=\"esp8266base-full\"
     -DESP8266BASE_USE_WEB=1
     -DESP8266BASE_USE_OTA=1
     -DESP8266BASE_USE_NTP=1
@@ -153,6 +153,7 @@ build_flags =
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 0=D 1=I 2=W 3=E 4=关闭 |
+| `ESP8266BASE_DEFAULT_HOSTNAME` | `"esp8266base"` | 编译期默认 hostname，合法 `eb_hostname` 会在启动时覆盖 |
 | `ESP8266BASE_FILELOG_DEFAULT_MODE` | `ESP8266BASE_FILELOG_MODE_WARN` | 文件日志默认运行模式：OFF/WARN/INFO |
 | `ESP8266BASE_FILELOG_PATH` | `"/logs/app.log"` | 文件日志路径，构建期资源策略 |
 | `ESP8266BASE_FILELOG_MAX_BYTES` | `16KB` | 文件日志单段最大字节数 |
@@ -186,6 +187,8 @@ build_flags =
 WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。需要重新进入 AP 配网时，先清除 WiFi 凭证再重启。
 
 Web Auth 策略：认证默认值按 `ESP8266BASE_WEB_AUTH_USER/PASS` → `Esp8266BaseWeb::setDefaultAuth()` 的顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。内置 `/auth` 页面可修改密码，保存后立即使用新密码，`clearAll()` 后恢复默认值。
+
+Hostname 策略：默认 hostname 来自 `ESP8266BASE_DEFAULT_HOSTNAME`；设备已保存的 `eb_hostname` 优先级最高。hostname 必须为 1-32 位小写字母、数字或短横线，不能以短横线开头或结尾，不允许 `.local`。System 页面和 `/api/system/hostname` 可保存新 hostname，重启后对 mDNS、Web 标题和设备发现生效；`clearAll()` 后恢复编译期默认值。
 
 OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
 

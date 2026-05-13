@@ -39,6 +39,7 @@ lib_deps = LittleFS
 
 build_flags =
     -DESP8266BASE_LOG_LEVEL=1
+    -DESP8266BASE_DEFAULT_HOSTNAME=\"esp8266base-full\"
     -DESP8266BASE_USE_WEB=1
     -DESP8266BASE_USE_OTA=1
     -DESP8266BASE_USE_NTP=1
@@ -64,7 +65,6 @@ void setup() {
     delay(100);
 
     Esp8266Base::setFirmwareInfo("my-device", "1.0.0");
-    Esp8266Base::setHostname("esp-device");
 
     Esp8266Base::begin();
 }
@@ -113,8 +113,10 @@ http://192.168.4.1/
 | `/auth` | 修改 Web 密码 |
 | `/ota` | OTA 上传 |
 | `/logs` | 文件日志查看 |
-| `/system` | System 页面：WiFi、Auth、OTA、文件日志模式、清除文件日志、重启设备 |
+| `/system` | System 页面：Hostname、WiFi、Auth、OTA、文件日志模式、清除文件日志、重启设备 |
 | `/system/filelog` | 保存 FileLog 模式；入口在 System 页面 |
+| `/system/hostname` | 保存 hostname；入口在 System 页面，重启生效 |
+| `/api/system/hostname` | hostname 查询/修改 JSON API，需要 Basic Auth |
 | `/logs/clear` | 清空文件日志；入口在 System 页面 |
 | `/reboot` | 重启动作，仅 POST |
 | `/health` | 健康信息 JSON |
@@ -122,6 +124,8 @@ http://192.168.4.1/
 除 `/health` 外，内置管理页面使用 Basic Auth。默认认证来自 `ESP8266BASE_WEB_AUTH_USER/PASS`，业务代码可在 `Esp8266Base::begin()` 前调用 `Esp8266BaseWeb::setDefaultAuth(user, pass)` 覆盖默认值；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。Web 已启动后再调用 `setDefaultAuth()` 会被忽略。
 
 访问 `/auth` 可修改 Web 密码。页面会校验当前密码、新密码和确认值，保存成功后写入 `eb_web_pass` 并立即使用新密码；`clearAll()` 后恢复默认认证。Web Auth 密码会明文写入日志和 Config 审计，这是个人项目为了调试观察保留的设计。
+
+默认 hostname 来自编译期宏 `ESP8266BASE_DEFAULT_HOSTNAME`，默认值为 `esp8266base`。System 页面或 `/api/system/hostname` 保存的 `eb_hostname` 优先级最高，保存后重启生效；恢复出厂会清除 `eb_hostname` 并回到编译期默认值。
 
 表单页面使用轻量 JS 防重复提交，POST 后尽量重定向回 GET，避免刷新重复提交。
 

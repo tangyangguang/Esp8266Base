@@ -87,7 +87,6 @@ void setup() {
     Serial.println();
 
     Esp8266Base::setFirmwareInfo("sleep-wdt", "0.2.0");
-    Esp8266Base::setHostname("esp-sleep");
 
     Esp8266Base::begin();
 

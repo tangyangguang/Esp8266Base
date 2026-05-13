@@ -34,7 +34,7 @@ static uint32_t _loadAndIncrementBootCount() {
 // ----------------------------------------------------------------------------
 char Esp8266Base::_fwName[24]    = "esp8266base";
 char Esp8266Base::_fwVersion[16] = "1.0.0";
-char Esp8266Base::_hostname[24]  = "esp8266";
+char Esp8266Base::_hostname[33]  = "esp8266base";
 
 #if ESP8266BASE_USE_NTP
 bool Esp8266Base::_ntpWasTriggered = false;
@@ -51,11 +51,52 @@ void Esp8266Base::setFirmwareInfo(const char* name, const char* version) {
     if (version) { strncpy(_fwVersion, version, sizeof(_fwVersion) - 1); _fwVersion[sizeof(_fwVersion)-1] = '\0'; }
 }
 
-void Esp8266Base::setHostname(const char* hostname) {
-    if (hostname) {
-        strncpy(_hostname, hostname, sizeof(_hostname) - 1);
-        _hostname[sizeof(_hostname) - 1] = '\0';
+bool Esp8266Base::isValidHostname(const char* hostname) {
+    if (!hostname) return false;
+    size_t len = strlen(hostname);
+    if (len < 1 || len > 32) return false;
+    if (hostname[0] == '-' || hostname[len - 1] == '-') return false;
+
+    for (size_t i = 0; i < len; i++) {
+        char c = hostname[i];
+        bool ok = (c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') ||
+                  c == '-';
+        if (!ok) return false;
     }
+    return true;
+}
+
+void Esp8266Base::_resolveHostname() {
+    const char* selected = ESP8266BASE_DEFAULT_HOSTNAME;
+    const char* source = "default";
+
+    if (!isValidHostname(selected)) {
+        ESP8266BASE_LOG_W("Base", "default_hostname_invalid value=%s action=fallback fallback=esp8266base",
+                          selected ? selected : "(null)");
+        selected = "esp8266base";
+        source = "fallback";
+    }
+
+    strncpy(_hostname, selected, sizeof(_hostname) - 1);
+    _hostname[sizeof(_hostname) - 1] = '\0';
+
+    if (Esp8266BaseConfig::isReady()) {
+        char persisted[33] = "";
+        bool found = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_HOSTNAME, persisted, sizeof(persisted), "");
+        if (found && persisted[0]) {
+            if (isValidHostname(persisted)) {
+                strncpy(_hostname, persisted, sizeof(_hostname) - 1);
+                _hostname[sizeof(_hostname) - 1] = '\0';
+                source = "persisted";
+            } else {
+                ESP8266BASE_LOG_W("Base", "persisted_hostname_invalid value=%s action=ignored default=%s",
+                                  persisted, _hostname);
+            }
+        }
+    }
+
+    ESP8266BASE_LOG_I("Base", "hostname_resolved host=%s source=%s", _hostname, source);
 }
 
 // ----------------------------------------------------------------------------
@@ -81,6 +122,8 @@ bool Esp8266Base::begin() {
     if (!Esp8266BaseFileLog::begin()) {
         ok = false;
     }
+
+    _resolveHostname();
 
     uint32_t bootCount = 0;
     bootCount = _loadAndIncrementBootCount();
@@ -212,8 +255,8 @@ void Esp8266Base::logDiagnostics() {
     Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
     Esp8266BaseUtil::formatBytes(ESP.getMaxFreeBlockSize(), maxBuf, sizeof(maxBuf));
 
-    ESP8266BASE_LOG_I("Base", "firmware=%s version=%s free_heap=%s",
-                      _fwName, _fwVersion, heapBuf);
+    ESP8266BASE_LOG_I("Base", "firmware=%s version=%s hostname=%s free_heap=%s",
+                      _fwName, _fwVersion, _hostname, heapBuf);
 
 #if ESP8266BASE_USE_SLEEP
     ESP8266BASE_LOG_I("SLEP", "wake_reason=%s", Esp8266BaseSleep::wakeReason());
