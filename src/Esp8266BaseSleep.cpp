@@ -2,6 +2,7 @@
 #if ESP8266BASE_USE_SLEEP
 #include "Esp8266BaseSleep.h"
 #include "Esp8266BaseLog.h"
+#include "Esp8266BaseFileLog.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWatchdog.h"
 #include "Esp8266BaseUtil.h"
@@ -88,7 +89,7 @@ void Esp8266BaseSleep::deepSleep(uint32_t sleepSec) {
 
     // 预飞：flush Config（确保待写数据落盘）
     Esp8266BaseConfig::flush();
-    Esp8266BaseLog::flushFileSink();
+    Esp8266BaseFileLog::flush();
 
     // 预飞：断开 WiFi
     WiFi.disconnect(true);

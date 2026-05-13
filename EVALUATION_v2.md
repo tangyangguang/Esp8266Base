@@ -135,7 +135,7 @@ if (chunk == 0) continue;
 
 - 这个 key 走的是 `setStr` 立即写，所以技术上不需要再 flush。
 - 但如果用户改完密码立即拔电，由于 LittleFS 写入并不强制 fsync 到底层 NOR flash，重启后可能丢失。
-- 改密成功后追加 `Esp8266BaseLog::flushFileSink()` 至少能保证文件日志内容也在断电前落盘。
+- 改密成功后追加 `Esp8266BaseFileLog::flush()` 至少能保证文件日志内容也在断电前落盘。
 
 ### B11（低）`Esp8266BaseUtil::formatBytes` MB 公式在大值时溢出 uint32_t
 位置：`src/Esp8266BaseUtil.h:20`
@@ -176,7 +176,7 @@ if (chunk == 0) continue;
 ### C3 `docs/02_architecture.md` 关键不做项里仍然列着 "FileLog"
 位置：`docs/02_architecture.md:235`
 
-- 库已经实现 `enableFileSink()` 并配套 `/logs` 页面、缓存机制、文档 `07_observability`。
+- 库已经实现 `Esp8266BaseFileLog` 并配套 `/logs` 页面、缓存机制、文档 `07_observability`。
 - 这条直接和实现矛盾，是历史遗留文档。
 
 ### C4 `docs/03_api_reference.md` NTP 段落是合并 / 编辑残留
@@ -226,7 +226,7 @@ Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   (int)_resetCount);
 Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_PENDING, 1);
 Esp8266BaseConfig::flush();
 ESP8266BASE_LOG_E(...);
-Esp8266BaseLog::flushFileSink();
+Esp8266BaseFileLog::flush();
 delay(50);
 ESP.restart();
 ```

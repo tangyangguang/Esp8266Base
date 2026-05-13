@@ -70,11 +70,12 @@ Esp8266Base（主入口）
 1. Esp8266BaseLog::begin()          — 最先，保证后续日志可输出
 2. Esp8266BaseSleep::begin()        — 读取唤醒原因（须在 Config 前）
 3. Esp8266BaseConfig::begin()       — 挂载 LittleFS；默认不自动格式化
-4. Esp8266BaseWiFi::begin()         — 读取凭证并缓存，启动状态机（非阻塞）
-5. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
-6. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）
-7. Esp8266BaseOTA::begin()          — `ESP8266BASE_USE_OTA=1` 时（要求 Web，注册 POST /ota）
-8. Esp8266Base::logDiagnostics()    — 输出启动诊断日志
+4. Esp8266BaseFileLog::begin()      — 读取 eb_log.mode，注册内部日志 sink
+5. Esp8266BaseWiFi::begin()         — 读取凭证并缓存，启动状态机（非阻塞）
+6. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
+7. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）
+8. Esp8266BaseOTA::begin()          — `ESP8266BASE_USE_OTA=1` 时（要求 Web，注册 POST /ota）
+9. Esp8266Base::logDiagnostics()    — 输出启动诊断日志
 ```
 
 > NTP 和 mDNS 不在 `begin()` 中初始化，而是在 `handle()` 检测到 WiFi 连接时自动触发。
@@ -87,7 +88,7 @@ Esp8266Base（主入口）
 
 ```text
 1. Esp8266BaseConfig::handle()      — 刷新 deferred 写入（每轮最多 1 条）
-2. Esp8266BaseLog::handle()         — 低优先级文件日志缓存到期刷新
+2. Esp8266BaseFileLog::handle()     — 低优先级文件日志缓存到期刷新
 3. Esp8266BaseWiFi::handle()        — 状态机推进
 4. NTP 触发检测                      — WiFi 已连接且 NTP 未启动：调用 Esp8266BaseNTP::begin()
 5. mDNS 触发检测                     — WiFi 已连接且 mDNS 未启动：调用 Esp8266BaseMDNS::begin()
@@ -141,8 +142,9 @@ ESP8266WebServer（端口 80）
   │     GET  /ota
   │     POST /ota        ──► Esp8266BaseOTA 处理（强制 Basic Auth）
   │     GET  /logs
-  │     POST /logs/clear ──► 清空文件日志（入口在 Tools 页面）
-  │     GET  /reboot      ──► Tools 页面：清除文件日志、重启设备
+  │     GET  /system     ──► System 页面：WiFi、Auth、OTA、FileLog、清日志、重启入口
+  │     POST /system/filelog ─► 保存 FileLog 模式（入口在 System 页面）
+  │     POST /logs/clear ──► 清空文件日志（入口在 System 页面）
   │     POST /reboot      ──► flush Config 后重启
   │     GET  /health
   │

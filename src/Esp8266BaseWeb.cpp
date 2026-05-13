@@ -2,6 +2,7 @@
 #if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
 #include "Esp8266BaseLog.h"
+#include "Esp8266BaseFileLog.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWiFi.h"
 #include "Esp8266BaseUtil.h"
@@ -31,8 +32,8 @@ uint32_t                 Esp8266BaseWeb::_bootCount = 0;
 char                     Esp8266BaseWeb::_titleBuf[48] = "ESP8266";
 char                     Esp8266BaseWeb::_activeUri[32] = "";
 char                     Esp8266BaseWeb::_activeMethod[5] = "";
-char                     Esp8266BaseWeb::_builtinLabels[6][16] = {
-    "Status", "WiFi", "OTA", "Logs", "Auth", "Tools"
+char                     Esp8266BaseWeb::_builtinLabels[3][16] = {
+    "Status", "Logs", "System"
 };
 Esp8266BaseWebHomeMode Esp8266BaseWeb::_homeMode = Esp8266BaseWebHomeMode::DEFAULT_SYSTEM_HOME;
 Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSystemNavMode::TOP_NAV;
@@ -50,9 +51,11 @@ static const char WEB_HEAD[] PROGMEM =
     "a,input[type=submit],input[type=button]{background:#2f6fb3;color:#fff;padding:6px 10px;"
     "text-decoration:none;border:none;border-radius:3px;cursor:pointer;margin:2px 2px 2px 0;"
     "font-size:14px;font-weight:normal}"
-    "input:not([type=submit]):not([type=button]){width:100%;padding:7px;margin:4px 0 12px;"
+    "input:not([type=submit]):not([type=button]):not([type=radio]):not([type=checkbox]){width:100%;padding:7px;margin:4px 0 12px;"
     "font-size:15px;"
     "border:1px solid #ccc;border-radius:3px;box-sizing:border-box}"
+    "label{display:inline-flex;align-items:center;gap:4px;margin:4px 10px 8px 0}"
+    "input[type=radio],input[type=checkbox]{width:auto;margin:0}"
     "input.danger{background:#c23b35}"
     "nav{margin-bottom:16px;border-bottom:1px solid #e5e5e5;padding-bottom:10px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}"
     "nav a{font-size:14px}.brand{background:transparent;color:#222;font-weight:600;padding-left:0}"
@@ -69,10 +72,10 @@ static const char WEB_HEAD[] PROGMEM =
     "font-size:13px;text-decoration:none;margin:0;font-weight:normal;white-space:nowrap}"
     ".tabs b{background:#333;color:#fff;font-weight:normal}"
     ".ok{color:#188038}.err{color:#c5221f}"
-    "footer{color:#777;font-size:13px;margin-top:16px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}"
+    "footer{color:#777;font-size:12px;margin-top:16px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}"
     "footer .tools{flex:1 1 auto;display:flex;flex-wrap:wrap;gap:4px}"
-    "footer a{font-size:13px;background:#f4f4f4;color:#666;padding:3px 6px;border-radius:3px}"
-    "footer .heap{white-space:nowrap;margin-left:auto}"
+    "footer a{font-size:12px;background:#f4f4f4;color:#666;padding:3px 6px;border-radius:3px}"
+    "footer .status{white-space:nowrap;margin-left:auto}"
     "</style>"
     "<script>"
     "function once(f){if(f.dataset.busy)return false;f.dataset.busy=1;"
@@ -81,7 +84,9 @@ static const char WEB_HEAD[] PROGMEM =
 
 static const char WEB_NAV_END[]    PROGMEM = "</nav>";
 static const char WEB_FOOT_PRE[]   PROGMEM = "<footer>";
-static const char WEB_FOOT_HEAP_PRE[] PROGMEM = "<span class=heap>Free heap: ";
+static const char WEB_FOOT_HEAP_PRE[] PROGMEM = "<span class=status>Free heap: ";
+static const char WEB_FOOT_UP_PRE[] PROGMEM = " &middot; Up: ";
+static const char WEB_FOOT_RSSI_PRE[] PROGMEM = " &middot; RSSI: ";
 static const char WEB_FOOT_POST[]  PROGMEM = "</span></footer></body></html>";
 
 static const char WEB_WIFI_FORM_PRE[] PROGMEM =
@@ -148,9 +153,18 @@ static const char WEB_AUTH_FORM[] PROGMEM =
     "<input type=submit value='Update Password'>"
     "</form>";
 
-static const char WEB_TOOLS_PAGE[] PROGMEM =
-    "<h2>Tools</h2>"
-    "<div class=grid>"
+static const char WEB_SYSTEM_PAGE[] PROGMEM =
+    "<section><h3>Network</h3>"
+    "<p><a href='/wifi'>WiFi Settings</a></p>"
+    "</section>"
+    "<section><h3>Security</h3>"
+    "<p><a href='/auth'>Auth Password</a></p>"
+    "</section>"
+#if ESP8266BASE_USE_OTA
+    "<section><h3>Firmware</h3>"
+    "<p><a href='/ota'>OTA Update</a></p>"
+    "</section>"
+#endif
     "<section><h3>File Logs</h3>"
     "<p>Clear all rotated file log segments.</p>"
     "<form method=post action='/logs/clear' onsubmit=\"return confirm('Clear file logs?')&&once(this)\">"
@@ -261,6 +275,54 @@ static void _redirect(const char* url) {
     Esp8266BaseWeb::server().send(303);
 }
 
+static void _sendFileLogModeOption(const char* value,
+                                   const char* label,
+                                   Esp8266BaseFileLog::Mode mode) {
+    Esp8266BaseWeb::sendChunk("<label><input type=radio name=mode value='");
+    Esp8266BaseWeb::sendChunk(value);
+    Esp8266BaseWeb::sendChunk("'");
+    if (Esp8266BaseFileLog::mode() == mode) {
+        Esp8266BaseWeb::sendChunk(" checked");
+    }
+    Esp8266BaseWeb::sendChunk("> ");
+    Esp8266BaseWeb::sendChunk(label);
+    Esp8266BaseWeb::sendChunk("</label> ");
+}
+
+static bool _fileLogModeFromArg(const String& raw, Esp8266BaseFileLog::Mode& mode) {
+    if (raw == "off") {
+        mode = Esp8266BaseFileLog::OFF;
+        return true;
+    }
+#if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_FILELOG_MODE_WARN
+    if (raw == "warn") {
+        mode = Esp8266BaseFileLog::WARN;
+        return true;
+    }
+#endif
+#if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_FILELOG_MODE_INFO
+    if (raw == "info") {
+        mode = Esp8266BaseFileLog::INFO;
+        return true;
+    }
+#endif
+    return false;
+}
+
+static void _sendFileLogSystemSection() {
+    Esp8266BaseWeb::sendChunk("<section><h3>File Log Mode</h3><p>Current mode: ");
+    Esp8266BaseWeb::sendChunk(Esp8266BaseFileLog::modeName());
+    Esp8266BaseWeb::sendChunk("</p><form method=post action='/system/filelog' onsubmit=\"return once(this)\">");
+    _sendFileLogModeOption("off", "Off", Esp8266BaseFileLog::OFF);
+#if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_FILELOG_MODE_WARN
+    _sendFileLogModeOption("warn", "WARN", Esp8266BaseFileLog::WARN);
+#endif
+#if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_FILELOG_MODE_INFO
+    _sendFileLogModeOption("info", "INFO", Esp8266BaseFileLog::INFO);
+#endif
+    Esp8266BaseWeb::sendChunk("<p>Mode is capped by the build log level.</p><input type=submit value='Save File Log'></form></section>");
+}
+
 static bool _isValidPath(const char* path) {
     if (!path || path[0] != '/') return false;
     size_t len = strlen(path);
@@ -310,13 +372,8 @@ void Esp8266BaseWeb::_sendSystemLinks() {
         systemHome = "/esp8266base";
     }
     _sendLink(systemHome, _builtinLabel(Esp8266BaseWebBuiltinLabel::HOME), nullptr);
-    _sendLink("/wifi", _builtinLabel(Esp8266BaseWebBuiltinLabel::WIFI), nullptr);
-#if ESP8266BASE_USE_OTA
-    _sendLink("/ota", _builtinLabel(Esp8266BaseWebBuiltinLabel::OTA), nullptr);
-#endif
     _sendLink("/logs", _builtinLabel(Esp8266BaseWebBuiltinLabel::LOGS), nullptr);
-    _sendLink("/auth", _builtinLabel(Esp8266BaseWebBuiltinLabel::AUTH), nullptr);
-    _sendLink("/reboot", _builtinLabel(Esp8266BaseWebBuiltinLabel::REBOOT), nullptr);
+    _sendLink("/system", _builtinLabel(Esp8266BaseWebBuiltinLabel::SYSTEM), nullptr);
 }
 
 void Esp8266BaseWeb::_sendAppLinks() {
@@ -347,14 +404,15 @@ bool Esp8266BaseWeb::begin() {
 #endif
     _server.on("/logs",   HTTP_GET,  _handleLogsGet);
     _server.on("/logs/clear", HTTP_POST, _handleLogsClearPost);
-    _server.on("/reboot", HTTP_GET,  _handleRebootGet);
+    _server.on("/system", HTTP_GET,  _handleSystemGet);
+    _server.on("/system/filelog", HTTP_POST, _handleFileLogPost);
     _server.on("/reboot", HTTP_POST, _handleRebootPost);
     _server.on("/health", HTTP_GET,  _handleHealth);
     _server.onNotFound(_handleNotFound);
 
     _server.begin();
     _running = true;
-    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=13 app_pages_registered=%d/%d app_apis_registered=%d/%d",
+    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=14 app_pages_registered=%d/%d app_apis_registered=%d/%d",
                       (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES,
                       (int)_apiCount,  ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
@@ -496,7 +554,7 @@ void Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode mode) {
 void Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const char* title) {
     if (!title) return;
     uint8_t index = (uint8_t)label;
-    if (index >= 6) return;
+    if (index >= 3) return;
     strncpy(_builtinLabels[index], title, sizeof(_builtinLabels[index]) - 1);
     _builtinLabels[index][sizeof(_builtinLabels[index]) - 1] = '\0';
 }
@@ -596,6 +654,22 @@ void Esp8266BaseWeb::_formatDuration(uint32_t seconds, char* out, size_t len) {
     }
 }
 
+void Esp8266BaseWeb::_formatFooterUptime(uint32_t seconds, char* out, size_t len) {
+    if (!out || len == 0) return;
+    uint32_t days = seconds / 86400UL;
+    seconds %= 86400UL;
+    uint32_t hours = seconds / 3600UL;
+    seconds %= 3600UL;
+    uint32_t minutes = seconds / 60UL;
+    if (days > 0) {
+        snprintf(out, len, "%lud %luh", (unsigned long)days, (unsigned long)hours);
+    } else if (hours > 0) {
+        snprintf(out, len, "%luh %lum", (unsigned long)hours, (unsigned long)minutes);
+    } else {
+        snprintf(out, len, "%lum", (unsigned long)minutes);
+    }
+}
+
 void Esp8266BaseWeb::_sendKv(const char* key, const char* value) {
     sendChunk("<dt>");
     _sendAttrEscaped(key);
@@ -678,9 +752,19 @@ void Esp8266BaseWeb::sendFooter() {
         _sendSystemLinks();
         sendChunk("</span>");
     }
+    char uptime[16];
+    _formatFooterUptime(millis() / 1000UL, uptime, sizeof(uptime));
+    char rssi[8] = "-";
+    if (Esp8266BaseWiFi::isConnected()) {
+        snprintf(rssi, sizeof(rssi), "%d", Esp8266BaseWiFi::rssi());
+    }
     sendContent_P(WEB_FOOT_HEAP_PRE);
     Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), _wb, sizeof(_wb));
     sendChunk(_wb);
+    sendContent_P(WEB_FOOT_UP_PRE);
+    sendChunk(uptime);
+    sendContent_P(WEB_FOOT_RSSI_PRE);
+    sendChunk(rssi);
     sendContent_P(WEB_FOOT_POST);
     _server.client().flush();
     _server.client().stop();
@@ -962,49 +1046,43 @@ void Esp8266BaseWeb::_handleLogsGet() {
     sendHeader();
     sendContent_P(WEB_LOGS_PRE);
 
-    if (!Esp8266BaseLog::isFileSinkEnabled()) {
-        sendChunk("<p>File sink: disabled</p>");
-        sendFooter();
-        return;
-    }
-    Esp8266BaseLog::flushFileSink();
+    Esp8266BaseFileLog::flush();
 
     char maxBuf[16];
     char totalBuf[16];
-    Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkMaxBytes(), maxBuf, sizeof(maxBuf));
-    Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkMaxBytes() * Esp8266BaseLog::fileSinkRotateFiles(),
+    Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::maxBytes(), maxBuf, sizeof(maxBuf));
+    Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::maxBytes() * Esp8266BaseFileLog::rotateFiles(),
                                  totalBuf, sizeof(totalBuf));
-    sendChunk("<p>File sink: enabled<br>Path: ");
-    _sendAttrEscaped(Esp8266BaseLog::fileSinkPath());
-    snprintf(_wb, sizeof(_wb), "<br>Rotation files: %u<br>File level: %s (%u)",
-             (unsigned)Esp8266BaseLog::fileSinkRotateFiles(),
-             Esp8266BaseLog::fileSinkLevelName(),
-             (unsigned)Esp8266BaseLog::fileSinkLevel());
+    sendChunk("<p>File log: ");
+    sendChunk(Esp8266BaseFileLog::isEnabled() ? "enabled" : "disabled");
+    sendChunk("<br>Mode: ");
+    sendChunk(Esp8266BaseFileLog::modeName());
+    sendChunk("<br>Path: ");
+    _sendAttrEscaped(Esp8266BaseFileLog::path());
+    snprintf(_wb, sizeof(_wb), "<br>Rotation files: %u",
+             (unsigned)Esp8266BaseFileLog::rotateFiles());
     sendChunk(_wb);
-    if (Esp8266BaseLog::fileSinkLevel() < 2) {
-        if (Esp8266BaseLog::fileSinkBufferEnabled()) {
-            char usedBuf[16];
-            char sizeBuf[16];
-            Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkBufferUsed(), usedBuf, sizeof(usedBuf));
-            Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkBufferSize(), sizeBuf, sizeof(sizeBuf));
-            snprintf(_wb, sizeof(_wb),
-                     "<br>Low-priority buffer: enabled<br>Buffer: %s / %s<br>Flush interval: %lus<br>Buffered levels: DEBUG/INFO",
-                     usedBuf, sizeBuf,
-                     (unsigned long)(Esp8266BaseLog::fileSinkFlushIntervalMs() / 1000UL));
-            sendChunk(_wb);
-        } else {
-            sendChunk("<br>Low-priority buffer: disabled<br>Reason: compiled buffer size is 0");
-        }
+
+    if (Esp8266BaseFileLog::bufferEnabled()) {
+        char usedBuf[16];
+        char sizeBuf[16];
+        Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::bufferUsed(), usedBuf, sizeof(usedBuf));
+        Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::bufferSize(), sizeBuf, sizeof(sizeBuf));
+        snprintf(_wb, sizeof(_wb),
+                 "<br>Buffer: %s / %s<br>Flush interval: %lus",
+                 usedBuf, sizeBuf,
+                 (unsigned long)(Esp8266BaseFileLog::flushIntervalMs() / 1000UL));
+        sendChunk(_wb);
     } else {
-        sendChunk("<br>Low-priority buffer: disabled<br>Reason: file level is WARN or higher; no buffer RAM reserved");
+        sendChunk("<br>Buffer: disabled");
     }
     snprintf(_wb, sizeof(_wb), "<br>Max per file: %s<br>Max total: %s",
              maxBuf, totalBuf);
     sendChunk(_wb);
     sendChunk("<br>Segments: ");
-    for (uint8_t i = 0; i < Esp8266BaseLog::fileSinkRotateFiles(); i++) {
+    for (uint8_t i = 0; i < Esp8266BaseFileLog::rotateFiles(); i++) {
         char segBuf[16];
-        Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkSegmentSize(i), segBuf, sizeof(segBuf));
+        Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::segmentSize(i), segBuf, sizeof(segBuf));
         snprintf(_wb, sizeof(_wb), "%s%u=%s", i == 0 ? "" : ", ", (unsigned)i, segBuf);
         sendChunk(_wb);
     }
@@ -1013,15 +1091,15 @@ void Esp8266BaseWeb::_handleLogsGet() {
     uint8_t selected = 0;
     if (_server.hasArg("seg")) {
         int v = _server.arg("seg").toInt();
-        if (v >= 0 && v < (int)Esp8266BaseLog::fileSinkRotateFiles()) {
+        if (v >= 0 && v < (int)Esp8266BaseFileLog::rotateFiles()) {
             selected = (uint8_t)v;
         }
     }
 
     sendChunk("<p class=tabs><span>Files:</span> ");
-    for (uint8_t i = 0; i < Esp8266BaseLog::fileSinkRotateFiles(); i++) {
+    for (uint8_t i = 0; i < Esp8266BaseFileLog::rotateFiles(); i++) {
         char segBuf[16];
-        Esp8266BaseUtil::formatBytes(Esp8266BaseLog::fileSinkSegmentSize(i), segBuf, sizeof(segBuf));
+        Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::segmentSize(i), segBuf, sizeof(segBuf));
         if (i == selected) {
             sendChunk("<b>");
             if (i == 0) {
@@ -1042,18 +1120,18 @@ void Esp8266BaseWeb::_handleLogsGet() {
             sendChunk(_wb);
             sendChunk("</a>");
         }
-        if (i + 1 < Esp8266BaseLog::fileSinkRotateFiles()) sendChunk(" ");
+        if (i + 1 < Esp8266BaseFileLog::rotateFiles()) sendChunk(" ");
     }
     sendChunk("</p><pre>");
 
     char selectedPath[36];
     const char* selectedLabel = "current-0";
-    uint32_t selectedSize = Esp8266BaseLog::fileSinkSegmentSize(selected);
+    uint32_t selectedSize = Esp8266BaseFileLog::segmentSize(selected);
     if (selected == 0) {
-        snprintf(selectedPath, sizeof(selectedPath), "%s", Esp8266BaseLog::fileSinkPath());
+        snprintf(selectedPath, sizeof(selectedPath), "%s", Esp8266BaseFileLog::path());
     } else {
         snprintf(selectedPath, sizeof(selectedPath), "%s.%u",
-                 Esp8266BaseLog::fileSinkPath(), (unsigned)selected);
+                 Esp8266BaseFileLog::path(), (unsigned)selected);
         snprintf(_wb, sizeof(_wb), "history-%u", (unsigned)selected);
         selectedLabel = _wb;
     }
@@ -1065,24 +1143,51 @@ void Esp8266BaseWeb::_handleLogsGet() {
 void Esp8266BaseWeb::_handleLogsClearPost() {
     if (!checkAuth()) return;
     _markRequest();
-    bool ok = Esp8266BaseLog::clearFileSink();
+    bool ok = Esp8266BaseFileLog::clear();
     ESP8266BASE_LOG_I("Web ", "log_file_clear_requested result=%s", ok ? "success" : "failed");
-    _redirect(ok ? "/reboot?cleared=1" : "/reboot?error=clear_failed");
+    _redirect(ok ? "/system?cleared=1" : "/system?error=clear_failed");
 }
 
-void Esp8266BaseWeb::_handleRebootGet() {
+void Esp8266BaseWeb::_handleFileLogPost() {
+    if (!checkAuth()) return;
+    _markRequest();
+
+    Esp8266BaseFileLog::Mode mode = Esp8266BaseFileLog::OFF;
+    if (!_fileLogModeFromArg(_server.arg("mode"), mode)) {
+        ESP8266BASE_LOG_W("Web ", "filelog_mode_rejected value=%s", _server.arg("mode").c_str());
+        _redirect("/system?error=filelog_invalid_mode");
+        return;
+    }
+
+    ESP8266BASE_LOG_W("Web ", "filelog_mode_requested old=%s new=%s",
+                      Esp8266BaseFileLog::modeName(),
+                      mode == Esp8266BaseFileLog::OFF ? "off" :
+                      (mode == Esp8266BaseFileLog::WARN ? "warn" : "info"));
+    bool ok = Esp8266BaseFileLog::setMode(mode);
+    _redirect(ok ? "/system?filelog_saved=1" : "/system?error=filelog_save_failed");
+}
+
+void Esp8266BaseWeb::_handleSystemGet() {
     if (!checkAuth()) return;
     sendHeader();
     if (_server.hasArg("cleared")) {
         sendChunk("<p class=ok>File logs cleared.</p>");
+    } else if (_server.hasArg("filelog_saved")) {
+        sendChunk("<p class=ok>File log mode saved.</p>");
     } else if (_server.hasArg("error")) {
         char err[24] = "";
         strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
         if (strcmp(err, "clear_failed") == 0) {
             sendChunk("<p class=err>Failed to clear file logs.</p>");
+        } else if (strcmp(err, "filelog_invalid_mode") == 0) {
+            sendChunk("<p class=err>Invalid file log mode.</p>");
+        } else if (strcmp(err, "filelog_save_failed") == 0) {
+            sendChunk("<p class=err>Failed to save file log mode.</p>");
         }
     }
-    sendContent_P(WEB_TOOLS_PAGE);
+    sendChunk("<h2>System</h2><div class=grid>");
+    _sendFileLogSystemSection();
+    sendContent_P(WEB_SYSTEM_PAGE);
     sendFooter();
 }
 
@@ -1094,7 +1199,7 @@ void Esp8266BaseWeb::_handleRebootPost() {
     _server.client().stop();
     ESP8266BASE_LOG_I("Web ", "reboot_requested source=web");
     Esp8266BaseConfig::flush();
-    Esp8266BaseLog::flushFileSink();
+    Esp8266BaseFileLog::flush();
     delay(500);
     ESP.restart();
 }

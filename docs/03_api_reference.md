@@ -13,15 +13,16 @@
 
 - [Esp8266Base — 主入口](#1-esp8266base--主入口)
 - [Esp8266BaseLog — 日志](#2-esp8266baselog--日志)
-- [Esp8266BaseConfig — 配置存储](#3-esp8266baseconfig--配置存储)
-- [Esp8266BaseWiFi — WiFi 管理](#4-esp8266basewifi--wifi-管理)
-- [Esp8266BaseWeb — Web 服务](#5-esp8266baseweb--web-服务)
-- [Esp8266BaseOTA — OTA 更新](#6-esp8266baseota--ota-更新)
-- [Esp8266BaseNTP — 网络对时](#7-esp8266basentp--网络对时)
-- [Esp8266BaseMDNS — mDNS 服务](#8-esp8266basemdns--mdns-服务)
-- [Esp8266BaseSleep — 睡眠管理](#9-esp8266basesleep--睡眠管理)
-- [Esp8266BaseWatchdog — 看门狗](#10-esp8266basewatchdog--看门狗)
-- [编译宏](#11-编译宏)
+- [Esp8266BaseFileLog — 文件日志](#3-esp8266basefilelog--文件日志)
+- [Esp8266BaseConfig — 配置存储](#4-esp8266baseconfig--配置存储)
+- [Esp8266BaseWiFi — WiFi 管理](#5-esp8266basewifi--wifi-管理)
+- [Esp8266BaseWeb — Web 服务](#6-esp8266baseweb--web-服务)
+- [Esp8266BaseOTA — OTA 更新](#7-esp8266baseota--ota-更新)
+- [Esp8266BaseNTP — 网络对时](#8-esp8266basentp--网络对时)
+- [Esp8266BaseMDNS — mDNS 服务](#9-esp8266basemdns--mdns-服务)
+- [Esp8266BaseSleep — 睡眠管理](#10-esp8266basesleep--睡眠管理)
+- [Esp8266BaseWatchdog — 看门狗](#11-esp8266basewatchdog--看门狗)
+- [编译宏](#12-编译宏)
 
 ---
 
@@ -34,12 +35,12 @@
 ```cpp
 static bool begin();
 ```
-按编译期开关初始化模块，固定顺序：Log → Sleep → Config → WiFi → Watchdog → Web → OTA。输出启动诊断日志。返回 `false` 仅表示 Config（LittleFS）初始化失败，其余模块仍会继续初始化。
+按编译期开关初始化模块，固定顺序：Log → Sleep → Config → FileLog → WiFi → Watchdog → Web → OTA。输出启动诊断日志。返回 `false` 表示 Config 或 FileLog 初始化失败，其余模块仍会继续初始化。
 
 ```cpp
 static void handle();
 ```
-在 `loop()` 中每轮调用。推进已编译模块的非阻塞状态机，调用顺序：Config → WiFi → NTP触发 → mDNS触发 → NTP → mDNS → Web → Watchdog。
+在 `loop()` 中每轮调用。推进已编译模块的非阻塞状态机，调用顺序：Config → FileLog → WiFi → NTP触发 → mDNS触发 → NTP → mDNS → Web → Watchdog。
 
 ```cpp
 static void setFirmwareInfo(const char* name, const char* version);
@@ -92,9 +93,12 @@ static void begin(uint8_t level = ESP8266BASE_LOG_LEVEL);
 初始化日志模块，设置初始日志等级。
 
 ```cpp
-static void setLevel(uint8_t level);
+static void setRuntimeLevel(uint8_t level);
+static uint8_t runtimeLevel();
+static void setSerialLevel(uint8_t level);
+static uint8_t serialLevel();
 ```
-运行时修改日志等级。等级值：`0`=DEBUG, `1`=INFO, `2`=WARN, `3`=ERROR, `4`=关闭。
+运行时修改日志等级。`runtimeLevel` 控制日志是否生成并分发给 Serial、output hook 和 FileLog；`serialLevel` 只控制 Serial 输出。等级值：`0`=DEBUG, `1`=INFO, `2`=WARN, `3`=ERROR, `4`=关闭。
 
 ```cpp
 typedef const char* (*TimeProviderFn)();
@@ -109,27 +113,6 @@ typedef void (*Esp8266BaseLogHookFn)(uint8_t level,
                                      const char* timestamp,
                                      const char* line);
 static void setOutputHook(Esp8266BaseLogHookFn fn);
-static bool enableFileSink(const char* path,
-                           uint32_t maxBytes,
-                           uint8_t fileLevel = ESP8266BASE_LOG_FILE_LEVEL,
-                           uint8_t rotateFiles = 4);
-static void disableFileSink();
-static void setFileSinkLevel(uint8_t level);
-static bool isFileSinkEnabled();
-static const char* fileSinkPath();
-static uint32_t fileSinkMaxBytes();
-static uint8_t fileSinkRotateFiles();
-static uint8_t fileSinkLevel();
-static const char* fileSinkLevelName();
-static uint32_t fileSinkSize();
-static uint32_t fileSinkSegmentSize(uint8_t index);
-static bool fileSinkBufferEnabled();
-static uint16_t fileSinkBufferSize();
-static uint16_t fileSinkBufferUsed();
-static uint32_t fileSinkFlushIntervalMs();
-static bool flushFileSink();
-static bool clearFileSink();
-static void handle();
 static void beginBootSession(const char* firmware,
                              const char* version,
                              const char* bootReason,
@@ -139,7 +122,7 @@ static void enableConfigAudit(bool enabled);
 static void enableConfigReadAudit(bool enabled);
 ```
 
-默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。`enableFileSink()` 启用 LittleFS 文件日志，例如 `/logs/app.log`。`rotateFiles` 支持 1-4，默认 4；当前文件超过 `maxBytes` 时会轮转为 `/logs/app.log.1`，再逐步后移到 `.2`、`.3`，最多占用约 `maxBytes * rotateFiles`。`fileLevel` 默认 `ESP8266BASE_LOG_FILE_LEVEL`，库默认 WARN；WARN/ERROR 在 file sink 启用后始终写入文件，避免关键问题被过滤。编译期 `ESP8266BASE_LOG_FILE_BUFFER_SIZE>0` 且文件等级低于 WARN 时，DEBUG/INFO 会进入低优先级缓存，达到间隔或容量后刷盘；WARN/ERROR 立即刷盘。`flushFileSink()` 用于页面读取、重启、deep sleep、OTA 成功前强制落盘。不开 file sink 时不长期占用文件日志状态；默认 WARN 时也不编译低优先级缓存。`beginBootSession()` 输出多行启动会话摘要，`bootReason` 是 ESP8266 SDK reset info 的归类结果，日志字段为 `boot_reason` 和 `boot_desc`；无法识别时输出 `unknown` / `未知启动原因`，不会输出 `undefined`。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。完整说明见 `docs/07_observability.md`。
+默认只输出 Serial。`setOutputHook()` 接收最终格式化日志行和拆分字段。文件日志由 `Esp8266BaseFileLog` 独立负责。`beginBootSession()` 输出多行启动会话摘要，`bootReason` 是 ESP8266 SDK reset info 的归类结果，日志字段为 `boot_reason` 和 `boot_desc`；无法识别时输出 `unknown` / `未知启动原因`，不会输出 `undefined`。配置审计直接输出 key/value，不做任何敏感 key 特殊处理。完整说明见 `docs/07_observability.md`。
 
 ### 日志宏
 
@@ -185,7 +168,44 @@ ESP8266BASE_LOG_E("Cfg ", "Failed to save key=%s", key);
 
 ---
 
-## 3. Esp8266BaseConfig — 配置存储
+## 3. Esp8266BaseFileLog — 文件日志
+
+头文件：`Esp8266BaseFileLog.h`
+
+```cpp
+class Esp8266BaseFileLog {
+public:
+    enum Mode : uint8_t {
+        OFF  = ESP8266BASE_FILELOG_MODE_OFF,
+        WARN = ESP8266BASE_FILELOG_MODE_WARN,
+        INFO = ESP8266BASE_FILELOG_MODE_INFO
+    };
+
+    static bool begin();
+    static bool setMode(Mode mode);
+    static Mode mode();
+    static const char* modeName();
+    static bool isEnabled();
+    static bool flush();
+    static bool clear();
+    static void handle();
+    static const char* path();
+    static uint32_t maxBytes();
+    static uint8_t rotateFiles();
+    static uint32_t size();
+    static uint32_t segmentSize(uint8_t index);
+    static bool bufferEnabled();
+    static uint16_t bufferSize();
+    static uint16_t bufferUsed();
+    static uint32_t flushIntervalMs();
+};
+```
+
+文件日志运行时只支持 `OFF / WARN / INFO`。`OFF` 不写新日志但不删除已有内容；`WARN` 只写 WARN/ERROR；`INFO` 写 INFO/WARN/ERROR。`DEBUG` 和 `VERBOSE` 不能作为文件日志模式。当前模式保存为 `eb_log.mode`，不读取旧 key，不做兼容迁移。
+
+`ESP8266BASE_LOG_LEVEL` 是编译期上限，`ESP8266BASE_FILELOG_DEFAULT_MODE` 和 Web 运行时设置都不能突破。设置 WARN/INFO 时会确保 core runtime log level 至少达到对应等级，但不会修改 Serial level。path、单段大小、轮转段数、buffer 和 flush interval 都是构建期资源策略，不在 Web 普通运维界面暴露。
+
+## 4. Esp8266BaseConfig — 配置存储
 
 头文件：`Esp8266BaseConfig.h`
 
@@ -290,7 +310,7 @@ ESP.restart();
 
 ---
 
-## 4. Esp8266BaseWiFi — WiFi 管理
+## 5. Esp8266BaseWiFi — WiFi 管理
 
 头文件：`Esp8266BaseWiFi.h`
 
@@ -353,7 +373,7 @@ static const char* apSSID();
 
 ---
 
-## 5. Esp8266BaseWeb — Web 服务
+## 6. Esp8266BaseWeb — Web 服务
 
 头文件：`Esp8266BaseWeb.h`
 
@@ -376,11 +396,8 @@ enum class Esp8266BaseWebSystemNavMode : uint8_t {
 
 enum class Esp8266BaseWebBuiltinLabel : uint8_t {
     HOME,
-    WIFI,
-    OTA,
     LOGS,
-    AUTH,
-    REBOOT
+    SYSTEM
 };
 ```
 
@@ -411,7 +428,7 @@ static void setHomeMode(Esp8266BaseWebHomeMode mode);
 static void setSystemNavMode(Esp8266BaseWebSystemNavMode mode);
 static void setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const char* title);
 ```
-配置 Web 信息架构，通常在 `Esp8266Base::begin()` 前调用。`setDeviceName` 设置导航品牌显示名。`setHomePath` 设置业务首页路径。`setBuiltinLabel` 可覆盖 `Status/WiFi/OTA/Logs/Auth/Tools` 的导航标签，便于中文本地化。
+配置 Web 信息架构，通常在 `Esp8266Base::begin()` 前调用。`setDeviceName` 设置导航品牌显示名。`setHomePath` 设置业务首页路径。`setBuiltinLabel` 可覆盖 `Status/Logs/System` 的外层内置导航标签，便于中文本地化。WiFi、Auth、OTA 是 System 页面内的低频维护入口，不作为外层内置导航标签。
 
 首页模式：
 
@@ -427,7 +444,7 @@ static void setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const char* title)
 |------|------|
 | `TOP_NAV` | 基础功能入口显示在顶部导航，默认行为 |
 | `BOTTOM_NAV` | 基础功能入口显示在页面内容下方 |
-| `FOOTER_COMPACT` | 基础功能入口以小字号轻量链接显示在 footer，与 `Free heap` 同区 |
+| `FOOTER_COMPACT` | 基础功能入口以小字号轻量链接显示在 footer，与 `Free heap / Up / RSSI` 同区 |
 
 ```cpp
 static void sendHeader();
@@ -478,15 +495,16 @@ static bool isRunning();
 | `/auth` | POST | 校验当前密码并保存 `eb_web_pass`，成功后 `303` 回 `/auth?saved=1` |
 | `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度；仅 `ESP8266BASE_USE_OTA=1` 时注册） |
 | `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，强制 Basic Auth；仅 `ESP8266BASE_USE_OTA=1` 时注册） |
-| `/logs` | GET | 查看文件日志状态、大小和内容（需要 Basic Auth） |
-| `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 Tools 页面） |
-| `/reboot` | GET | Tools 页面，包含清除文件日志和重启设备 |
+| `/logs` | GET | 查看文件日志状态、模式、大小和内容（需要 Basic Auth） |
+| `/system` | GET | System 页面，聚合 WiFi、Auth、OTA、FileLog、清日志和重启入口 |
+| `/system/filelog` | POST | 保存 FileLog 模式（需要 Basic Auth，入口在 System 页面） |
+| `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
 | `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
-系统首页的 Network 卡片显示 `Hostname/WiFi/SSID/IP/RSSI/MAC`；Device 卡片显示 `Firmware/Version/Boot count/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap` 等字节数统一保留两位小数；`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
+系统首页的 Network 卡片显示 `Hostname/WiFi/SSID/IP/RSSI/MAC`；Device 卡片显示 `Firmware/Version/Boot count/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
 
 `/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 
@@ -509,13 +527,13 @@ void handleSensorPage() {
 
 ---
 
-## 6. Esp8266BaseOTA — OTA 更新
+## 7. Esp8266BaseOTA — OTA 更新
 
 头文件：`Esp8266BaseOTA.h`
 
 OTA 模块由 `Esp8266Base` 在内部初始化，应用代码通常无需直接调用。
 
-`ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面、导航入口或上传 POST 路由；如果设备仍显示 OTA 页面但上传最终返回 HTTP 404，说明当前运行固件可能来自旧版本或业务代码自定义页面，需要先通过串口刷入启用 OTA 的固件。
+`ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面、System 页面 OTA 入口或上传 POST 路由；如果设备仍显示 OTA 页面但上传最终返回 HTTP 404，说明当前运行固件可能来自旧版本或业务代码自定义页面，需要先通过串口刷入启用 OTA 的固件。
 
 ### 函数
 
@@ -544,7 +562,7 @@ OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZ
 
 ---
 
-## 7. Esp8266BaseNTP — 网络对时
+## 8. Esp8266BaseNTP — 网络对时
 
 头文件：`Esp8266BaseNTP.h`
 
@@ -591,7 +609,7 @@ if (Esp8266BaseNTP::formatTo(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S")) {
 
 ---
 
-## 8. Esp8266BaseMDNS — mDNS 服务
+## 9. Esp8266BaseMDNS — mDNS 服务
 
 头文件：`Esp8266BaseMDNS.h`
 
@@ -619,7 +637,7 @@ static bool isRunning();
 
 ---
 
-## 9. Esp8266BaseSleep — 睡眠管理
+## 10. Esp8266BaseSleep — 睡眠管理
 
 头文件：`Esp8266BaseSleep.h`
 
@@ -688,7 +706,7 @@ void collectAndSleep() {
 
 ---
 
-## 10. Esp8266BaseWatchdog — 看门狗
+## 11. Esp8266BaseWatchdog — 看门狗
 
 头文件：`Esp8266BaseWatchdog.h`
 
@@ -753,16 +771,19 @@ void loop() {
 
 ---
 
-## 11. 编译宏
+## 12. 编译宏
 
 在 `platformio.ini` 的 `build_flags` 中设置：
 
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 日志等级：0=D, 1=I, 2=W, 3=E, 4=关闭 |
-| `ESP8266BASE_LOG_FILE_LEVEL` | `2` | 文件日志默认等级，默认 WARN |
-| `ESP8266BASE_LOG_FILE_BUFFER_SIZE` | `WARN 以下为 512，否则 0` | DEBUG/INFO 文件日志低优先级缓存；最大 512B |
-| `ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
+| `ESP8266BASE_FILELOG_DEFAULT_MODE` | `ESP8266BASE_FILELOG_MODE_WARN` | 文件日志默认运行模式：OFF/WARN/INFO |
+| `ESP8266BASE_FILELOG_PATH` | `"/logs/app.log"` | 文件日志路径 |
+| `ESP8266BASE_FILELOG_MAX_BYTES` | `16KB` | 文件日志单段最大字节数 |
+| `ESP8266BASE_FILELOG_ROTATE_FILES` | `4` | 文件日志轮转段数，1-4 |
+| `ESP8266BASE_FILELOG_BUFFER_SIZE` | `INFO 默认 512，否则 0` | INFO 文件日志低优先级缓存；最大 512B |
+| `ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |

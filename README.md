@@ -153,9 +153,12 @@ build_flags =
 | 宏 | 默认值 | 说明 |
 |---|---|---|
 | `ESP8266BASE_LOG_LEVEL` | `1` | 0=D 1=I 2=W 3=E 4=关闭 |
-| `ESP8266BASE_LOG_FILE_LEVEL` | `2` | 文件日志默认等级，默认 WARN |
-| `ESP8266BASE_LOG_FILE_BUFFER_SIZE` | `WARN 以下为 512，否则 0` | DEBUG/INFO 文件日志低优先级缓存 |
-| `ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
+| `ESP8266BASE_FILELOG_DEFAULT_MODE` | `ESP8266BASE_FILELOG_MODE_WARN` | 文件日志默认运行模式：OFF/WARN/INFO |
+| `ESP8266BASE_FILELOG_PATH` | `"/logs/app.log"` | 文件日志路径，构建期资源策略 |
+| `ESP8266BASE_FILELOG_MAX_BYTES` | `16KB` | 文件日志单段最大字节数 |
+| `ESP8266BASE_FILELOG_ROTATE_FILES` | `4` | 文件日志轮转段数，1-4 |
+| `ESP8266BASE_FILELOG_BUFFER_SIZE` | `INFO 默认 512，否则 0` | INFO 文件日志低优先级缓存 |
+| `ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
@@ -191,12 +194,12 @@ OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Bas
 可选文件日志和配置审计：
 
 ```cpp
-Esp8266BaseLog::enableFileSink("/logs/app.log", 16384);
+Esp8266BaseFileLog::setMode(Esp8266BaseFileLog::INFO);
 Esp8266BaseLog::enableConfigAudit(true);
 Esp8266BaseLog::enableConfigReadAudit(false);
 ```
 
-默认不开文件日志和配置审计，仍然只输出 Serial。启用文件日志后，文件等级默认 WARN；WARN/ERROR 始终立即写入 LittleFS 文件。文件等级低于 WARN 且编译期启用缓存时，DEBUG/INFO 会先进入低优先级缓存，默认 512B 或 2s 刷盘；默认 WARN 不编译该缓存，无额外 512B RAM 占用。文件 sink 默认 4 段轮转；轮转或追加异常时优先恢复写入能力，允许极端情况下丢少量日志，但避免日志功能长期失效。`full_demo` 使用 INFO 文件日志和 4×16KB，用于调试演示。完整逻辑见 `docs/07_observability.md`。
+文件日志运行时只支持 `OFF / WARN / INFO` 三种模式，当前模式保存到 `eb_log.mode`；`DEBUG` 不作为文件日志模式。`ESP8266BASE_LOG_LEVEL` 仍是编译期上限，Web 和 public API 都不能突破。`OFF` 不删除已有日志，清空内容仍由 System 页面中的 Clear logs 独立负责。path、单段大小、轮转段数、buffer 和 flush interval 都是构建期资源策略，不在 Web 普通运维界面暴露。`full_demo` 通过 `ESP8266BASE_FILELOG_DEFAULT_MODE=ESP8266BASE_FILELOG_MODE_INFO` 默认启用 INFO 文件日志。完整逻辑见 `docs/07_observability.md`。
 
 ---
 

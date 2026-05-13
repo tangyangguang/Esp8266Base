@@ -36,7 +36,8 @@
 
 | 模块 | 预算上限 | 主要来源 |
 |------|---------|----------|
-| Esp8266BaseLog | <= 240B 默认；INFO/DEBUG 文件缓存另加 <=512B | level/timeFn/hook/file sink path/current size；格式缓冲在栈上；默认文件等级 WARN 时不编译低优先级缓存 |
+| Esp8266BaseLog | <= 16B | runtime/serial level + timeFn/hook/internal hook；格式缓冲在栈上 |
+| Esp8266BaseFileLog | <= 80B 默认；INFO 文件缓存另加 <=512B | mode/path/current size/dir state；默认 WARN 时不编译低优先级缓存 |
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb（路由表） | <= 880B | AppRoute 4×48+6×48=480B + _authUser/Pass(48B) + _deviceName/_homePath(48B) + hostname/firmware/version/title/boot(116B) + labels(96B) + _activeUri/Method(37B) + 状态 |

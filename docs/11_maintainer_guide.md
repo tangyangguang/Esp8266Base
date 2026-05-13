@@ -59,7 +59,7 @@ Config 正式配置写入必须使用安全策略：
 
 禁止直接对正式配置文件 `open("w")` 截断写入。
 
-日志文件不是数据库。允许极端情况下丢少量日志，但不能让 file sink 或 `/logs` 长期失效。轮转或追加异常时优先恢复当前写入能力。
+日志文件不是数据库。允许极端情况下丢少量日志，但不能让 FileLog 或 `/logs` 长期失效。轮转或追加异常时优先恢复当前写入能力。
 
 ---
 
@@ -79,7 +79,7 @@ Config 正式配置写入必须使用安全策略：
 
 - WiFi 密码、Web Auth 密码明文日志是设计要求，不按 bug 处理。
 - 配置审计不脱敏，直接输出 key/value。
-- WARN/ERROR 在 file sink 启用后必须进入文件。
+- FileLog 只支持 OFF/WARN/INFO；WARN 模式写 WARN/ERROR，INFO 模式写 INFO/WARN/ERROR。
 - NTP 同步后必须输出实际时间和 boot time 映射。
 - 启动会话必须有分割线、boot_count、`boot_reason`、中文 `boot_desc`、firmware、version、人性化 free heap。
 
@@ -118,14 +118,14 @@ tools/test_all.sh
 - OTA 页面可上传。
 - NTP 输出 `time_synchronized` 和 `time_mapping`。
 - `/logs` 显示 4 段文件状态。
-- Tools 页面可通过 `/logs/clear` 清空日志。
+- System 页面可切换 FileLog 模式；System 页面可通过 `/logs/clear` 清空日志。
 - GPIO0 长按清配置有效。
 - Watchdog 清零和 deep sleep 页面有确认。
 
 文档搜索：
 
 ```bash
-rg -n 'eb_wifi_ssid|eb_wifi_pass|eb_boot_count|enableFileSink|rotateFiles|/logs/clear' README.md docs
+rg -n 'eb_wifi_ssid|eb_wifi_pass|eb_boot_count|Esp8266BaseFileLog|rotateFiles|/logs/clear' README.md docs
 ```
 
 无前缀 key 不应作为库保留 key 出现在文档或代码中。

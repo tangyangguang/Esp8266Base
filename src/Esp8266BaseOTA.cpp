@@ -5,6 +5,7 @@
 #include "Esp8266BaseWatchdog.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseLog.h"
+#include "Esp8266BaseFileLog.h"
 #include "Esp8266BaseUtil.h"
 #include <Updater.h>
 
@@ -184,7 +185,7 @@ void Esp8266BaseOTA::_handleUploadComplete() {
         ESP8266BASE_LOG_I("OTA ", "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s action=reboot",
                           uploadedBuf, elapsedBuf, rateBuf, heapBuf);
         Esp8266BaseConfig::flush();
-        Esp8266BaseLog::flushFileSink();
+        Esp8266BaseFileLog::flush();
         delay(500);
         ESP.restart();
     } else {

@@ -27,12 +27,12 @@ def format_bytes(value: int) -> str:
     return f"{v100 // 100}.{v100 % 100:02d} MB"
 
 
-def file_buffer_size_for_level(file_level: int, explicit_size: int | None = None) -> int:
+def file_buffer_size_for_mode(mode: int, explicit_size: int | None = None) -> int:
     if explicit_size is not None:
         if explicit_size > 512:
             raise ValueError("buffer size must be <= 512")
         return explicit_size
-    return 512 if file_level < 2 else 0
+    return 512 if mode == 1 else 0
 
 
 def retry_interval(attempt: int, fast_count: int, fast_ms: int, slow_ms: int) -> int:
@@ -98,18 +98,29 @@ def test_format_bytes() -> None:
 
 def test_log_file_buffer_rules() -> None:
     log_h = read("src/Esp8266BaseLog.h")
+    filelog_h = read("src/Esp8266BaseFileLog.h")
+    filelog_cpp = read("src/Esp8266BaseFileLog.cpp")
     log_cpp = read("src/Esp8266BaseLog.cpp")
-    assert_eq(parse_define_int(log_h, "ESP8266BASE_LOG_FILE_LEVEL"), 2, "default file log level")
-    assert_eq(parse_define_int(log_h, "ESP8266BASE_LOG_FILE_FLUSH_INTERVAL_MS"), 2000, "file flush interval")
-    if "#if ESP8266BASE_LOG_FILE_LEVEL < 2" not in log_h:
-        fail("file buffer default must depend on file level < WARN")
-    assert_eq(file_buffer_size_for_level(0), 512, "DEBUG file buffer")
-    assert_eq(file_buffer_size_for_level(1), 512, "INFO file buffer")
-    assert_eq(file_buffer_size_for_level(2), 0, "WARN file buffer")
-    assert_eq(file_buffer_size_for_level(3), 0, "ERROR file buffer")
-    assert_eq(file_buffer_size_for_level(2, explicit_size=0), 0, "explicit disabled buffer")
-    if "file_sink_buffer low_priority=%s" not in log_cpp:
-        fail("file sink buffer details must be logged on a separate line")
+    assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_MODE_OFF"), 4, "filelog OFF mode")
+    assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_MODE_WARN"), 2, "filelog WARN mode")
+    assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_MODE_INFO"), 1, "filelog INFO mode")
+    assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS"), 2000, "file flush interval")
+    if "ESP8266BASE_FILELOG_DEFAULT_MODE == ESP8266BASE_FILELOG_MODE_INFO" not in filelog_h:
+        fail("file buffer default must depend on FileLog default mode INFO")
+    assert_eq(file_buffer_size_for_mode(1), 512, "INFO file buffer")
+    assert_eq(file_buffer_size_for_mode(2), 0, "WARN file buffer")
+    assert_eq(file_buffer_size_for_mode(4), 0, "OFF file buffer")
+    assert_eq(file_buffer_size_for_mode(2, explicit_size=0), 0, "explicit disabled buffer")
+    if "setRuntimeLevel" not in log_h or "setSerialLevel" not in log_h:
+        fail("Log must split runtime and serial levels")
+    if "Esp8266BaseLog::_setInternalHook(_lineSink)" not in filelog_cpp:
+        fail("FileLog must register an internal log sink")
+    if "eb_log.mode" not in filelog_cpp:
+        fail("FileLog mode must persist to eb_log.mode")
+    old_enable_api = "enableFile" + "Sink"
+    old_sink_word = "file" + "Sink"
+    if old_enable_api in log_h or old_sink_word in log_h or "LittleFS" in log_cpp:
+        fail("core Log must not expose or implement FileLog sink")
 
 
 def test_wifi_retry_rules() -> None:
@@ -254,8 +265,9 @@ def test_web_auth_contract() -> None:
 
     required = [
         (web_h, "setDefaultAuth"),
-        (web_h, "AUTH = 4"),
+        (web_h, "SYSTEM = 2"),
         (web_cpp, "_server.on(\"/auth\""),
+        (web_cpp, "<p><a href='/auth'>Auth Password</a></p>"),
         (web_cpp, "_handleAuthGet"),
         (web_cpp, "_handleAuthPost"),
         (web_cpp, "ESP8266BASE_CFG_KEY_WEB_PASS"),
@@ -375,7 +387,7 @@ def test_web_home_contract() -> None:
     if "系统首页以轻量分组展示" not in web_doc:
         fail("Web doc must describe system home information groups")
 
-    require_token(web_cpp, '"Status", "WiFi", "OTA", "Logs", "Auth", "Tools"', "default Web nav labels")
+    require_token(web_cpp, '"Status", "Logs", "System"', "default Web nav labels")
     require_token(web_cpp, "Password<input id=wp type=password name=pass maxlength=63 value=", "WiFi password optional form")
     if "Password cannot be empty" in web_cpp or "missing_password" in web_cpp:
         fail("WiFi Web form must allow empty password for open networks")
@@ -395,47 +407,56 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, '_sendKv("Flash", flashSize)', "Web home flash field")
     require_token(web_cpp, '_sendKv("Sketch", sketchSize)', "Web home sketch field")
     require_token(web_cpp, '_sendKv("OTA free", otaFree)', "Web home OTA free field")
-    require_token(web_cpp, "<h2>Tools</h2>", "Tools page heading")
-    require_token(web_cpp, "Clear File Logs", "Tools page log clear action")
-    require_token(web_cpp, "_redirect(ok ? \"/reboot?cleared=1\" : \"/reboot?error=clear_failed\")",
-                  "log clear returns to Tools page")
+    require_token(web_cpp, "_formatFooterUptime", "Web footer compact uptime formatter")
+    require_token(web_cpp, "Free heap: ", "Web footer keeps Free heap label")
+    require_token(web_cpp, "&middot; Up: ", "Web footer compact Up label")
+    require_token(web_cpp, "&middot; RSSI: ", "Web footer compact RSSI label")
+    require_token(web_cpp, "<h2>System</h2>", "System page heading")
+    require_token(web_cpp, "_sendLink(\"/logs\", _builtinLabel(Esp8266BaseWebBuiltinLabel::LOGS)", "Logs outer system nav")
+    require_token(web_cpp, "_sendLink(\"/system\", _builtinLabel(Esp8266BaseWebBuiltinLabel::SYSTEM)", "System outer nav")
+    require_token(web_cpp, "<p><a href='/wifi'>WiFi Settings</a></p>", "System WiFi entry")
+    require_token(web_cpp, "<p><a href='/auth'>Auth Password</a></p>", "System Auth entry")
+    require_token(web_cpp, "<p><a href='/ota'>OTA Update</a></p>", "System OTA entry")
+    require_token(web_cpp, "Clear File Logs", "System page log clear action")
+    require_token(web_cpp, "_redirect(ok ? \"/system?cleared=1\" : \"/system?error=clear_failed\")",
+                  "log clear returns to System page")
     require_token(web_cpp, "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
                   "Web addPage diagnostic rejection")
     require_token(web_cpp, "addApi_rejected reason=table_full path=%s count=%u max=%u",
                   "Web addApi table full diagnostic")
-    require_token(web_cpp, "#if ESP8266BASE_USE_OTA", "OTA page/nav compile guard")
-    require_token(web_cpp, '_sendLink("/ota"', "OTA nav link")
+    require_token(web_cpp, "#if ESP8266BASE_USE_OTA", "OTA page/System entry compile guard")
     require_token(web_cpp, '_server.on("/ota",    HTTP_GET,  _handleOtaGet);', "OTA GET route")
-    require_token(api, "`Status/WiFi/OTA/Logs/Auth/Tools`", "API built-in nav label list")
+    require_token(api, "`Status/Logs/System`", "API built-in nav label list")
     require_token(web_doc, "Hostname、WiFi 状态、SSID、IP、RSSI、MAC", "Web doc Network hostname fields")
     require_token(web_doc, "Boot count、Chip ID、CPU、Flash、Sketch、OTA free",
                   "Web doc Device card hardware fields")
     require_token(api, "ESP8266-XXXXXX", "API chip id display format")
     require_token(api, "仅 `ESP8266BASE_USE_OTA=1` 时注册", "API OTA route guard doc")
-    require_token(web_doc, "不会注册 `/ota` 页面和导航入口", "Web OTA disabled route doc")
+    require_token(web_doc, "不会注册 `/ota` 页面、System 页面 OTA 入口或上传 POST 路由", "Web OTA disabled route doc")
     if '_sendKv("Chip", "ESP8266")' in web_cpp:
         fail("Web home must not show a fixed Chip value")
-    require_token(api, "入口在 Tools 页面", "API log clear location")
-    require_token(web_doc, "入口在 Tools 页面", "Web doc log clear location")
-    require_token(user_guide, "入口在 Tools 页面", "user guide log clear location")
-    require_token(architecture, "入口在 Tools 页面", "architecture log clear location")
-    require_token(observability, "Tools 页面中的清除文件日志按钮", "observability log clear location")
-    require_token(maintainer, "Tools 页面可通过 `/logs/clear` 清空日志", "maintainer log clear location")
+    require_token(api, "入口在 System 页面", "API log clear location")
+    require_token(web_doc, "入口在 System 页面", "Web doc log clear location")
+    require_token(user_guide, "入口在 System 页面", "user guide log clear location")
+    require_token(architecture, "入口在 System 页面", "architecture log clear location")
+    require_token(observability, "System 页面中的清除文件日志按钮", "observability log clear location")
+    require_token(maintainer, "System 页面可通过 `/logs/clear` 清空日志", "maintainer log clear location")
     if "Clear Log" in web_cpp:
         fail("Logs page must not keep the old Clear Log action")
-    if "重启确认页" in api or "重启确认页" in web_doc or "重启确认" in user_guide:
-        fail("docs must describe /reboot as Tools, not the old reboot-only page")
+    if "GET  /reboot" in architecture or "| `/reboot` | GET" in api or "| `/reboot` | GET" in web_doc:
+        fail("GET /reboot must not remain; System page is GET /system")
+    for text, label in [(web_cpp, "web_cpp"), (web_h, "web_h"), (api, "api"), (web_doc, "web_doc")]:
+        for old in ["Esp8266BaseWebBuiltinLabel::WIFI", "Esp8266BaseWebBuiltinLabel::OTA",
+                    "Esp8266BaseWebBuiltinLabel::AUTH", "Esp8266BaseWebBuiltinLabel::REBOOT",
+                    "/reboot/filelog", "<h2>Tools</h2>"]:
+            if old in text:
+                fail(f"{old} must not remain in {label}")
     require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "Status");',
                   "Web doc Status nav label")
-    require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::AUTH, "Auth");',
-                  "Web doc Auth nav label")
-    require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Tools");',
-                  "Web doc Tools nav label")
+    require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::SYSTEM, "System");',
+                  "Web doc System nav label")
     for text, label in [(custom_web, "custom_web"), (full_demo, "full_demo")]:
-        if 'Esp8266BaseWebBuiltinLabel::HOME, "System"' in text:
-            fail(f"{label} must not use old System nav label")
-        if 'Esp8266BaseWebBuiltinLabel::REBOOT, "Restart"' in text:
-            fail(f"{label} must not use old Restart nav label")
+        require_token(text, 'Esp8266BaseWebBuiltinLabel::SYSTEM, "System"', f"{label} System nav label")
 
 
 def main() -> None:

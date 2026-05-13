@@ -34,6 +34,19 @@
 
 没有内容的小节可以省略。
 
+## 2026-05-12
+
+### 行为变化 / 使用建议
+
+- 文件日志重构为独立 `Esp8266BaseFileLog` 模块，运行时只支持 `OFF / WARN / INFO` 三种模式；当前模式保存到 `eb_log.mode`，不读取旧 key，不做兼容迁移。
+- 移除旧的参数拼装式文件日志 API 和旧宏命名；业务项目改用 `Esp8266BaseFileLog::setMode()` 以及 `ESP8266BASE_FILELOG_*` 构建期资源策略宏。
+- `Esp8266BaseLog` 拆分 `setRuntimeLevel()` 和 `setSerialLevel()`：FileLog 切到 WARN/INFO 只确保 runtime level 足够，不修改 Serial level。
+- Web 低频维护入口统一为 System：外层内置导航只保留 `Status / Logs / System`，WiFi、Auth、OTA、FileLog、清日志和重启入口聚合到 `GET /system`。
+- `GET /reboot` 和 `POST /reboot/filelog` 移除；重启动作只保留 `POST /reboot`，FileLog 模式保存改为 `POST /system/filelog`。
+- `Esp8266BaseWebBuiltinLabel` 只保留 `HOME / LOGS / SYSTEM`，业务项目应把旧的 `WIFI / OTA / AUTH / REBOOT` 自定义标签删除或改为 `SYSTEM`。
+- System 页面包含 FileLog 模式设置；Logs 页面只负责查看日志。`OFF` 不删除已有日志，清空内容仍由 Clear logs 独立负责。
+- `full_demo` 改为通过 `ESP8266BASE_FILELOG_DEFAULT_MODE=ESP8266BASE_FILELOG_MODE_INFO` 默认启用 INFO 文件日志，不再在应用代码中配置路径、大小和轮转参数。
+
 ## 2026-05-09
 
 ### 行为变化 / 使用建议
@@ -64,7 +77,7 @@
 
 - 新增内置 `/auth` 页面：可在 Web 管理页中修改 Basic Auth 密码。页面要求 Basic Auth，校验当前密码、新密码非空、长度不超过 23、确认一致；保存成功后写入 `eb_web_pass` 并立即使用新密码。
 - 新增 `Esp8266BaseWeb::setDefaultAuth(user, pass)`，用于设置业务代码默认认证值。认证优先级为编译期宏默认值、`setDefaultAuth()`、设备持久化 `eb_web_user` / `eb_web_pass`。
-- 新增 `Esp8266BaseWebBuiltinLabel::AUTH`，内置导航默认显示 `Auth`，可通过 `setBuiltinLabel()` 改名。
+- 新增 Web Auth 内置入口，允许通过内置导航标签 API 改名；该低频入口在后续 System 导航重构中并入 System 页面。
 
 ### 优化
 

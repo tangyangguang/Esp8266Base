@@ -5,8 +5,8 @@
 // ----------------------------------------------------------------------------
 // Esp8266BaseWeb — 极简管理 Web
 //
-// 内置路由：GET / GET /esp8266base GET/POST /wifi GET/POST /auth GET/POST /ota GET /logs POST /logs/clear GET/POST /reboot GET /health
-// /reboot 是 Tools 页面，包含重启和清除文件日志等维护操作
+// 内置路由：GET / GET /esp8266base GET /system GET/POST /wifi GET/POST /auth GET/POST /ota GET /logs POST /logs/clear POST /system/filelog POST /reboot GET /health
+// /system 是维护入口页面；/reboot 只保留 POST 重启动作
 // 应用扩展：最多 4 页面 + 6 API（静态数组，不动态分配）
 // Basic Auth 默认开启
 // HTML 全部放 PROGMEM，动态响应分段发送
@@ -54,11 +54,8 @@ enum class Esp8266BaseWebSystemNavMode : uint8_t {
 
 enum class Esp8266BaseWebBuiltinLabel : uint8_t {
     HOME = 0,
-    WIFI = 1,
-    OTA = 2,
-    LOGS = 3,
-    AUTH = 4,
-    REBOOT = 5
+    LOGS = 1,
+    SYSTEM = 2
 };
 
 class Esp8266BaseWeb {
@@ -121,7 +118,7 @@ private:
     static char             _titleBuf[48];                      // "hostname (fw ver)" 48B
     static char             _activeUri[32];                     // 当前请求 URI，用于慢请求日志
     static char             _activeMethod[5];                   // GET/POST
-    static char             _builtinLabels[6][16];              // Status/WiFi/OTA/Logs/Auth/Tools
+    static char             _builtinLabels[3][16];              // Status/Logs/System
     static Esp8266BaseWebHomeMode      _homeMode;
     static Esp8266BaseWebSystemNavMode _systemNavMode;
 
@@ -148,7 +145,8 @@ private:
     static void _handleOtaGet();   // OTA GET 由此处理，POST 由 Esp8266BaseOTA 注册
     static void _handleLogsGet();
     static void _handleLogsClearPost();
-    static void _handleRebootGet();
+    static void _handleFileLogPost();
+    static void _handleSystemGet();
     static void _handleRebootPost();
     static void _handleHealth();
     static void _handleNotFound();
@@ -160,5 +158,6 @@ private:
     static void _sendSystemLinks();
     static void _loadPersistedAuth();
     static void _formatDuration(uint32_t seconds, char* out, size_t len);
+    static void _formatFooterUptime(uint32_t seconds, char* out, size_t len);
     static void _sendKv(const char* key, const char* value);
 };

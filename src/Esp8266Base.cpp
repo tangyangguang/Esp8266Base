@@ -77,6 +77,11 @@ bool Esp8266Base::begin() {
         ok = false;  // 继续运行，但配置读写不可用
     }
 
+    // 4. FileLog — Config ready 后加载 eb_log.mode，确保 boot session 可写文件
+    if (!Esp8266BaseFileLog::begin()) {
+        ok = false;
+    }
+
     uint32_t bootCount = 0;
     bootCount = _loadAndIncrementBootCount();
 
@@ -92,26 +97,26 @@ bool Esp8266Base::begin() {
         ESP.getFreeHeap()
     );
 
-    // 4. WiFi — 读取凭证，启动状态机（非阻塞）
+    // 5. WiFi — 读取凭证，启动状态机（非阻塞）
     Esp8266BaseWiFi::begin();
 
-    // 5. Watchdog — begin() 后启动，使循环受监控
+    // 6. Watchdog — begin() 后启动，使循环受监控
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::begin();
 #endif
 
-    // 6. Web — 注册内置路由（OTA 路由由 OTA 模块在此后注册）
+    // 7. Web — 注册内置路由（OTA 路由由 OTA 模块在此后注册）
 #if ESP8266BASE_USE_WEB
     Esp8266BaseWeb::setSystemInfo(_hostname, _fwName, _fwVersion, bootCount);
     Esp8266BaseWeb::begin();
 #endif
 
-    // 7. OTA — 必须在 Web 启动后注册 POST /ota
+    // 8. OTA — 必须在 Web 启动后注册 POST /ota
 #if ESP8266BASE_USE_OTA
     Esp8266BaseOTA::begin();
 #endif
 
-    // 8. NTP / mDNS — 需要 WiFi 连接后触发（在 handle() 中检测）
+    // 9. NTP / mDNS — 需要 WiFi 连接后触发（在 handle() 中检测）
 
     // 输出启动诊断
     logDiagnostics();
@@ -125,7 +130,7 @@ bool Esp8266Base::begin() {
 void Esp8266Base::handle() {
     // 1. Config deferred 刷新
     Esp8266BaseConfig::handle();
-    Esp8266BaseLog::handle();
+    Esp8266BaseFileLog::handle();
 
     // 2. WiFi 状态机
     Esp8266BaseWiFi::handle();

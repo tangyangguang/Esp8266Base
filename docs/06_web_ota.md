@@ -32,9 +32,10 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/auth` | POST | Basic Auth | 校验当前密码并保存 `eb_web_pass`，提交后 303 回 GET |
 | `/ota` | GET | Basic Auth | OTA 上传页，带进度显示；仅 `ESP8266BASE_USE_OTA=1` 时注册 |
 | `/ota` | POST | Basic Auth | 固件上传，由 OTA 模块处理；仅 `ESP8266BASE_USE_OTA=1` 时注册 |
-| `/logs` | GET | Basic Auth | 查看文件日志状态、文件等级、缓存状态和单个日志段内容 |
-| `/logs/clear` | POST | Basic Auth | 清空文件日志；入口在 Tools 页面 |
-| `/reboot` | GET | Basic Auth | Tools 页面，包含清除文件日志和重启设备 |
+| `/logs` | GET | Basic Auth | 查看文件日志状态、模式、缓存状态和单个日志段内容 |
+| `/system` | GET | Basic Auth | System 页面，聚合 WiFi、Auth、OTA、FileLog、清日志和重启入口 |
+| `/system/filelog` | POST | Basic Auth | 保存 FileLog 模式；入口在 System 页面 |
+| `/logs/clear` | POST | Basic Auth | 清空文件日志；入口在 System 页面 |
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
 | `/health` | GET | 无 | JSON 健康信息 |
 
@@ -58,7 +59,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
 `Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
 
-`Flash`、`Sketch`、`OTA free` 和 footer 的 `Free heap` 等字节数统一保留两位小数。`OTA free` 直接显示 `ESP.getFreeSketchSpace()` 的结果，表示当前 Flash map、OTA slot、bootloader 和对齐规则下可写入新固件的空间；它不是 `2MB - Sketch` 的简单差值。
+`Flash`、`Sketch`、`OTA free` 和 footer 的 `Free heap` 等字节数统一保留两位小数。Footer 常驻紧凑状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63` 顺序显示；`Up` 不显示秒，`RSSI` 仅 STA 已连接时显示数值，未连接或 AP 配网模式显示 `-`。`OTA free` 直接显示 `ESP.getFreeSketchSpace()` 的结果，表示当前 Flash map、OTA slot、bootloader 和对齐规则下可写入新固件的空间；它不是 `2MB - Sketch` 的简单差值。
 
 业务项目希望业务页面成为主界面时，在 `Esp8266Base::begin()` 前配置首页和导航模型，在 `begin()` 后注册页面：
 
@@ -68,10 +69,7 @@ Esp8266BaseWeb::setHomePath("/sensor");
 Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode::FUSED_HOME);
 Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode::FOOTER_COMPACT);
 Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "Status");
-Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::WIFI, "Network");
-Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::OTA, "Update");
-Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::AUTH, "Auth");
-Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::REBOOT, "Tools");
+Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::SYSTEM, "System");
 
 Esp8266Base::begin();
 Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
@@ -91,9 +89,9 @@ Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
 |---|---|
 | `TOP_NAV` | 基础功能入口在顶部导航，适合基础库独立使用 |
 | `BOTTOM_NAV` | 基础功能入口在页面内容下方，降低视觉层级 |
-| `FOOTER_COMPACT` | 基础功能入口在 footer 中与 `Free heap` 同区，小字号、可换行，适合业务应用主界面 |
+| `FOOTER_COMPACT` | 基础功能入口在 footer 中与 `Free heap / Up / RSSI` 同区，小字号、可换行，适合业务应用主界面 |
 
-`FOOTER_COMPACT` 不输出额外工具标题，不使用 `details/summary`，也不显示展开图标。桌面端状态入口和 `Free heap` 尽量同一行；窄屏下自然换行，避免横向滚动。
+`FOOTER_COMPACT` 不输出额外工具标题，不使用 `details/summary`，也不显示展开图标。桌面端状态入口和 `Free heap / Up / RSSI` 尽量同一行；窄屏下自然换行，避免横向滚动。
 
 ---
 
@@ -208,7 +206,7 @@ http://<device-ip>/ota
 
 - `GET /ota` 需要 Basic Auth。
 - `POST /ota` 也需要 Basic Auth。
-- `ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面和导航入口，避免上传表单可见但 POST `/ota` 返回 404。
+- `ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面、System 页面 OTA 入口或上传 POST 路由，避免上传表单可见但 POST `/ota` 返回 404。
 - 上传页面先用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验；校验失败时不发起上传，直接提示 `Invalid firmware: not an ESP8266 app image`。
 - 上传页面使用 XMLHttpRequest 显示百分比和字节数；进度条表示浏览器上传进度，不代表服务端已经接受固件。
 - 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。

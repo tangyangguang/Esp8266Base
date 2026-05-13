@@ -35,9 +35,15 @@ if rg -n 'ESP8266BASE_LOG_LEVEL=0' examples platformio.ini; then
 fi
 
 echo "[static] checking public docs references"
-for token in enableFileSink ESP8266BASE_LOG_FILE_LEVEL ESP8266BASE_CFG_READ_AUDIT_LEVEL /logs; do
+for token in Esp8266BaseFileLog ESP8266BASE_FILELOG_DEFAULT_MODE ESP8266BASE_CFG_READ_AUDIT_LEVEL /logs; do
   rg -n "$token" README.md docs >/dev/null || fail "documentation token missing: $token"
 done
+
+OLD_FILELOG_PATTERN='enableFile[S]ink|ESP8266BASE_LOG_[F]ILE_LEVEL|ESP8266BASE_LOG_[F]ILE_BUFFER_SIZE|ESP8266BASE_LOG_[F]ILE_FLUSH_INTERVAL_MS|setFile[S]inkLevel|file[S]inkLevel'
+if rg -n "$OLD_FILELOG_PATTERN" \
+  src examples platformio.ini README.md docs; then
+  fail "old FileLog API or macro reference found"
+fi
 
 echo "[static] checking default Web Auth password"
 rg -n '#define\s+ESP8266BASE_WEB_AUTH_PASS\s+"admin"' src/Esp8266BaseWeb.h >/dev/null || fail "default Web Auth password must be admin"

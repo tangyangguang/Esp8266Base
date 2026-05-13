@@ -4,6 +4,7 @@
 
 // Phase 1 核心模块（已实现）
 #include "Esp8266BaseLog.h"
+#include "Esp8266BaseFileLog.h"
 #include "Esp8266BaseUtil.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWiFi.h"
@@ -49,7 +50,7 @@ public:
 
     // ---- 核心 API ----
 
-    // 按序初始化：Log → Sleep → Config → WiFi → Watchdog → Web → OTA → 诊断日志
+    // 按序初始化：Log → Sleep → Config → FileLog → WiFi → Watchdog → Web → OTA → 诊断日志
     // 返回 false 表示 Config 或 WiFi 初始化失败（仍继续运行）
     static bool begin();
 

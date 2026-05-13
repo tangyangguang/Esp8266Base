@@ -113,8 +113,10 @@ http://192.168.4.1/
 | `/auth` | 修改 Web 密码 |
 | `/ota` | OTA 上传 |
 | `/logs` | 文件日志查看 |
-| `/logs/clear` | 清空文件日志；入口在 Tools 页面 |
-| `/reboot` | Tools 页面：清除文件日志、重启设备 |
+| `/system` | System 页面：WiFi、Auth、OTA、文件日志模式、清除文件日志、重启设备 |
+| `/system/filelog` | 保存 FileLog 模式；入口在 System 页面 |
+| `/logs/clear` | 清空文件日志；入口在 System 页面 |
+| `/reboot` | 重启动作，仅 POST |
 | `/health` | 健康信息 JSON |
 
 除 `/health` 外，内置管理页面使用 Basic Auth。默认认证来自 `ESP8266BASE_WEB_AUTH_USER/PASS`，业务代码可在 `Esp8266Base::begin()` 前调用 `Esp8266BaseWeb::setDefaultAuth(user, pass)` 覆盖默认值；设备已保存的 `eb_web_user` / `eb_web_pass` 优先级最高。Web 已启动后再调用 `setDefaultAuth()` 会被忽略。
@@ -158,10 +160,12 @@ http://<device-ip>/ota
 默认只输出 Serial，不写文件。full_demo 使用：
 
 ```cpp
-Esp8266BaseLog::enableFileSink("/logs/app.log", 16384);
+Esp8266BaseFileLog::setMode(Esp8266BaseFileLog::INFO);
 Esp8266BaseLog::enableConfigAudit(true);
 Esp8266BaseLog::enableConfigReadAudit(false);
 ```
+
+文件日志运行时只支持 `OFF / WARN / INFO`，当前模式保存到 `eb_log.mode`。System 页面可立即切换模式；`OFF` 不删除已有日志，清空内容仍由 Clear logs 独立负责。`DEBUG` 和 `VERBOSE` 不能作为文件日志模式，`ESP8266BASE_LOG_LEVEL` 仍是编译期上限。
 
 文件日志默认 4 段轮转：
 

@@ -140,14 +140,14 @@ time_synchronized actual_time=...
 
 现象：
 
-- `/logs` 显示 disabled。
+- `/logs` 显示 disabled 或 mode=OFF。
 - 文件大小不增长。
 
 处理：
 
-- 确认调用了 `Esp8266BaseLog::enableFileSink()`。
+- 确认 `Esp8266BaseFileLog::mode()` 不是 `OFF`，或在 System 页面切到 WARN/INFO。
 - 确认 Config/LittleFS ready。
-- 确认 fileLevel 没过滤 INFO；WARN/ERROR 会始终入文件。
+- 确认当前模式是否过滤 INFO；WARN 模式只写 WARN/ERROR。
 - 查看 `/logs` 页面显示的 path、max per file、segments。
 
 文件满时会轮转。极端异常时会截断当前文件恢复写入，允许丢少量日志但避免功能失效。
