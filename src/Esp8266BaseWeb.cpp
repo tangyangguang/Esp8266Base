@@ -474,10 +474,12 @@ void Esp8266BaseWeb::handle() {
     _server.handleClient();
     uint32_t elapsed = millis() - start;
     if (elapsed > 250UL) {
+#if ESP8266BASE_LOG_LEVEL <= 0
         const char* method = _activeMethod[0] ? _activeMethod : "?";
         const char* uri = _activeUri[0] ? _activeUri : "(unknown)";
-        ESP8266BASE_LOG_W("Web ", "slow_request method=%s uri=%s elapsed=%lums",
+        ESP8266BASE_LOG_D("Web ", "slow_request method=%s uri=%s elapsed=%lums",
                           method, uri, (unsigned long)elapsed);
+#endif
     }
 }
 
