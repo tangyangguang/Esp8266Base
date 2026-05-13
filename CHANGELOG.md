@@ -34,6 +34,20 @@
 
 没有内容的小节可以省略。
 
+## 2026-05-14
+
+### 修复
+
+- Web WiFi POST 现在先按原始参数长度校验 SSID 和密码，避免脚本提交超长密码时被截断后静默保存。
+- 404 响应现在也要求 Basic Auth，保持除 `/health` 外的内置 Web 边界一致。
+- Config `getInt()` / `getBool()` 改为严格解析；损坏值会记录 WARN 并返回默认值。
+- `ESP8266BASE_FILELOG_PATH` 增加编译期长度检查，避免长路径被静默截断。
+
+### 文档 / 示例
+
+- 明确 WDT 超时异常路径只写 RTC 标记、不写 LittleFS；正常重启、deep sleep、OTA 成功仍会 flush 配置和文件日志。
+- 更新 Web 静态 RAM 预算说明，并清理 `full_demo` 中容易被业务项目模仿的整页栈缓冲和局部 String 文件名写法。
+
 ## 2026-05-12
 
 ### 行为变化 / 使用建议

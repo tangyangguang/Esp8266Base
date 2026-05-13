@@ -324,7 +324,21 @@ int32_t Esp8266BaseConfig::getInt(const char* key, int32_t def) {
         _auditRead("getInt", key, val, false);
         return def;
     }
-    int32_t v = (int32_t)atol(buf);
+
+    bool numericStart = (buf[0] >= '0' && buf[0] <= '9') ||
+                        (buf[0] == '-' && buf[1] >= '0' && buf[1] <= '9');
+    char* end = nullptr;
+    long parsed = numericStart ? strtol(buf, &end, 10) : 0;
+    if (!numericStart || !end || *end != '\0') {
+        ESP8266BASE_LOG_W("Cfg ", "config_value_invalid op=getInt key=%s value=%s action=default default=%ld",
+                          key ? key : "(null)", buf, (long)def);
+        char val[12];
+        snprintf(val, sizeof(val), "%ld", (long)def);
+        _auditRead("getInt", key, val, false);
+        return def;
+    }
+
+    int32_t v = (int32_t)parsed;
     char val[12];
     snprintf(val, sizeof(val), "%ld", (long)v);
     _auditRead("getInt", key, val, true);
@@ -342,6 +356,12 @@ bool Esp8266BaseConfig::getBool(const char* key, bool def) {
     char buf[4] = "";
     bool found = _getStrInternal(key, buf, sizeof(buf), nullptr, false);
     if (!found || buf[0] == '\0') {
+        _auditRead("getBool", key, def ? "true" : "false", false);
+        return def;
+    }
+    if (strcmp(buf, "0") != 0 && strcmp(buf, "1") != 0) {
+        ESP8266BASE_LOG_W("Cfg ", "config_value_invalid op=getBool key=%s value=%s action=default default=%s",
+                          key ? key : "(null)", buf, def ? "true" : "false");
         _auditRead("getBool", key, def ? "true" : "false", false);
         return def;
     }

@@ -1002,6 +1002,10 @@ void Esp8266BaseWeb::_handleWiFiGet() {
         strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
         if (strcmp(err, "missing_ssid") == 0) {
             sendChunk("<p class=err>SSID cannot be empty.</p>");
+        } else if (strcmp(err, "ssid_too_long") == 0) {
+            sendChunk("<p class=err>SSID is too long.</p>");
+        } else if (strcmp(err, "password_too_long") == 0) {
+            sendChunk("<p class=err>Password is too long.</p>");
         } else if (strcmp(err, "save_failed") == 0) {
             sendChunk("<p class=err>Failed to save WiFi credentials.</p>");
         } else {
@@ -1025,24 +1029,35 @@ void Esp8266BaseWeb::_handleWiFiPost() {
     if (!checkAuth()) return;
     _markRequest();
 
-    char ssid[64] = "";
-    char pass[64] = "";
-    strncpy(ssid, _server.arg("ssid").c_str(), sizeof(ssid) - 1);
-    strncpy(pass, _server.arg("pass").c_str(), sizeof(pass) - 1);
-    _trimWhitespace(ssid);
-    _trimWhitespace(pass);
+    String ssidArg = _server.arg("ssid");
+    String passArg = _server.arg("pass");
+    ssidArg.trim();
+    passArg.trim();
 
-    if (strlen(ssid) > 0) {
-        // Intentionally log the WiFi password in plaintext for field debugging.
-        ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=%s password_length=%u",
-                          ssid, pass, (unsigned)strlen(pass));
-        if (Esp8266BaseWiFi::connect(ssid, pass)) {
-            _redirect("/wifi?saved=1");
-        } else {
-            _redirect("/wifi?error=save_failed");
-        }
-    } else if (strlen(ssid) == 0) {
+    if (ssidArg.length() == 0) {
         _redirect("/wifi?error=missing_ssid");
+        return;
+    }
+    if (ssidArg.length() > 32) {
+        ESP8266BASE_LOG_W("Web ", "wifi_credentials_form_rejected reason=ssid_too_long length=%u max=32",
+                          (unsigned)ssidArg.length());
+        _redirect("/wifi?error=ssid_too_long");
+        return;
+    }
+    if (passArg.length() > 63) {
+        ESP8266BASE_LOG_W("Web ", "wifi_credentials_form_rejected reason=password_too_long length=%u max=63",
+                          (unsigned)passArg.length());
+        _redirect("/wifi?error=password_too_long");
+        return;
+    }
+
+    // Intentionally log the WiFi password in plaintext for field debugging.
+    ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=%s password_length=%u",
+                      ssidArg.c_str(), passArg.c_str(), (unsigned)passArg.length());
+    if (Esp8266BaseWiFi::connect(ssidArg.c_str(), passArg.c_str())) {
+        _redirect("/wifi?saved=1");
+    } else {
+        _redirect("/wifi?error=save_failed");
     }
 }
 
@@ -1392,6 +1407,7 @@ void Esp8266BaseWeb::_handleHealth() {
 
 void Esp8266BaseWeb::_handleNotFound() {
     _markRequest();
+    if (!checkAuth()) return;
     _server.send(404, "text/plain", "Not found");
 }
 #endif

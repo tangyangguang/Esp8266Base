@@ -101,9 +101,9 @@ private:
         bool                  showInNav;  // 1B
     };
 
-    static ESP8266WebServer _server;                            // ~4B ref
-    static AppRoute         _pages[ESP8266BASE_WEB_MAX_APP_PAGES]; // 4×48=192B
-    static AppRoute         _apis [ESP8266BASE_WEB_MAX_APP_APIS];  // 6×48=288B
+    static ESP8266WebServer _server;                            // ~272B
+    static AppRoute         _pages[ESP8266BASE_WEB_MAX_APP_PAGES]; // 4×52=208B
+    static AppRoute         _apis [ESP8266BASE_WEB_MAX_APP_APIS];  // 6×52=312B
     static uint8_t          _pageCount;                         // 1B
     static uint8_t          _apiCount;                          // 1B
     static bool             _running;                           // 1B

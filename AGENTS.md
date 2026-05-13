@@ -63,7 +63,7 @@ pio run -e esp12f -t upload --upload-port /dev/cu.usbserial-120
 ## 7. 关键行为规范
 
 - 配置存储使用 LittleFS `/cfg_<key>`；库保留 key 必须使用 `eb_` 前缀，业务项目不得复用。
-- 配置写入必须写前比较；高频计数使用 deferred；重启、deep sleep、OTA 成功、WDT 重启前 flush 配置和文件日志。
+- 配置写入必须写前比较；高频计数使用 deferred；正常重启、deep sleep、OTA 成功前 flush 配置和文件日志；WDT 超时异常路径只写 RTC 标记，不写 LittleFS。
 - LittleFS 挂载失败默认不格式化，只有 `ESP8266BASE_CFG_FORMAT_ON_FAIL=1` 才允许。
 - 日志必须可读、字段清晰；大字节数使用 KB/MB；启动必须有 boot session 分割线。
 - WiFi 密码、Web Auth 密码和配置审计值按设计明文输出，不视为 bug。

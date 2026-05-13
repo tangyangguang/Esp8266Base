@@ -21,6 +21,9 @@
 #define ESP8266BASE_FILELOG_PATH "/logs/app.log"
 #endif
 
+static_assert(sizeof(ESP8266BASE_FILELOG_PATH) <= 32,
+              "ESP8266BASE_FILELOG_PATH must fit in 31 chars plus NUL");
+
 #ifndef ESP8266BASE_FILELOG_MAX_BYTES
 #define ESP8266BASE_FILELOG_MAX_BYTES (16UL * 1024UL)
 #endif

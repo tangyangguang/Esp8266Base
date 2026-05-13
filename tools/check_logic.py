@@ -117,6 +117,8 @@ def test_log_file_buffer_rules() -> None:
         fail("FileLog must register an internal log sink")
     if "eb_log.mode" not in filelog_cpp:
         fail("FileLog mode must persist to eb_log.mode")
+    if "static_assert(sizeof(ESP8266BASE_FILELOG_PATH) <= 32" not in filelog_h:
+        fail("FileLog path macro must have a compile-time length guard")
     old_enable_api = "enableFile" + "Sink"
     old_sink_word = "file" + "Sink"
     if old_enable_api in log_h or old_sink_word in log_h or "LittleFS" in log_cpp:
@@ -151,6 +153,10 @@ def test_wifi_retry_rules() -> None:
     require_token(wifi_cpp, "reason=password_too_long", "WiFi password length validation")
     require_token(wifi_cpp, "max=32", "WiFi SSID length limit log")
     require_token(wifi_cpp, "max=63", "WiFi password length limit log")
+    web_cpp = read("src/Esp8266BaseWeb.cpp")
+    require_token(web_cpp, "ssidArg.length() > 32", "Web WiFi raw SSID length validation")
+    require_token(web_cpp, "passArg.length() > 63", "Web WiFi raw password length validation")
+    require_token(web_cpp, "reason=password_too_long length=%u max=63", "Web WiFi password too long log")
     require_token(networking, "SSID 必须为 1-32 字节，密码必须为 0-63 字节",
                   "WiFi credential length doc")
     require_token(networking, "密码可以为空，用于连接开放 WiFi", "WiFi open network doc")
@@ -173,9 +179,14 @@ def test_ntp_manual_packet_validation() -> None:
 
 def test_config_deferred_rules() -> None:
     config_h = read("src/Esp8266BaseConfig.h")
+    config_cpp = read("src/Esp8266BaseConfig.cpp")
     assert_eq(parse_define_int(config_h, "ESP8266BASE_CFG_DEFERRED_SIZE"), 4, "default deferred queue size")
     assert_eq(parse_define_int(config_h, "ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS"), 5000,
               "default deferred flush interval")
+    require_token(config_cpp, "strtol(buf, &end, 10)", "strict Config int parsing")
+    require_token(config_cpp, 'strcmp(buf, "0") != 0 && strcmp(buf, "1") != 0', "strict Config bool parsing")
+    require_token(config_cpp, "config_value_invalid op=getInt", "invalid Config int warning")
+    require_token(config_cpp, "config_value_invalid op=getBool", "invalid Config bool warning")
 
 
 def test_log_segment_paths() -> None:
@@ -463,6 +474,8 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, "Clear File Logs", "System page log clear action")
     require_token(web_cpp, "_redirect(ok ? \"/system?cleared=1\" : \"/system?error=clear_failed\")",
                   "log clear returns to System page")
+    require_token(web_cpp, "void Esp8266BaseWeb::_handleNotFound() {\n    _markRequest();\n    if (!checkAuth()) return;",
+                  "404 requires Basic Auth")
     require_token(web_cpp, "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
                   "Web addPage diagnostic rejection")
     require_token(web_cpp, "addApi_rejected reason=table_full path=%s count=%u max=%u",
@@ -504,6 +517,10 @@ def test_web_home_contract() -> None:
                   "Web doc System nav label")
     for text, label in [(custom_web, "custom_web"), (full_demo, "full_demo")]:
         require_token(text, 'Esp8266BaseWebBuiltinLabel::SYSTEM, "System"', f"{label} System nav label")
+    if "String name = dir.fileName()" in full_demo:
+        fail("full_demo config table must not keep a local String filename")
+    if "char body[420]" in full_demo:
+        fail("full_demo deep sleep response must not build a full HTML page in a stack buffer")
 
 
 def main() -> None:

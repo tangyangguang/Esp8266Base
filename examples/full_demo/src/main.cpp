@@ -208,12 +208,13 @@ static void sendConfigTable() {
     bool any = false;
     Dir dir = LittleFS.openDir("/");
     while (dir.next()) {
-        String name = dir.fileName();
+        char name[32] = "";
+        strncpy(name, dir.fileName().c_str(), sizeof(name) - 1);
         const char* key = nullptr;
-        if (name.startsWith("/cfg_")) {
-            key = name.c_str() + 5;
-        } else if (name.startsWith("cfg_")) {
-            key = name.c_str() + 4;
+        if (strncmp(name, "/cfg_", 5) == 0) {
+            key = name + 5;
+        } else if (strncmp(name, "cfg_", 4) == 0) {
+            key = name + 4;
         } else {
             continue;
         }
@@ -306,15 +307,13 @@ void handleCtrlApi() {
         int sec = Esp8266BaseWeb::server().arg("sec").toInt();
         if (sec < 1) sec = 10;
 
-        char body[420];
-        snprintf(body, sizeof(body),
-                 "<!DOCTYPE html><html><head><meta charset=UTF-8></head>"
-                 "<body><h2>Deep Sleep</h2>"
-                 "<p>Command accepted. Sleeping for %d seconds...</p>"
-                 "<p>ESP8266 deep sleep turns WiFi and Web off. The device wakes automatically only when GPIO16 is wired to RST; otherwise press RST or power-cycle it.</p>"
-                 "<p>After wake, reopen <a href='/demo'>/demo</a>.</p>"
-                 "</body></html>", sec);
-        Esp8266BaseWeb::server().send(200, "text/html", body);
+        char line[72];
+        Esp8266BaseWeb::sendHeader();
+        Esp8266BaseWeb::sendChunk("<h2>Deep Sleep</h2><p>Command accepted. Sleeping for ");
+        snprintf(line, sizeof(line), "%d seconds...</p>", sec);
+        Esp8266BaseWeb::sendChunk(line);
+        Esp8266BaseWeb::sendChunk("<p>ESP8266 deep sleep turns WiFi and Web off. The device wakes automatically only when GPIO16 is wired to RST; otherwise press RST or power-cycle it.</p><p>After wake, reopen <a href='/demo'>/demo</a>.</p>");
+        Esp8266BaseWeb::sendFooter();
         Esp8266BaseWeb::server().client().flush();
         Esp8266BaseWeb::server().client().stop();
         delay(1200);
