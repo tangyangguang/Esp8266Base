@@ -66,9 +66,9 @@
 |------|----------|-----|-------|
 | `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,888B | 314,959B |
 | `sleep_watchdog` | Sleep + WDT | 33,708B | 316,003B |
-| `custom_web` | Web + mDNS + WDT | 40,512B | 395,384B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 43,652B | 420,128B |
-| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 45,696B | 428,492B |
+| `custom_web` | Web + mDNS + WDT | 40,512B | 395,400B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 43,652B | 420,144B |
+| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 45,696B | 428,508B |
 
 Arduino SDK 内部开销（不可控，参考值）：
 

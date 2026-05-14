@@ -49,7 +49,7 @@ Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSyste
 // PROGMEM HTML 片段（全部在 Flash，不占 DRAM）
 // ----------------------------------------------------------------------------
 static const char WEB_HEAD[] PROGMEM =
-    "<meta charset=UTF-8><meta name=viewport content=width=device-width>"
+    "<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>"
     "<style>"
     "body{font-family:Arial,Helvetica,sans-serif;padding:12px;max-width:920px;margin:0 auto;"
     "font-size:15px;font-weight:normal;color:#222;line-height:1.45}"
@@ -83,7 +83,7 @@ static const char WEB_HEAD[] PROGMEM =
     "footer .tools{flex:1 1 auto;display:flex;flex-wrap:wrap;gap:4px}"
     "footer a{font-size:12px;background:#f4f4f4;color:#666;padding:3px 6px;border-radius:3px}"
     "footer .status{white-space:nowrap;margin-left:auto}"
-    "@media(max-width:560px){footer{border:1px solid #d9e1e8;border-radius:6px;padding:10px;"
+    "@media(max-width:700px){footer{border:1px solid #d9e1e8;border-radius:6px;padding:10px;"
     "align-items:flex-start;background:#fff}footer .tools{flex:1 0 100%;gap:5px}"
     "footer a{font-size:14px;padding:5px 8px}footer .status{margin-left:0;white-space:normal;font-size:14px}}"
     "</style>"
