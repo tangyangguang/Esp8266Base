@@ -62,7 +62,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
 `Watchdog resets` 仅启用 Watchdog 时显示 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数；`Wake reason` 仅启用 Sleep 时显示英文状态和简短中文说明。`Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
 
-`Flash`、`Sketch`、`OTA free`、`Free heap` 和 `Max block` 等字节数统一保留两位小数。Footer 常驻紧凑状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示；`Up` 不显示秒，`RSSI` 仅 STA 已连接时显示带单位数值，未连接或 AP 配网模式显示 `-`。`OTA free` 直接显示 `ESP.getFreeSketchSpace()` 的结果，表示当前 Flash map、OTA slot、bootloader 和对齐规则下可写入新固件的空间；它不是 `2MB - Sketch` 的简单差值。
+`Flash`、`Sketch`、`OTA free`、`Free heap` 和 `Max block` 等字节数统一保留两位小数。Footer 常驻紧凑状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示；`Up` 不显示秒，`RSSI` 仅 STA 已连接时显示带单位数值，未连接或 AP 配网模式显示 `-`。`FOOTER_COMPACT` 在窄屏下会把入口按钮和状态信息分成两行并左对齐，避免状态行换行后靠右。`OTA free` 直接显示 `ESP.getFreeSketchSpace()` 的结果，表示当前 Flash map、OTA slot、bootloader 和对齐规则下可写入新固件的空间；它不是 `2MB - Sketch` 的简单差值。
 
 业务项目希望业务页面成为主界面时，在 `Esp8266Base::begin()` 前配置首页和导航模型，在 `begin()` 后注册页面：
 
@@ -92,9 +92,9 @@ Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
 |---|---|
 | `TOP_NAV` | 基础功能入口在顶部导航，适合基础库独立使用 |
 | `BOTTOM_NAV` | 基础功能入口在页面内容下方，降低视觉层级 |
-| `FOOTER_COMPACT` | 基础功能入口在 footer 中与 `Free heap / Up / RSSI` 同区，小字号、可换行，适合业务应用主界面 |
+| `FOOTER_COMPACT` | 基础功能入口在 footer 中与 `Free heap / Up / RSSI` 同区，小字号、可换行；窄屏下切换为两行左对齐面板，适合业务应用主界面 |
 
-`FOOTER_COMPACT` 不输出额外工具标题，不使用 `details/summary`，也不显示展开图标。桌面端状态入口和 `Free heap / Up / RSSI` 尽量同一行；窄屏下自然换行，避免横向滚动。
+`FOOTER_COMPACT` 不输出额外工具标题，不使用 `details/summary`，也不显示展开图标。桌面端状态入口和 `Free heap / Up / RSSI` 尽量同一行；窄屏下入口按钮独占第一行，状态信息独占第二行并左对齐，避免横向滚动。
 
 ---
 
