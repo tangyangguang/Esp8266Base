@@ -40,7 +40,7 @@
 | Esp8266BaseFileLog | <= 80B 默认；INFO 文件缓存另加 <=512B | mode/path/current size/dir state；默认 WARN 时不编译低优先级缓存 |
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
-| Esp8266BaseWeb | <= 1.36KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + _wb(160B) + auth/device/home/hostname/firmware/title/labels/active request 状态 |
+| Esp8266BaseWeb | <= 1.20KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + auth/device/home/hostname/firmware/title/labels/active request 状态；页面临时缓冲在栈上 |
 | Esp8266BaseOTA | <= 160B | _inProgress/_rejected/_started/_status + 上传计时、字节数和 25% 进度日志状态 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
@@ -66,9 +66,9 @@
 |------|----------|-----|-------|
 | `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,940B | 315,035B |
 | `sleep_watchdog` | Sleep + WDT | 33,784B | 316,127B |
-| `custom_web` | Web + mDNS + WDT | 40,672B | 395,680B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 43,848B | 420,508B |
-| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 45,904B | 428,860B |
+| `custom_web` | Web + mDNS + WDT | 40,512B | 395,696B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 43,688B | 420,524B |
+| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 45,744B | 428,876B |
 
 Arduino SDK 内部开销（不可控，参考值）：
 
@@ -147,7 +147,7 @@ static String _hostname;
 ESP8266 默认栈约 4KB：
 
 - 日志格式化缓冲（128B）在栈上分配，不要在多层嵌套中重叠持有
-- Web handler 中临时缓冲建议 <= 64B；较大缓冲使用全局共享 `_wb[160]`
+- Web handler 中临时缓冲优先保持 <= 96B；JSON 响应等少数固定格式可使用 <= 160B 栈缓冲，但不要跨 helper 保存指针
 - 禁止递归（快速消耗栈）
 
 ---

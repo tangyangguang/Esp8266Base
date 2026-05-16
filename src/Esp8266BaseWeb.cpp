@@ -213,9 +213,6 @@ static const char WEB_REBOOTING[] PROGMEM =
 static const char WEB_LOGS_PRE[] PROGMEM =
     "<h2>Logs</h2>";
 
-// 内部共享小缓冲（用于 sendContent_P 和动态内容，非重入）
-static char _wb[160];
-
 static void _trimWhitespace(char* s) {
     if (!s) return;
     char* start = s;
@@ -235,6 +232,7 @@ static void _trimWhitespace(char* s) {
 
 static void _sendAttrEscaped(const char* s) {
     if (!s) return;
+    char buf[96];
     size_t out = 0;
     while (*s) {
         const char* repl = nullptr;
@@ -248,26 +246,26 @@ static void _sendAttrEscaped(const char* s) {
         }
         if (repl) {
             for (const char* r = repl; *r; r++) {
-                _wb[out++] = *r;
-                if (out == sizeof(_wb) - 1) {
-                    _wb[out] = '\0';
-                    Esp8266BaseWeb::sendChunk(_wb);
+                buf[out++] = *r;
+                if (out == sizeof(buf) - 1) {
+                    buf[out] = '\0';
+                    Esp8266BaseWeb::sendChunk(buf);
                     out = 0;
                 }
             }
         } else {
-            _wb[out++] = *s;
-            if (out == sizeof(_wb) - 1) {
-                _wb[out] = '\0';
-                Esp8266BaseWeb::sendChunk(_wb);
+            buf[out++] = *s;
+            if (out == sizeof(buf) - 1) {
+                buf[out] = '\0';
+                Esp8266BaseWeb::sendChunk(buf);
                 out = 0;
             }
         }
         s++;
     }
     if (out > 0) {
-        _wb[out] = '\0';
-        Esp8266BaseWeb::sendChunk(_wb);
+        buf[out] = '\0';
+        Esp8266BaseWeb::sendChunk(buf);
     }
 }
 
@@ -846,8 +844,9 @@ void Esp8266BaseWeb::sendFooter() {
         snprintf(rssi, sizeof(rssi), "%d dBm", Esp8266BaseWiFi::rssi());
     }
     sendContent_P(WEB_FOOT_HEAP_PRE);
-    Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), _wb, sizeof(_wb));
-    sendChunk(_wb);
+    char heap[16];
+    Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heap, sizeof(heap));
+    sendChunk(heap);
     sendContent_P(WEB_FOOT_UP_PRE);
     sendChunk(uptime);
     sendContent_P(WEB_FOOT_RSSI_PRE);
@@ -1181,32 +1180,33 @@ void Esp8266BaseWeb::_handleLogsGet() {
     sendChunk(Esp8266BaseFileLog::modeName());
     sendChunk("<br>Path: ");
     _sendAttrEscaped(Esp8266BaseFileLog::path());
-    snprintf(_wb, sizeof(_wb), "<br>Rotation files: %u",
+    char line[96];
+    snprintf(line, sizeof(line), "<br>Rotation files: %u",
              (unsigned)Esp8266BaseFileLog::rotateFiles());
-    sendChunk(_wb);
+    sendChunk(line);
 
     if (Esp8266BaseFileLog::bufferEnabled()) {
         char usedBuf[16];
         char sizeBuf[16];
         Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::bufferUsed(), usedBuf, sizeof(usedBuf));
         Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::bufferSize(), sizeBuf, sizeof(sizeBuf));
-        snprintf(_wb, sizeof(_wb),
+        snprintf(line, sizeof(line),
                  "<br>Buffer: %s / %s<br>Flush interval: %lus",
                  usedBuf, sizeBuf,
                  (unsigned long)(Esp8266BaseFileLog::flushIntervalMs() / 1000UL));
-        sendChunk(_wb);
+        sendChunk(line);
     } else {
         sendChunk("<br>Buffer: disabled");
     }
-    snprintf(_wb, sizeof(_wb), "<br>Max per file: %s<br>Max total: %s",
+    snprintf(line, sizeof(line), "<br>Max per file: %s<br>Max total: %s",
              maxBuf, totalBuf);
-    sendChunk(_wb);
+    sendChunk(line);
     sendChunk("<br>Segments: ");
     for (uint8_t i = 0; i < Esp8266BaseFileLog::rotateFiles(); i++) {
         char segBuf[16];
         Esp8266BaseUtil::formatBytes(Esp8266BaseFileLog::segmentSize(i), segBuf, sizeof(segBuf));
-        snprintf(_wb, sizeof(_wb), "%s%u=%s", i == 0 ? "" : ", ", (unsigned)i, segBuf);
-        sendChunk(_wb);
+        snprintf(line, sizeof(line), "%s%u=%s", i == 0 ? "" : ", ", (unsigned)i, segBuf);
+        sendChunk(line);
     }
     sendChunk("</p>");
 
@@ -1225,21 +1225,21 @@ void Esp8266BaseWeb::_handleLogsGet() {
         if (i == selected) {
             sendChunk("<b>");
             if (i == 0) {
-                snprintf(_wb, sizeof(_wb), "current-0 (%s)", segBuf);
+                snprintf(line, sizeof(line), "current-0 (%s)", segBuf);
             } else {
-                snprintf(_wb, sizeof(_wb), "history-%u (%s)", (unsigned)i, segBuf);
+                snprintf(line, sizeof(line), "history-%u (%s)", (unsigned)i, segBuf);
             }
-            sendChunk(_wb);
+            sendChunk(line);
             sendChunk("</b>");
         } else {
-            snprintf(_wb, sizeof(_wb), "<a href='/logs?seg=%u'>", (unsigned)i);
-            sendChunk(_wb);
+            snprintf(line, sizeof(line), "<a href='/logs?seg=%u'>", (unsigned)i);
+            sendChunk(line);
             if (i == 0) {
-                snprintf(_wb, sizeof(_wb), "current-0 (%s)", segBuf);
+                snprintf(line, sizeof(line), "current-0 (%s)", segBuf);
             } else {
-                snprintf(_wb, sizeof(_wb), "history-%u (%s)", (unsigned)i, segBuf);
+                snprintf(line, sizeof(line), "history-%u (%s)", (unsigned)i, segBuf);
             }
-            sendChunk(_wb);
+            sendChunk(line);
             sendChunk("</a>");
         }
         if (i + 1 < Esp8266BaseFileLog::rotateFiles()) sendChunk(" ");
@@ -1254,8 +1254,8 @@ void Esp8266BaseWeb::_handleLogsGet() {
     } else {
         snprintf(selectedPath, sizeof(selectedPath), "%s.%u",
                  Esp8266BaseFileLog::path(), (unsigned)selected);
-        snprintf(_wb, sizeof(_wb), "history-%u", (unsigned)selected);
-        selectedLabel = _wb;
+        snprintf(line, sizeof(line), "history-%u", (unsigned)selected);
+        selectedLabel = line;
     }
     _sendLogSection(selectedLabel, selectedPath, selectedSize);
     sendChunk("</pre>");
@@ -1326,13 +1326,14 @@ void Esp8266BaseWeb::_handleHostnameApiGet() {
     const char* defaultHostname = _validatedDefaultHostname();
     bool rebootRequired = persistedValid && strcmp(persisted, Esp8266Base::hostname()) != 0;
 
-    snprintf(_wb, sizeof(_wb),
+    char json[160];
+    snprintf(json, sizeof(json),
              "{\"hostname\":\"%s\",\"persisted\":\"%s\",\"default\":\"%s\",\"rebootRequired\":%s}",
              Esp8266Base::hostname(),
              persistedValid ? persisted : "",
              defaultHostname,
              rebootRequired ? "true" : "false");
-    _server.send(200, "application/json", _wb);
+    _server.send(200, "application/json", json);
 }
 
 void Esp8266BaseWeb::_handleHostnameApiPost() {
@@ -1409,7 +1410,8 @@ void Esp8266BaseWeb::_handleRebootPost() {
 void Esp8266BaseWeb::_handleHealth() {
     _markRequest();
     // 不需要 Auth（健康检查通常开放）
-    snprintf(_wb, sizeof(_wb),
+    char json[160];
+    snprintf(json, sizeof(json),
              "{\"heap\":%u,\"maxBlock\":%u,\"ip\":\"%s\","
              "\"uptime\":%lu,\"wifi\":\"%s\"}",
              (unsigned)ESP.getFreeHeap(),
@@ -1417,7 +1419,7 @@ void Esp8266BaseWeb::_handleHealth() {
              Esp8266BaseWiFi::ip(),
              millis() / 1000UL,
              Esp8266BaseWiFi::isConnected() ? "connected" : "disconnected");
-    _server.send(200, "application/json", _wb);
+    _server.send(200, "application/json", json);
 }
 
 void Esp8266BaseWeb::_handleNotFound() {

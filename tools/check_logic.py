@@ -375,7 +375,7 @@ def test_public_default_tables() -> None:
     require_token(api, "average_speed", "API OTA speed log doc")
     require_token(memory, "它不是运行时 free heap 实测", "memory build RAM scope")
     require_token(memory, "Esp8266BaseOTA | <= 160B", "OTA memory budget with diagnostics")
-    require_token(memory, "Esp8266BaseWeb | <= 1.36KB", "memory Web budget")
+    require_token(memory, "Esp8266BaseWeb | <= 1.20KB", "memory Web budget")
     require_token(memory, "核心裁剪目标（自有）", "memory core profile budget")
     require_token(memory, "全模块默认目标（自有）", "memory full default profile budget")
     require_token(memory, "全模块 INFO FileLog 目标（自有）", "memory full INFO FileLog profile budget")
@@ -400,6 +400,7 @@ def test_web_home_contract() -> None:
     architecture = read("docs/02_architecture.md")
     observability = read("docs/07_observability.md")
     maintainer = read("docs/11_maintainer_guide.md")
+    memory = read("docs/04_memory_budget.md")
     custom_web = read("examples/custom_web/src/main.cpp")
     full_demo = read("examples/full_demo/src/main.cpp")
 
@@ -441,8 +442,8 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, 'grid-template-columns:104px minmax(0,1fr)', "Web status label column width")
     require_token(web_cpp, 'white-space:nowrap', "Web status label no-wrap")
     require_token(web_cpp, '_sendKv("Hostname", _hostname)', "Web home hostname field")
-    if re.search(r"_sendKv\([^\n]+_wb", web_cpp):
-        fail("Web status fields must not pass shared _wb as a value buffer")
+    if "_wb" in web_cpp or "_wb" in web_h or "_wb" in memory:
+        fail("Web must not keep the old shared _wb buffer")
     require_token(web_cpp, '_sendKv("STA MAC", mac)', "Web home STA MAC field")
     if web_cpp.count('"%d dBm"') < 2:
         fail("Web status card and footer RSSI must both include dBm")
