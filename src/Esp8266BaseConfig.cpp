@@ -27,14 +27,14 @@ bool Esp8266BaseConfig::begin() {
         delay(50);
         if (!LittleFS.begin()) {
 #if ESP8266BASE_CFG_FORMAT_ON_FAIL
-        ESP8266BASE_LOG_W("Cfg ", "littlefs_mount_failed formatting_enabled=yes");
-        LittleFS.format();
-        if (!LittleFS.begin()) {
-            ESP8266BASE_LOG_E("Cfg ", "littlefs_mount_failed_after_format");
-            _ready = false;
-            return false;
-        }
-        ESP8266BASE_LOG_I("Cfg ", "littlefs_formatted result=success");
+            ESP8266BASE_LOG_W("Cfg ", "littlefs_mount_failed formatting_enabled=yes");
+            LittleFS.format();
+            if (!LittleFS.begin()) {
+                ESP8266BASE_LOG_E("Cfg ", "littlefs_mount_failed_after_format");
+                _ready = false;
+                return false;
+            }
+            ESP8266BASE_LOG_I("Cfg ", "littlefs_formatted result=success");
 #else
             ESP8266BASE_LOG_E("Cfg ", "littlefs_mount_failed formatting_enabled=no config_disabled=yes");
             _ready = false;

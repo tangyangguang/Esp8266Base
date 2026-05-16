@@ -116,6 +116,7 @@ static const char WEB_WIFI_FORM_POST[] PROGMEM =
     "<input type=submit value='Save &amp; Connect'>"
     "</form>";
 
+#if ESP8266BASE_USE_OTA
 static const char WEB_OTA_FORM[] PROGMEM =
     "<h2>OTA Update</h2>"
     "<form id=f>"
@@ -147,6 +148,7 @@ static const char WEB_OTA_FORM[] PROGMEM =
     "var r=new FileReader();r.onload=function(){var a=new Uint8Array(r.result);if(!ok(a)){fail('Invalid firmware: not an ESP8266 app image');return;}send();};"
     "r.onerror=function(){fail('Invalid firmware: cannot read file header');};r.readAsArrayBuffer(file.slice(0,16));return false;};"
     "</script>";
+#endif
 
 static const char WEB_AUTH_FORM[] PROGMEM =
     "<h2>Auth Password</h2>"
@@ -520,6 +522,10 @@ bool Esp8266BaseWeb::addPage(const char* path, Esp8266BaseWebHandler handler) {
 
 bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWebHandler handler) {
     if (!path || !handler) return false;
+    if (!_running) {
+        ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=web_not_running path=%s", path);
+        return false;
+    }
     if (!_isValidPath(path)) {
         ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
                           path, (unsigned)_pageCount, (unsigned)ESP8266BASE_WEB_MAX_APP_PAGES);
@@ -559,6 +565,10 @@ bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWeb
 
 bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     if (!path || !handler) return false;
+    if (!_running) {
+        ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=web_not_running path=%s", path);
+        return false;
+    }
     if (!_isValidPath(path)) {
         ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=invalid_path path=%s count=%u max=%u",
                           path, (unsigned)_apiCount, (unsigned)ESP8266BASE_WEB_MAX_APP_APIS);
@@ -1144,12 +1154,14 @@ void Esp8266BaseWeb::_handleAuthPost() {
     _redirect("/auth?saved=1");
 }
 
+#if ESP8266BASE_USE_OTA
 void Esp8266BaseWeb::_handleOtaGet() {
     if (!checkAuth()) return;
     sendHeader();
     sendContent_P(WEB_OTA_FORM);
     sendFooter();
 }
+#endif
 
 void Esp8266BaseWeb::_handleLogsGet() {
     if (!checkAuth()) return;

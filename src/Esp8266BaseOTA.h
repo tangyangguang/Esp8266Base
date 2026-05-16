@@ -31,7 +31,7 @@ private:
     static uint32_t _startedMs;       // 4B：上传开始 millis
     static uint32_t _uploadedBytes;   // 4B：已写入固件字节数
     static uint32_t _requestBytes;    // 4B：multipart request Content-Length
-    static uint8_t  _lastProgressPct; // 1B：最近一次 10% 阶梯进度日志
+    static uint8_t  _lastProgressPct; // 1B：最近一次 25% 阶梯进度日志
     static const char* _failureMessage; // 失败时返回给客户端的简短原因
 
     // 静态回调函数（注册给 ESP8266WebServer，无捕获，无 std::function 驻留堆）

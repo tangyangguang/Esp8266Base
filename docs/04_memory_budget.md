@@ -41,7 +41,7 @@
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb | <= 1.36KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + _wb(160B) + auth/device/home/hostname/firmware/title/labels/active request 状态 |
-| Esp8266BaseOTA | <= 160B | _inProgress/_rejected/_started/_status + 上传计时、字节数和 10% 进度日志状态 |
+| Esp8266BaseOTA | <= 160B | _inProgress/_rejected/_started/_status + 上传计时、字节数和 25% 进度日志状态 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |

@@ -24,6 +24,8 @@ uint32_t Esp8266BaseOTA::_requestBytes = 0;
 uint8_t  Esp8266BaseOTA::_lastProgressPct = 0;
 const char* Esp8266BaseOTA::_failureMessage = "Upload failed";
 
+static const uint8_t OTA_PROGRESS_STEP = 25;
+
 static uint32_t _elapsedMs(uint32_t startedMs) {
     return startedMs ? (uint32_t)(millis() - startedMs) : 0;
 }
@@ -277,8 +279,9 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             if (_requestBytes > 0) {
                 uint8_t progress = (uint8_t)(((uint64_t)_uploadedBytes * 100ULL) / (uint64_t)_requestBytes);
                 if (progress > 100) progress = 100;
-                if (progress >= 10 && progress / 10 > _lastProgressPct / 10) {
-                    _lastProgressPct = (progress / 10) * 10;
+                if (progress >= OTA_PROGRESS_STEP &&
+                    progress / OTA_PROGRESS_STEP > _lastProgressPct / OTA_PROGRESS_STEP) {
+                    _lastProgressPct = (progress / OTA_PROGRESS_STEP) * OTA_PROGRESS_STEP;
                     char uploadedBuf[16];
                     char requestBuf[16];
                     char elapsedBuf[16];
@@ -303,6 +306,12 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         }
         if (upload.totalSize > _uploadedBytes) {
             _uploadedBytes = (uint32_t)upload.totalSize;
+        }
+        if (!_updateStarted || _uploadedBytes == 0) {
+            _failUpload(400, "Invalid upload: no firmware data", false);
+            ESP8266BASE_LOG_E("OTA ", "upload_rejected reason=no_firmware_data");
+            _resumeWatchdog();
+            return;
         }
         if (Update.end(true)) {
             _updateStarted = false;

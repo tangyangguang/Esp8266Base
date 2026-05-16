@@ -32,12 +32,12 @@ static bool _writeWdtRtcState(uint32_t count) {
     return system_rtc_mem_write(WDT_RTC_ADDR, &state, sizeof(state));
 }
 
-static void _clearWdtRtcState() {
+static bool _clearWdtRtcState() {
     WatchdogRtcState state;
     state.magic = 0;
     state.count = 0;
     state.checksum = 0;
-    system_rtc_mem_write(WDT_RTC_ADDR, &state, sizeof(state));
+    return system_rtc_mem_write(WDT_RTC_ADDR, &state, sizeof(state));
 }
 
 // ----------------------------------------------------------------------------
@@ -72,12 +72,14 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
             _resetCount++;
         }
         bool countOk = Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT, (int)_resetCount);
+        bool clearOk = false;
         if (countOk) {
-            _clearWdtRtcState();
+            clearOk = _clearWdtRtcState();
         }
-        ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u source=rtc persist=%s",
+        ESP8266BASE_LOG_W("WDT ", "boot_after_watchdog_reset reset_count=%u source=rtc persist=%s rtc_clear=%s",
                           (unsigned)_resetCount,
-                          countOk ? "success" : "failed");
+                          countOk ? "success" : "failed",
+                          clearOk ? "success" : "failed");
     } else {
         _wasWdtReset = false;
     }

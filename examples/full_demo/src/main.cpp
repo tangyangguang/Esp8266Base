@@ -388,7 +388,9 @@ static void handleBoardButton() {
         g_clearFired = true;
         setBoardLed(true);
         ESP8266BASE_LOG_W("Btn ", "button_long_press_detected pin=GPIO0 duration=1s action=clear_all_config_and_restart");
+#if ESP8266BASE_USE_WATCHDOG
         Esp8266BaseWatchdog::pause();
+#endif
         Esp8266BaseConfig::clearAll();
         Esp8266BaseFileLog::flush();
         delay(300);

@@ -67,7 +67,8 @@ if rg -n '\(redacted\)|\bredacted\b|不得明文|不会明文|只记录长度、
 fi
 
 echo "[static] checking optional Watchdog guards"
-for file in src/Esp8266BaseOTA.cpp src/Esp8266BaseSleep.cpp; do
+for file in src/Esp8266BaseOTA.cpp src/Esp8266BaseSleep.cpp examples/*/src/main.cpp; do
+  [ -f "$file" ] || continue
   if rg -n 'Esp8266BaseWatchdog::(pause|resume)\(' "$file" >/dev/null; then
     rg -n '#if ESP8266BASE_USE_WATCHDOG' "$file" >/dev/null || fail "Watchdog call without feature guard in $file"
   fi

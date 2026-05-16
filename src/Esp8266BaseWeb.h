@@ -1,4 +1,5 @@
 #pragma once
+#include "Esp8266BaseOptions.h"
 #include <Arduino.h>
 #include <ESP8266WebServer.h>
 
@@ -142,7 +143,9 @@ private:
     static void _handleWiFiPost();
     static void _handleAuthGet();
     static void _handleAuthPost();
+#if ESP8266BASE_USE_OTA
     static void _handleOtaGet();   // OTA GET 由此处理，POST 由 Esp8266BaseOTA 注册
+#endif
     static void _handleLogsGet();
     static void _handleLogsClearPost();
     static void _handleFileLogPost();

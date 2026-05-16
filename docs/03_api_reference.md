@@ -452,6 +452,7 @@ static void sendContent_P(PGM_P content);
 static void sendChunk(const char* content);
 ```
 页面输出辅助函数。`sendContent_P` 单遍从 PROGMEM 读取，无需预计算长度。
+`sendFooter()` 会输出 HTML 尾部并关闭当前连接；调用后不要继续 `sendChunk()` 或直接写 `server().client()`。
 
 ```cpp
 static bool checkAuth();
@@ -509,6 +510,7 @@ Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 系统首页用 Connection、Runtime、Firmware、Time 四组展示状态。Connection 显示 `Hostname/WiFi/SSID/IP/RSSI(dBm)/STA MAC`；Runtime 显示 `Free heap/Max block/Boot count`，启用 Watchdog 时显示 `WDT resets`，值为 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数，启用 Sleep 时显示 `Wake reason` 英文状态和简短中文说明；Time 显示 `Uptime/NTP/Now/Boot time`；Firmware 显示 `Firmware/Version/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap/Max block` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`FOOTER_COMPACT` 在窄屏下会把入口按钮和状态信息分成两行并左对齐，避免状态行换行后靠右。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
 
 `/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
+`addPage()` / `addApi()` 必须在 `Esp8266Base::begin()` 后调用；过早调用会返回 `false` 并输出 WARN 日志。
 
 ### 使用示例
 
@@ -556,7 +558,7 @@ OTA 上传是否正在进行。
 3. 页面提交前：内置 OTA 页用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验，失败时不发起上传并提示 `Invalid firmware: not an ESP8266 app image`
 4. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，日志输出 `upload_started`
 5. 首个数据块：服务端再次做 ESP8266 固件头快速校验，拒绝 ESP32 固件、gzip 包和非固件文件；校验通过后调用 `Update.begin(ESP.getFreeSketchSpace())`
-6. 上传期间：分块写入固件，每块后 `yield()`，按 10% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
+6. 上传期间：分块写入固件，每块后 `yield()`，按 25% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
 7. 上传完成：输出 `upload_finished`，启用 Watchdog 时 `resume()`，成功后输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
 8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息
 

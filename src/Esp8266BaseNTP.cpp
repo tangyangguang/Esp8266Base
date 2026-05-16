@@ -116,6 +116,7 @@ void Esp8266BaseNTP::handle() {
 void Esp8266BaseNTP::reset() {
     _ntpUdp.stop();
     _synced = false;
+    _logSwitched = false;
     _lastCheckMs = 0;
     _lastPendingLogMs = 0;
     _startedMs = 0;

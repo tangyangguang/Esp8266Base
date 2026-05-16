@@ -304,6 +304,7 @@ def test_watchdog_and_ota_failure_contract() -> None:
     require_token(watchdog_cpp, "system_rtc_mem_write", "Watchdog RTC timeout marker")
     require_token(watchdog_cpp, "source=rtc", "Watchdog RTC recovery log")
     require_token(watchdog_cpp, "if (countOk)", "Watchdog RTC clear after Config persistence")
+    require_token(watchdog_cpp, "rtc_clear=%s", "Watchdog RTC clear diagnostic")
     if "ESP8266BASE_CFG_KEY_WDT_PENDING" in watchdog_cpp:
         fail("Watchdog must not keep WDT pending compatibility key")
     require_token(watchdog_doc, "超时时只写 RTC user memory 标记，不写 LittleFS", "Watchdog no-Flash timeout doc")
@@ -327,6 +328,8 @@ def test_watchdog_and_ota_failure_contract() -> None:
     require_token(ota_cpp, "_watchdogPaused", "OTA watchdog resume state")
     require_token(ota_cpp, "_failUpload(", "OTA single failure closeout helper")
     require_token(ota_cpp, "_updateStarted", "OTA Update.begin state")
+    require_token(ota_cpp, "Invalid upload: no firmware data", "OTA empty upload rejection")
+    require_token(ota_cpp, "OTA_PROGRESS_STEP = 25", "OTA progress log step")
     require_token(ota_cpp, '_failUpload(500, "Update failed: write failed", true)',
                   "OTA write failure immediate closeout")
 
@@ -362,7 +365,7 @@ def test_public_default_tables() -> None:
     require_token(readme, "/wifi` GET 表单也会回显已保存密码", "README plaintext WiFi password echo")
     require_token(readme, "硬件运行时目标", "README free heap target scope")
     require_token(web_doc, "路径字符集", "Web route path charset table")
-    require_token(web_doc, "addPage()` / `addApi()` 返回 `false`", "Web invalid route path behavior")
+    require_token(web_doc, "函数返回 `false` 并输出 WARN 日志", "Web invalid route path behavior")
     require_token(web_doc, "Web Auth 改密成功和失败路径都会", "Web Auth plaintext change logs")
     require_token(web_doc, "upload_progress", "Web OTA progress log doc")
     require_token(web_doc, "average_speed", "Web OTA speed log doc")
@@ -486,6 +489,8 @@ def test_web_home_contract() -> None:
                   "404 requires Basic Auth")
     require_token(web_cpp, "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
                   "Web addPage diagnostic rejection")
+    require_token(web_cpp, "addPage_rejected reason=web_not_running", "Web addPage before begin rejection")
+    require_token(web_cpp, "addApi_rejected reason=web_not_running", "Web addApi before begin rejection")
     require_token(web_cpp, "addApi_rejected reason=table_full path=%s count=%u max=%u",
                   "Web addApi table full diagnostic")
     require_token(web_cpp, "#if ESP8266BASE_USE_OTA", "OTA page/System entry compile guard")
