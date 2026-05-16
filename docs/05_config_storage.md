@@ -99,6 +99,7 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | `eb_web_pass` | string | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 | 立即 |
 | `eb_wdt_count` | int32 | WDT 重启累计次数，超时重启后的正常启动阶段补写 | immediate |
 | `eb_boot_count` | uint32 string | 启动次数，库自动维护，达到 4,294,967,295 后饱和 | immediate |
+| `eb_filelog_mode` | int32 | 文件日志运行模式，保存 OFF/WARN/INFO 对应整数值 | immediate |
 
 ---
 

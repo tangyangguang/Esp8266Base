@@ -202,7 +202,7 @@ Esp8266BaseLog::enableConfigAudit(true);
 Esp8266BaseLog::enableConfigReadAudit(false);
 ```
 
-文件日志运行时只支持 `OFF / WARN / INFO` 三种模式，当前模式保存到 `eb_log.mode`；`DEBUG` 不作为文件日志模式。`ESP8266BASE_LOG_LEVEL` 仍是编译期上限，Web 和 public API 都不能突破。`OFF` 不删除已有日志，清空内容仍由 System 页面中的 Clear logs 独立负责。path、单段大小、轮转段数、buffer 和 flush interval 都是构建期资源策略，不在 Web 普通运维界面暴露。`full_demo` 通过 `ESP8266BASE_FILELOG_DEFAULT_MODE=ESP8266BASE_FILELOG_MODE_INFO` 默认启用 INFO 文件日志。完整逻辑见 `docs/07_observability.md`。
+文件日志运行时只支持 `OFF / WARN / INFO` 三种模式，当前模式保存到 `eb_filelog_mode`；`DEBUG` 不作为文件日志模式。`ESP8266BASE_LOG_LEVEL` 仍是编译期上限，Web 和 public API 都不能突破。`OFF` 不删除已有日志，清空内容仍由 System 页面中的 Clear logs 独立负责。path、单段大小、轮转段数、buffer 和 flush interval 都是构建期资源策略，不在 Web 普通运维界面暴露。`full_demo` 通过 `ESP8266BASE_FILELOG_DEFAULT_MODE=ESP8266BASE_FILELOG_MODE_INFO` 默认启用 INFO 文件日志。完整逻辑见 `docs/07_observability.md`。
 
 ---
 

@@ -53,7 +53,7 @@ Esp8266BaseFileLog::setMode(Esp8266BaseFileLog::OFF);
 | `WARN` | 只写 WARN/ERROR |
 | `INFO` | 写 INFO/WARN/ERROR |
 
-`DEBUG` 和 `VERBOSE` 不作为文件日志模式，public API 和 Web POST 都不能设置成功。当前模式保存到 `eb_log.mode`；不读取旧 key，不做兼容迁移。
+`DEBUG` 和 `VERBOSE` 不作为文件日志模式，public API 和 Web POST 都不能设置成功。当前模式保存到 `eb_filelog_mode`。
 
 `ESP8266BASE_LOG_LEVEL` 仍是编译期上限。`ESP8266BASE_FILELOG_DEFAULT_MODE` 只能是 OFF/WARN/INFO，且不能高于编译期上限；Web 也不会提供超过上限的模式。设置 WARN/INFO 时，FileLog 会确保 runtime level 至少达到对应等级，但不修改 Serial level。
 

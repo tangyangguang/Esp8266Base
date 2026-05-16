@@ -34,7 +34,7 @@ static bool _validMode(Esp8266BaseFileLog::Mode mode) {
 }
 
 static Esp8266BaseFileLog::Mode _readMode() {
-    int32_t raw = Esp8266BaseConfig::getInt("eb_log.mode", ESP8266BASE_FILELOG_DEFAULT_MODE);
+    int32_t raw = Esp8266BaseConfig::getInt(ESP8266BASE_CFG_KEY_FILELOG_MODE, ESP8266BASE_FILELOG_DEFAULT_MODE);
     Esp8266BaseFileLog::Mode mode = static_cast<Esp8266BaseFileLog::Mode>(raw);
     return _validMode(mode)
         ? mode
@@ -241,7 +241,7 @@ bool Esp8266BaseFileLog::setMode(Mode mode) {
     Mode oldMode = g_mode;
     if (mode == OFF) {
         flush();
-        bool saved = Esp8266BaseConfig::setInt("eb_log.mode", (int32_t)mode);
+        bool saved = Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_FILELOG_MODE, (int32_t)mode);
         ESP8266BASE_LOG_W("FLog", "mode_change old=%s new=%s saved=%s",
                           _modeName(oldMode), _modeName(mode), saved ? "yes" : "no");
         g_enabled = false;
@@ -269,7 +269,7 @@ bool Esp8266BaseFileLog::setMode(Mode mode) {
     g_lastFlushMs = 0;
 #endif
     g_enabled = true;
-    bool saved = Esp8266BaseConfig::setInt("eb_log.mode", (int32_t)g_mode);
+    bool saved = Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_FILELOG_MODE, (int32_t)g_mode);
     ESP8266BASE_LOG_W("FLog", "mode_change old=%s new=%s saved=%s path=%s max_bytes=%lu rotate_files=%u buffer_size=%u flush_interval_ms=%lu",
                       _modeName(oldMode),
                       _modeName(g_mode),

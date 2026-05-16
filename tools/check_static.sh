@@ -16,13 +16,17 @@ if rg -n '#\s*(if|ifdef|ifndef|elif)\b.*ESP32|platform\s*=\s*espressif32|board\s
 fi
 
 echo "[static] checking reserved config keys"
-if rg -n '#define\s+ESP8266BASE_CFG_KEY_.*"(wifi_ssid|wifi_pass|ap_pass|hostname|web_user|web_pass|wdt_count|wdt_pending|boot_count)"' src; then
+if rg -n '#define\s+ESP8266BASE_CFG_KEY_.*"(wifi_ssid|wifi_pass|ap_pass|hostname|web_user|web_pass|wdt_count|wdt_pending|boot_count|filelog_mode)"' src; then
   fail "reserved config key without eb_ prefix found"
 fi
 
-for key in eb_wifi_ssid eb_wifi_pass eb_hostname eb_boot_count eb_wdt_count; do
+for key in eb_wifi_ssid eb_wifi_pass eb_hostname eb_boot_count eb_wdt_count eb_filelog_mode; do
   rg -n "$key" src docs README.md >/dev/null || fail "required reserved key/reference missing: $key"
 done
+
+if rg -n 'eb_log\.mode' src docs README.md tools; then
+  fail "obsolete FileLog config key found"
+fi
 
 rg -n 'ESP8266BASE_DEFAULT_HOSTNAME' src docs README.md examples platformio.ini >/dev/null || \
   fail "default hostname macro reference missing"

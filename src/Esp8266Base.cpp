@@ -94,6 +94,8 @@ void Esp8266Base::_resolveHostname() {
                                   persisted, _hostname);
             }
         }
+    } else {
+        ESP8266BASE_LOG_W("Base", "hostname_config_unavailable action=use_default host=%s", _hostname);
     }
 
     ESP8266BASE_LOG_I("Base", "hostname_resolved host=%s source=%s", _hostname, source);
@@ -118,7 +120,7 @@ bool Esp8266Base::begin() {
         ok = false;  // 继续运行，但配置读写不可用
     }
 
-    // 4. FileLog — Config ready 后加载 eb_log.mode，确保 boot session 可写文件
+    // 4. FileLog — Config ready 后加载 eb_filelog_mode，确保 boot session 可写文件
     if (!Esp8266BaseFileLog::begin()) {
         ok = false;
     }

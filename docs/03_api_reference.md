@@ -200,7 +200,7 @@ public:
 };
 ```
 
-文件日志运行时只支持 `OFF / WARN / INFO`。`OFF` 不写新日志但不删除已有内容；`WARN` 只写 WARN/ERROR；`INFO` 写 INFO/WARN/ERROR。`DEBUG` 和 `VERBOSE` 不能作为文件日志模式。当前模式保存为 `eb_log.mode`，不读取旧 key，不做兼容迁移。
+文件日志运行时只支持 `OFF / WARN / INFO`。`OFF` 不写新日志但不删除已有内容；`WARN` 只写 WARN/ERROR；`INFO` 写 INFO/WARN/ERROR。`DEBUG` 和 `VERBOSE` 不能作为文件日志模式。当前模式保存为 `eb_filelog_mode`。
 
 `ESP8266BASE_LOG_LEVEL` 是编译期上限，`ESP8266BASE_FILELOG_DEFAULT_MODE` 和 Web 运行时设置都不能突破。设置 WARN/INFO 时会确保 core runtime log level 至少达到对应等级，但不会修改 Serial level。path、单段大小、轮转段数、buffer 和 flush interval 都是构建期资源策略，不在 Web 普通运维界面暴露。
 
@@ -289,6 +289,7 @@ static void enableConfigReadAudit(bool enabled);
 | `eb_web_pass` | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 |
 | `eb_wdt_count` | WDT 重启累计次数 |
 | `eb_boot_count` | 启动次数，无符号十进制字符串，最大 4,294,967,295，达到上限后饱和 |
+| `eb_filelog_mode` | 文件日志运行模式，保存 OFF/WARN/INFO 对应整数值 |
 
 ### 使用示例
 
@@ -504,6 +505,8 @@ static bool isRunning();
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
 | `/reboot` | POST | flush Config 后重启 |
 | `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
+
+页面式路由和未知路径使用 Basic Auth 挑战；未知路径认证通过后返回 404。`/api/system/hostname` 未认证时返回 JSON 401，不发送 `WWW-Authenticate`，调用方需要显式提供 `Authorization` header。`/health` 保持免认证。
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 

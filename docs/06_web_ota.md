@@ -41,7 +41,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
 | `/health` | GET | 无 | JSON 健康信息 |
 
-管理操作都需要 Basic Auth。`/health` 用于轻量状态探测，不要求认证。
+管理页面和危险操作都需要 Basic Auth；未知路径也会先要求 Basic Auth，认证通过后才返回 404。`/api/system/hostname` 是 JSON API，未认证时返回 JSON 401，不触发浏览器 Basic Auth 弹窗；调用方需要显式提供 `Authorization` header。`/health` 用于轻量状态探测，不要求认证。
 
 应用路由路径必须以 `/` 开头，长度小于 24 字符，并且只允许字母、数字、`/`、`-`、`_`、`.`。不符合规则，或在 Web 启动前调用 `addPage()` / `addApi()` 时，函数返回 `false` 并输出 WARN 日志。内置导航和系统首页会对应用提供的路径、标题和日志路径做 HTML 输出转义。
 

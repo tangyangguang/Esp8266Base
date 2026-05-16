@@ -70,7 +70,7 @@ Esp8266Base（主入口）
 1. Esp8266BaseLog::begin()          — 最先，保证后续日志可输出
 2. Esp8266BaseSleep::begin()        — 读取唤醒原因（须在 Config 前）
 3. Esp8266BaseConfig::begin()       — 挂载 LittleFS；默认不自动格式化
-4. Esp8266BaseFileLog::begin()      — 读取 eb_log.mode，注册内部日志 sink
+4. Esp8266BaseFileLog::begin()      — 读取 eb_filelog_mode，注册内部日志 sink
 5. Esp8266BaseWiFi::begin()         — 读取凭证并缓存，启动状态机（非阻塞）
 6. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
 7. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）

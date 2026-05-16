@@ -115,8 +115,10 @@ def test_log_file_buffer_rules() -> None:
         fail("Log must split runtime and serial levels")
     if "Esp8266BaseLog::_setInternalHook(_lineSink)" not in filelog_cpp:
         fail("FileLog must register an internal log sink")
-    if "eb_log.mode" not in filelog_cpp:
-        fail("FileLog mode must persist to eb_log.mode")
+    if "ESP8266BASE_CFG_KEY_FILELOG_MODE" not in filelog_cpp:
+        fail("FileLog mode must use the reserved key macro")
+    config_h = read("src/Esp8266BaseConfig.h")
+    require_token(config_h, '#define ESP8266BASE_CFG_KEY_FILELOG_MODE "eb_filelog_mode"', "FileLog reserved config key")
     if "static_assert(sizeof(ESP8266BASE_FILELOG_PATH) <= 32" not in filelog_h:
         fail("FileLog path macro must have a compile-time length guard")
     old_enable_api = "enableFile" + "Sink"
@@ -487,6 +489,10 @@ def test_web_home_contract() -> None:
                   "log clear returns to System page")
     require_token(web_cpp, "void Esp8266BaseWeb::_handleNotFound() {\n    _markRequest();\n    if (!checkAuth()) return;",
                   "404 requires Basic Auth")
+    require_token(web_cpp, '_server.send(401, "application/json"', "hostname API JSON 401")
+    require_token(web_cpp, '\\"error\\":\\"unauthorized\\"', "hostname API unauthorized JSON body")
+    require_token(web_doc, "未认证时返回 JSON 401", "Web JSON API auth policy")
+    require_token(api, "未知路径认证通过后返回 404", "API doc 404 auth policy")
     require_token(web_cpp, "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
                   "Web addPage diagnostic rejection")
     require_token(web_cpp, "addPage_rejected reason=web_not_running", "Web addPage before begin rejection")
