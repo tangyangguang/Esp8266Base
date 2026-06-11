@@ -1,6 +1,6 @@
 #include "Esp8266Base.h"
 
-static uint32_t _loadAndIncrementBootCount() {
+static uint32_t _loadBootCount(const char* invalidAction) {
     if (!Esp8266BaseConfig::isReady()) return 0;
 
     char raw[16] = "";
@@ -14,8 +14,27 @@ static uint32_t _loadAndIncrementBootCount() {
     if (valid) {
         count = (uint32_t)strtoul(raw, nullptr, 10);
     } else if (found) {
-        ESP8266BASE_LOG_W("Boot", "boot_count_invalid value=%s action=reset_to_1", raw);
+        ESP8266BASE_LOG_W("Boot", "boot_count_invalid value=%s action=%s",
+                          raw, invalidAction ? invalidAction : "use_0");
     }
+
+    return count;
+}
+
+static uint32_t _loadAndIncrementBootCount() {
+    if (!Esp8266BaseConfig::isReady()) return 0;
+
+#if ESP8266BASE_USE_SLEEP
+    if (Esp8266BaseSleep::isDeepSleepWake()) {
+        // skip boot_count increment: periodic deep sleep wake is a normal resume path.
+        uint32_t count = _loadBootCount("skip_increment");
+        ESP8266BASE_LOG_I("Boot", "boot_count_skip reason=deep_sleep_wake value=%lu",
+                          (unsigned long)count);
+        return count;
+    }
+#endif
+
+    uint32_t count = _loadBootCount("reset_to_1");
 
     if (count < 0xFFFFFFFFUL) {
         count++;

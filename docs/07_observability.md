@@ -210,7 +210,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 
 无法识别的值统一输出 `unknown boot_desc=未知启动原因`，不会输出 `undefined`。
 
-`eb_boot_count` 使用无符号十进制字符串保存，达到 `4,294,967,295` 后饱和。
+`eb_boot_count` 使用无符号十进制字符串保存，达到 `4,294,967,295` 后饱和。它表示重启计数：上电、外部复位、软件重启和 WDT 恢复会递增，deep sleep 唤醒不递增，避免周期性休眠设备每次唤醒都写 Flash。
 
 ---
 

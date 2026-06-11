@@ -193,6 +193,20 @@ def test_config_deferred_rules() -> None:
     require_token(config_cpp, "config_value_invalid op=getBool", "invalid Config bool warning")
 
 
+def test_boot_count_skips_deep_sleep_wake() -> None:
+    base_cpp = read("src/Esp8266Base.cpp")
+    config_doc = read("docs/05_config_storage.md")
+    api = read("docs/03_api_reference.md")
+    observability = read("docs/07_observability.md")
+
+    require_token(base_cpp, "skip boot_count increment", "deep sleep boot count skip comment")
+    require_token(base_cpp, "Esp8266BaseSleep::isDeepSleepWake()", "deep sleep wake guard")
+    require_token(base_cpp, "boot_count_skip reason=deep_sleep_wake", "deep sleep boot count skip log")
+    require_token(config_doc, "deep sleep 唤醒不递增", "Config boot count deep sleep doc")
+    require_token(api, "deep sleep 唤醒不递增", "API boot count deep sleep doc")
+    require_token(observability, "deep sleep 唤醒不递增", "Observability boot count deep sleep doc")
+
+
 def test_log_segment_paths() -> None:
     assert_eq([log_segment_path("/logs/app.log", i) for i in range(4)],
               ["/logs/app.log", "/logs/app.log.1", "/logs/app.log.2", "/logs/app.log.3"],
@@ -447,7 +461,7 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, '_sendKv("STA MAC", mac)', "Web home STA MAC field")
     if web_cpp.count('"%d dBm"') < 2:
         fail("Web status card and footer RSSI must both include dBm")
-    require_token(web_cpp, '_sendKv("Boot count", bootCount)', "Web home boot count label")
+    require_token(web_cpp, '_sendKv("Restart count", bootCount)', "Web home restart count label")
     require_token(web_cpp, '_sendKv("Free heap", freeHeap)', "Web home free heap field")
     require_token(web_cpp, '_sendKv("Max block", maxBlock)', "Web home max block field")
     require_token(web_cpp, '"%lu since clear"', "Web home watchdog reset clear scope")
@@ -505,7 +519,7 @@ def test_web_home_contract() -> None:
     require_token(api, "`Status/Logs/System`", "API built-in nav label list")
     require_token(web_doc, "Connection | Hostname、WiFi 状态、SSID、IP、RSSI(dBm)、STA MAC",
                   "Web doc Connection fields")
-    require_token(web_doc, "Runtime | Free heap、Max block、Boot count、Watchdog resets、Wake reason",
+    require_token(web_doc, "Runtime | Free heap、Max block、Restart count、Watchdog resets、Wake reason",
                   "Web doc Runtime fields")
     require_token(web_doc, "`N since clear`", "Web doc watchdog reset clear scope")
     require_token(web_doc, "Firmware | Firmware、Version、Chip ID、CPU、Flash、Sketch、OTA free",
@@ -555,6 +569,7 @@ def main() -> None:
     test_wifi_retry_rules()
     test_ntp_manual_packet_validation()
     test_config_deferred_rules()
+    test_boot_count_skips_deep_sleep_wake()
     test_log_segment_paths()
     test_ota_header_guard()
     test_boot_session_log_contract()

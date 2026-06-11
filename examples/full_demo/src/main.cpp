@@ -3,7 +3,7 @@
  *
  * 演示模块：
  *   Log      — 串口日志，NTP 同步后自动切换为绝对时间戳
- *   Config   — 自定义 demo_boot 计数 + demo_val 字符串 KV 存储
+ *   Config   — 自定义 demo_boot 重启计数 + demo_val 字符串 KV 存储
  *   WiFi     — STA 自动连接 + AP 配网（首次使用）
  *   Web      — 2 页面 /demo /ctrl + 2 API /api/demo /api/ctrl
  *   OTA      — 内置 /ota 页面，Web 刷机
@@ -32,7 +32,7 @@ static const uint8_t  BOARD_BUTTON_PIN = 0;
 static const uint8_t  BOARD_LED_PIN    = 2;
 static const uint32_t CLEAR_HOLD_MS    = 1000;
 
-// full_demo 自定义启动计数（库级 eb_boot_count 由 Esp8266Base 自动维护）
+// full_demo 自定义重启计数（库级 eb_boot_count 由 Esp8266Base 自动维护）
 static int32_t g_bootCount = 0;
 static uint32_t g_buttonDownAt = 0;
 static bool     g_clearFired   = false;
@@ -58,7 +58,7 @@ static const char PAGE_DEMO[] PROGMEM =
     "<tr><td>Wake Reason</td><td id='wake'>-</td></tr>"
     "<tr><td>Board Button</td><td>GPIO0 long press 1s clears config</td></tr>"
     "<tr><td>Board LED</td><td>GPIO2 active-low</td></tr>"
-    "<tr><td>Boot Count (Config)</td><td id='bc'>-</td></tr>"
+    "<tr><td>Restart Count (Config)</td><td id='bc'>-</td></tr>"
     "<tr><td>WDT Resets (Watchdog)</td><td id='wdt'>-</td></tr>"
     "<tr><td>demo_val (Config)</td><td id='cv'>-</td></tr>"
     "</table>"
@@ -422,11 +422,19 @@ void setup() {
 
     Esp8266Base::begin();
 
-    // Config 演示：读取 + 递增 demo_boot（deferred 写，不阻塞启动）
-    g_bootCount = Esp8266BaseConfig::getInt(KEY_BOOT, 0) + 1;
-    Esp8266BaseConfig::setIntDeferred(KEY_BOOT, g_bootCount);
-    ESP8266BASE_LOG_I("App ", "config_deferred_save key=%s value=%ld",
-                      KEY_BOOT, (long)g_bootCount);
+    // Config 演示：读取 + 递增 demo_boot（deep sleep 唤醒只读不写）
+    g_bootCount = Esp8266BaseConfig::getInt(KEY_BOOT, 0);
+    if (Esp8266BaseSleep::isDeepSleepWake()) {
+        ESP8266BASE_LOG_I("App ", "config_save_skip key=%s reason=deep_sleep_wake value=%ld",
+                          KEY_BOOT, (long)g_bootCount);
+    } else {
+        if (g_bootCount < 0x7FFFFFFF) {
+            g_bootCount++;
+        }
+        Esp8266BaseConfig::setIntDeferred(KEY_BOOT, g_bootCount);
+        ESP8266BASE_LOG_I("App ", "config_deferred_save key=%s value=%ld",
+                          KEY_BOOT, (long)g_bootCount);
+    }
 
     char demoVal[48] = "";
     bool hasDemoVal = Esp8266BaseConfig::getStr(KEY_VAL, demoVal, sizeof(demoVal), "");

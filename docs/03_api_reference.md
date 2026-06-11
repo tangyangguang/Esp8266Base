@@ -288,7 +288,7 @@ static void enableConfigReadAudit(bool enabled);
 | `eb_web_user` | Web Auth 持久化用户名，覆盖默认用户名 |
 | `eb_web_pass` | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 |
 | `eb_wdt_count` | WDT 重启累计次数 |
-| `eb_boot_count` | 启动次数，无符号十进制字符串，最大 4,294,967,295，达到上限后饱和 |
+| `eb_boot_count` | 重启计数，无符号十进制字符串；上电、外部复位、软件重启和 WDT 恢复会递增，deep sleep 唤醒不递增，最大 4,294,967,295，达到上限后饱和 |
 | `eb_filelog_mode` | 文件日志运行模式，保存 OFF/WARN/INFO 对应整数值 |
 
 ### 使用示例
@@ -298,7 +298,7 @@ static void enableConfigReadAudit(bool enabled);
 int32_t cnt = Esp8266BaseConfig::getInt("app_counter", 0) + 1;
 Esp8266BaseConfig::setIntDeferred("app_counter", cnt);
 
-// eb_boot_count 是库保留 key，由 Esp8266Base::begin() 自动维护
+// eb_boot_count 是库保留 key，由 Esp8266Base::begin() 自动维护；deep sleep 唤醒不递增
 
 // 低频配置立即写
 Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid);
@@ -510,7 +510,7 @@ static bool isRunning();
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
-系统首页用 Connection、Runtime、Firmware、Time 四组展示状态。Connection 显示 `Hostname/WiFi/SSID/IP/RSSI(dBm)/STA MAC`；Runtime 显示 `Free heap/Max block/Boot count`，启用 Watchdog 时显示 `WDT resets`，值为 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数，启用 Sleep 时显示 `Wake reason` 英文状态和简短中文说明；Time 显示 `Uptime/NTP/Now/Boot time`；Firmware 显示 `Firmware/Version/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap/Max block` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`FOOTER_COMPACT` 在窄屏下会把入口按钮和状态信息分成两行并左对齐，避免状态行换行后靠右。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
+系统首页用 Connection、Runtime、Firmware、Time 四组展示状态。Connection 显示 `Hostname/WiFi/SSID/IP/RSSI(dBm)/STA MAC`；Runtime 显示 `Free heap/Max block/Restart count`，其中 `Restart count` 来自 `eb_boot_count`，deep sleep 唤醒不递增；启用 Watchdog 时显示 `WDT resets`，值为 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数，启用 Sleep 时显示 `Wake reason` 英文状态和简短中文说明；Time 显示 `Uptime/NTP/Now/Boot time`；Firmware 显示 `Firmware/Version/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap/Max block` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`FOOTER_COMPACT` 在窄屏下会把入口按钮和状态信息分成两行并左对齐，避免状态行换行后靠右。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
 
 `/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 `addPage()` / `addApi()` 必须在 `Esp8266Base::begin()` 后调用；过早调用会返回 `false` 并输出 WARN 日志。

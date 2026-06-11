@@ -977,7 +977,7 @@ void Esp8266BaseWeb::_handleSystemHome() {
     sendChunk("</dl></section><section><h3>Runtime</h3><dl>");
     _sendKv("Free heap", freeHeap);
     _sendKv("Max block", maxBlock);
-    _sendKv("Boot count", bootCount);
+    _sendKv("Restart count", bootCount);
 #if ESP8266BASE_USE_WATCHDOG
     char wdtResets[28];
     snprintf(wdtResets, sizeof(wdtResets), "%lu since clear",

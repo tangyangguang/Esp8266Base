@@ -81,7 +81,7 @@ Config 正式配置写入必须使用安全策略：
 - 配置审计不脱敏，直接输出 key/value。
 - FileLog 只支持 OFF/WARN/INFO；WARN 模式写 WARN/ERROR，INFO 模式写 INFO/WARN/ERROR。
 - NTP 同步后必须输出实际时间和 boot time 映射。
-- 启动会话必须有分割线、boot_count、`boot_reason`、中文 `boot_desc`、firmware、version、人性化 free heap。
+- 启动会话必须有分割线、boot_count、`boot_reason`、中文 `boot_desc`、firmware、version、人性化 free heap；`eb_boot_count` 统计重启次数，deep sleep 唤醒不递增。
 
 ---
 

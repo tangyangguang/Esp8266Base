@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,10 +19,10 @@ run() {
 }
 
 run git diff --check
-run tools/check_static.sh
-run tools/check_logic.py
+run bash tools/check_static.sh
+run python3 tools/check_logic.py
 
-run pio run -e esp12f
+run pio run -e esp12f -j1
 
 examples=(
   basic_wifi
@@ -33,13 +33,13 @@ examples=(
 )
 
 for example in "${examples[@]}"; do
-  run bash -lc "cd 'examples/${example}' && pio run -e esp12f"
+  run bash -lc "cd 'examples/${example}' && pio run -e esp12f -j1"
 done
 
 if [[ "$ALL_ENVS" -eq 1 ]]; then
-  run pio run -e nodemcuv2
+  run pio run -e nodemcuv2 -j1
   for example in basic_wifi custom_web sleep_watchdog wifi_config_ota; do
-    run bash -lc "cd 'examples/${example}' && pio run -e nodemcuv2"
+    run bash -lc "cd 'examples/${example}' && pio run -e nodemcuv2 -j1"
   done
 fi
 

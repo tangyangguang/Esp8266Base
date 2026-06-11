@@ -56,11 +56,11 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | 分组 | 字段 |
 |---|---|
 | Connection | Hostname、WiFi 状态、SSID、IP、RSSI(dBm)、STA MAC |
-| Runtime | Free heap、Max block、Boot count、Watchdog resets、Wake reason |
+| Runtime | Free heap、Max block、Restart count、Watchdog resets、Wake reason |
 | Firmware | Firmware、Version、Chip ID、CPU、Flash、Sketch、OTA free |
 | Time | Uptime、NTP 状态、当前时间、Boot time |
 
-`Watchdog resets` 仅启用 Watchdog 时显示 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数；`Wake reason` 仅启用 Sleep 时显示英文状态和简短中文说明。`Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
+`Restart count` 来自 `eb_boot_count`，deep sleep 唤醒不递增；`Watchdog resets` 仅启用 Watchdog 时显示 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数；`Wake reason` 仅启用 Sleep 时显示英文状态和简短中文说明。`Uptime` 使用人性化格式并保留秒级精度。`Boot time` 在 NTP 同步后显示为 `YYYY-MM-DD HH:MM:SS`，同步前显示 `-`；未启用 NTP 时显示 `NTP: disabled`。
 
 `Flash`、`Sketch`、`OTA free`、`Free heap` 和 `Max block` 等字节数统一保留两位小数。Footer 常驻紧凑状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示；`Up` 不显示秒，`RSSI` 仅 STA 已连接时显示带单位数值，未连接或 AP 配网模式显示 `-`。`FOOTER_COMPACT` 在窄屏下会把入口按钮和状态信息分成两行并左对齐，避免状态行换行后靠右。`OTA free` 直接显示 `ESP.getFreeSketchSpace()` 的结果，表示当前 Flash map、OTA slot、bootloader 和对齐规则下可写入新固件的空间；它不是 `2MB - Sketch` 的简单差值。
 
