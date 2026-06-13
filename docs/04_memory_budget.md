@@ -37,7 +37,7 @@
 | 模块 | 预算上限 | 主要来源 |
 |------|---------|----------|
 | Esp8266BaseLog | <= 16B | runtime/serial level + timeFn/hook/internal hook；格式缓冲在栈上 |
-| Esp8266BaseFileLog | <= 80B 默认；INFO 文件缓存另加 <=512B | mode/path/current size/dir state；默认 WARN 时不编译低优先级缓存 |
+| Esp8266BaseFileLog | <= 80B 默认；INFO 文件缓存另加 <=512B | mode/path/current size/dir state；默认 ERROR 时不编译低优先级缓存 |
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb | <= 1.20KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + auth/device/home/hostname/firmware/title/labels/active request 状态；页面临时缓冲在栈上 |
@@ -47,7 +47,7 @@
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
 | Esp8266BaseWatchdog | <= 96B DRAM + 12B RTC | timeout(4B) + 计时器(8B) + pause(1B) + count(4B)；RTC user memory word 64-66 保存 WDT 超时标记 |
 | **核心裁剪目标（自有）** | **< 1.25KB** | Log + Config + WiFi + Sleep + Watchdog + 默认 FileLog，不含 Web/OTA/NTP/mDNS 和 Arduino SDK 内部开销 |
-| **全模块默认目标（自有）** | **<= 2.9KB** | Web/OTA/NTP/mDNS/Sleep/Watchdog 全开，默认 WARN FileLog，无 INFO 缓存 |
+| **全模块默认目标（自有）** | **<= 2.9KB** | Web/OTA/NTP/mDNS/Sleep/Watchdog 全开，默认 ERROR FileLog，无 INFO 缓存 |
 | **全模块 INFO FileLog 目标（自有）** | **<= 3.4KB** | 全模块默认目标 + INFO 文件日志缓存，缓存上限仍为单个静态缓冲 512B |
 
 库保留 RTC user memory：

@@ -17,6 +17,7 @@ static uint32_t g_lastFlushMs = 0;
 
 static const char* _modeName(Esp8266BaseFileLog::Mode mode) {
     switch (mode) {
+        case Esp8266BaseFileLog::ERROR: return "ERROR";
         case Esp8266BaseFileLog::WARN: return "WARN";
         case Esp8266BaseFileLog::INFO: return "INFO";
         case Esp8266BaseFileLog::OFF:
@@ -26,6 +27,7 @@ static const char* _modeName(Esp8266BaseFileLog::Mode mode) {
 
 static bool _validMode(Esp8266BaseFileLog::Mode mode) {
     if (mode != Esp8266BaseFileLog::OFF &&
+        mode != Esp8266BaseFileLog::ERROR &&
         mode != Esp8266BaseFileLog::WARN &&
         mode != Esp8266BaseFileLog::INFO) {
         return false;
@@ -216,9 +218,12 @@ static void _lineSink(uint8_t level,
                       const char*,
                       const char* line) {
     if (!g_enabled || !line) return;
+    if (g_mode == Esp8266BaseFileLog::ERROR && level < 3) return;
     if (g_mode == Esp8266BaseFileLog::WARN && level < 2) return;
     if (g_mode == Esp8266BaseFileLog::INFO && level < 1) return;
-    if (g_mode != Esp8266BaseFileLog::WARN && g_mode != Esp8266BaseFileLog::INFO) return;
+    if (g_mode != Esp8266BaseFileLog::ERROR &&
+        g_mode != Esp8266BaseFileLog::WARN &&
+        g_mode != Esp8266BaseFileLog::INFO) return;
 
     if (level >= 2) {
         Esp8266BaseFileLog::flush();

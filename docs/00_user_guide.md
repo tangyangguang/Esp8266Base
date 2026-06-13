@@ -161,7 +161,7 @@ http://<device-ip>/ota
 
 ## 七、启用文件日志和配置审计
 
-默认只输出 Serial，不写文件。full_demo 使用：
+默认输出 Serial，并启用 ERROR 文件日志；正常运行没有 ERROR 日志时不会产生持续 Flash 写入。需要调试时可以临时提高文件日志模式，例如：
 
 ```cpp
 Esp8266BaseFileLog::setMode(Esp8266BaseFileLog::INFO);
@@ -169,7 +169,7 @@ Esp8266BaseLog::enableConfigAudit(true);
 Esp8266BaseLog::enableConfigReadAudit(false);
 ```
 
-文件日志运行时只支持 `OFF / WARN / INFO`，当前模式保存到 `eb_filelog_mode`。System 页面可立即切换模式；`OFF` 不删除已有日志，清空内容仍由 Clear logs 独立负责。`DEBUG` 和 `VERBOSE` 不能作为文件日志模式，`ESP8266BASE_LOG_LEVEL` 仍是编译期上限。
+文件日志运行时只支持 `OFF / ERROR / WARN / INFO`，当前模式保存到 `eb_filelog_mode`。System 页面可立即切换模式；`OFF` 不删除已有日志，清空内容仍由 Clear logs 独立负责。`DEBUG` 和 `VERBOSE` 不能作为文件日志模式，`ESP8266BASE_LOG_LEVEL` 仍是编译期上限。
 
 文件日志默认 4 段轮转：
 

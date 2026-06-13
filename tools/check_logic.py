@@ -102,15 +102,28 @@ def test_log_file_buffer_rules() -> None:
     filelog_cpp = read("src/Esp8266BaseFileLog.cpp")
     log_cpp = read("src/Esp8266BaseLog.cpp")
     assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_MODE_OFF"), 4, "filelog OFF mode")
+    assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_MODE_ERROR"), 3, "filelog ERROR mode")
     assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_MODE_WARN"), 2, "filelog WARN mode")
     assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_MODE_INFO"), 1, "filelog INFO mode")
+    require_token(filelog_h,
+                  "#define ESP8266BASE_FILELOG_DEFAULT_MODE ESP8266BASE_FILELOG_MODE_ERROR",
+                  "default filelog ERROR mode")
     assert_eq(parse_define_int(filelog_h, "ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS"), 2000, "file flush interval")
     if "ESP8266BASE_FILELOG_DEFAULT_MODE == ESP8266BASE_FILELOG_MODE_INFO" not in filelog_h:
         fail("file buffer default must depend on FileLog default mode INFO")
     assert_eq(file_buffer_size_for_mode(1), 512, "INFO file buffer")
     assert_eq(file_buffer_size_for_mode(2), 0, "WARN file buffer")
+    assert_eq(file_buffer_size_for_mode(3), 0, "ERROR file buffer")
     assert_eq(file_buffer_size_for_mode(4), 0, "OFF file buffer")
     assert_eq(file_buffer_size_for_mode(2, explicit_size=0), 0, "explicit disabled buffer")
+    if 'case Esp8266BaseFileLog::ERROR: return "ERROR";' not in filelog_cpp:
+        fail("FileLog must expose ERROR mode name")
+    require_token(filelog_cpp, "if (g_mode == Esp8266BaseFileLog::ERROR && level < 3) return;",
+                  "FileLog ERROR threshold")
+    for path in ["platformio.ini", "examples/full_demo/platformio.ini"]:
+        text = read(path)
+        if "ESP8266BASE_FILELOG_DEFAULT_MODE=ESP8266BASE_FILELOG_MODE_INFO" in text:
+            fail(f"{path} must not default FileLog to INFO")
     if "setRuntimeLevel" not in log_h or "setSerialLevel" not in log_h:
         fail("Log must split runtime and serial levels")
     if "Esp8266BaseLog::_setInternalHook(_lineSink)" not in filelog_cpp:
@@ -193,18 +206,21 @@ def test_config_deferred_rules() -> None:
     require_token(config_cpp, "config_value_invalid op=getBool", "invalid Config bool warning")
 
 
-def test_boot_count_skips_deep_sleep_wake() -> None:
+def test_restart_count_skips_deep_sleep_wake() -> None:
     base_cpp = read("src/Esp8266Base.cpp")
     config_doc = read("docs/05_config_storage.md")
     api = read("docs/03_api_reference.md")
     observability = read("docs/07_observability.md")
 
-    require_token(base_cpp, "skip boot_count increment", "deep sleep boot count skip comment")
+    require_token(base_cpp, "skip restart_count increment", "deep sleep restart count skip comment")
     require_token(base_cpp, "Esp8266BaseSleep::isDeepSleepWake()", "deep sleep wake guard")
-    require_token(base_cpp, "boot_count_skip reason=deep_sleep_wake", "deep sleep boot count skip log")
-    require_token(config_doc, "deep sleep 唤醒不递增", "Config boot count deep sleep doc")
-    require_token(api, "deep sleep 唤醒不递增", "API boot count deep sleep doc")
-    require_token(observability, "deep sleep 唤醒不递增", "Observability boot count deep sleep doc")
+    require_token(base_cpp, "restart_count_skip reason=deep_sleep_wake", "deep sleep restart count skip log")
+    require_token(config_doc, "重启计数", "Config restart count wording")
+    require_token(api, "重启计数", "API restart count wording")
+    require_token(observability, "重启计数", "Observability restart count wording")
+    require_token(config_doc, "deep sleep 唤醒不递增", "Config deep sleep skip doc")
+    require_token(api, "deep sleep 唤醒不递增", "API deep sleep skip doc")
+    require_token(observability, "deep sleep 唤醒不递增", "Observability deep sleep skip doc")
 
 
 def test_log_segment_paths() -> None:
@@ -258,7 +274,7 @@ def test_boot_session_log_contract() -> None:
         fail("beginBootSession parameter must be named bootReason")
 
     required = [
-        "boot_session_start boot_count=%lu",
+        "boot_session_start restart_count=%lu",
         "boot_reason=%s boot_desc=%s",
         "firmware=%s version=%s free_heap=%s",
         "reason = \"unknown\"",
@@ -569,7 +585,7 @@ def main() -> None:
     test_wifi_retry_rules()
     test_ntp_manual_packet_validation()
     test_config_deferred_rules()
-    test_boot_count_skips_deep_sleep_wake()
+    test_restart_count_skips_deep_sleep_wake()
     test_log_segment_paths()
     test_ota_header_guard()
     test_boot_session_log_contract()

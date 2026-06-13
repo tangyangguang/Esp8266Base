@@ -14,7 +14,7 @@ static uint32_t _loadBootCount(const char* invalidAction) {
     if (valid) {
         count = (uint32_t)strtoul(raw, nullptr, 10);
     } else if (found) {
-        ESP8266BASE_LOG_W("Boot", "boot_count_invalid value=%s action=%s",
+        ESP8266BASE_LOG_W("Boot", "restart_count_invalid value=%s action=%s",
                           raw, invalidAction ? invalidAction : "use_0");
     }
 
@@ -26,9 +26,9 @@ static uint32_t _loadAndIncrementBootCount() {
 
 #if ESP8266BASE_USE_SLEEP
     if (Esp8266BaseSleep::isDeepSleepWake()) {
-        // skip boot_count increment: periodic deep sleep wake is a normal resume path.
+        // skip restart_count increment: periodic deep sleep wake is a normal resume path.
         uint32_t count = _loadBootCount("skip_increment");
-        ESP8266BASE_LOG_I("Boot", "boot_count_skip reason=deep_sleep_wake value=%lu",
+        ESP8266BASE_LOG_I("Boot", "restart_count_skip reason=deep_sleep_wake value=%lu",
                           (unsigned long)count);
         return count;
     }
@@ -39,7 +39,7 @@ static uint32_t _loadAndIncrementBootCount() {
     if (count < 0xFFFFFFFFUL) {
         count++;
     } else {
-        ESP8266BASE_LOG_W("Boot", "boot_count_saturated value=%lu", (unsigned long)count);
+        ESP8266BASE_LOG_W("Boot", "restart_count_saturated value=%lu", (unsigned long)count);
     }
 
     char next[11];

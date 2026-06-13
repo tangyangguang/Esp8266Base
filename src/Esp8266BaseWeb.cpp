@@ -321,6 +321,12 @@ static bool _fileLogModeFromArg(const String& raw, Esp8266BaseFileLog::Mode& mod
         mode = Esp8266BaseFileLog::OFF;
         return true;
     }
+#if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_FILELOG_MODE_ERROR
+    if (raw == "error") {
+        mode = Esp8266BaseFileLog::ERROR;
+        return true;
+    }
+#endif
 #if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_FILELOG_MODE_WARN
     if (raw == "warn") {
         mode = Esp8266BaseFileLog::WARN;
@@ -386,6 +392,9 @@ static void _sendFileLogSystemSection() {
     Esp8266BaseWeb::sendChunk(Esp8266BaseFileLog::modeName());
     Esp8266BaseWeb::sendChunk("</p><form method=post action='/system/filelog' onsubmit=\"return once(this)\">");
     _sendFileLogModeOption("off", "Off", Esp8266BaseFileLog::OFF);
+#if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_FILELOG_MODE_ERROR
+    _sendFileLogModeOption("error", "ERROR", Esp8266BaseFileLog::ERROR);
+#endif
 #if ESP8266BASE_LOG_LEVEL <= ESP8266BASE_FILELOG_MODE_WARN
     _sendFileLogModeOption("warn", "WARN", Esp8266BaseFileLog::WARN);
 #endif
@@ -1284,6 +1293,7 @@ void Esp8266BaseWeb::_handleFileLogPost() {
     ESP8266BASE_LOG_W("Web ", "filelog_mode_requested old=%s new=%s",
                       Esp8266BaseFileLog::modeName(),
                       mode == Esp8266BaseFileLog::OFF ? "off" :
+                      mode == Esp8266BaseFileLog::ERROR ? "error" :
                       (mode == Esp8266BaseFileLog::WARN ? "warn" : "info"));
     bool ok = Esp8266BaseFileLog::setMode(mode);
     _redirect(ok ? "/system?filelog_saved=1" : "/system?error=filelog_save_failed");

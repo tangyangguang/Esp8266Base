@@ -40,30 +40,32 @@
 示例：
 
 ```cpp
+Esp8266BaseFileLog::setMode(Esp8266BaseFileLog::ERROR);
 Esp8266BaseFileLog::setMode(Esp8266BaseFileLog::WARN);
 Esp8266BaseFileLog::setMode(Esp8266BaseFileLog::INFO);
 Esp8266BaseFileLog::setMode(Esp8266BaseFileLog::OFF);
 ```
 
-文件日志运行时只支持三种模式：
+文件日志运行时只支持四种模式：
 
 | 模式 | 行为 |
 |---|---|
 | `OFF` | 不写新文件日志，不删除已有日志 |
+| `ERROR` | 只写 ERROR |
 | `WARN` | 只写 WARN/ERROR |
 | `INFO` | 写 INFO/WARN/ERROR |
 
 `DEBUG` 和 `VERBOSE` 不作为文件日志模式，public API 和 Web POST 都不能设置成功。当前模式保存到 `eb_filelog_mode`。
 
-`ESP8266BASE_LOG_LEVEL` 仍是编译期上限。`ESP8266BASE_FILELOG_DEFAULT_MODE` 只能是 OFF/WARN/INFO，且不能高于编译期上限；Web 也不会提供超过上限的模式。设置 WARN/INFO 时，FileLog 会确保 runtime level 至少达到对应等级，但不修改 Serial level。
+`ESP8266BASE_LOG_LEVEL` 仍是编译期上限。`ESP8266BASE_FILELOG_DEFAULT_MODE` 只能是 OFF/ERROR/WARN/INFO，且不能高于编译期上限；Web 也不会提供超过上限的模式。设置 ERROR/WARN/INFO 时，FileLog 会确保 runtime level 至少达到对应等级，但不修改 Serial level。
 
 path、单段大小、轮转段数、buffer 和 flush interval 是构建期资源策略：
 
 | 场景 | 默认行为 |
 |---|---|
-| `ESP8266BASE_FILELOG_DEFAULT_MODE=INFO` | 默认编译 512B 低优先级缓存 |
-| 默认 WARN/OFF | 不编译低优先级缓存，无 512B RAM 占用 |
-| WARN/ERROR | 始终立即写入文件，写入前先刷出已有缓存 |
+| `ESP8266BASE_FILELOG_DEFAULT_MODE=INFO` | INFO 模式默认编译 512B 低优先级缓存 |
+| 默认 ERROR/WARN/OFF | 不编译低优先级缓存，无 512B RAM 占用 |
+| ERROR/WARN | 始终立即写入文件，写入前先刷出已有缓存 |
 | `/logs` 页面读取 | 读取文件前先调用 `Esp8266BaseFileLog::flush()` |
 | OTA 成功、Web 重启、deep sleep | 重启/休眠前调用 `Esp8266BaseFileLog::flush()` |
 | Watchdog 超时重启 | 只写 RTC 标记，不写 LittleFS，避免系统已卡住时二次阻塞 |
@@ -192,7 +194,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 
 ```text
 [925][I][Boot] ============================================================
-[1055][I][Boot] boot_session_start boot_count=1
+[1055][I][Boot] boot_session_start restart_count=1
 [1062][I][Boot] boot_reason=power-on boot_desc=上电或外部复位
 [1070][I][Boot] firmware=full-demo version=1.0.0 free_heap=39.8 KB
 [1188][I][Boot] ============================================================
@@ -249,7 +251,7 @@ http://<device-ip>/logs
 页面显示：
 
 - FileLog 是否启用
-- 当前模式，例如 `WARN`
+- 当前模式，例如 `ERROR`
 - 路径
 - 轮转段数
 - buffer 状态
@@ -269,8 +271,8 @@ http://<device-ip>/logs
 ESP8266 推荐：
 
 ```ini
--D ESP8266BASE_FILELOG_DEFAULT_MODE=ESP8266BASE_FILELOG_MODE_WARN
+-D ESP8266BASE_FILELOG_DEFAULT_MODE=ESP8266BASE_FILELOG_MODE_ERROR
 -D ESP8266BASE_FILELOG_MAX_BYTES=16384
 ```
 
-4×16KB 通常足够定位现场问题，同时不会让 `/logs` 页面过慢。正式固件建议文件日志保持默认 WARN，磨损和页面读取成本都低；调试样例可通过 `ESP8266BASE_FILELOG_DEFAULT_MODE=ESP8266BASE_FILELOG_MODE_INFO` 使用 INFO，并启用 512B/2s 低优先级缓存减少 INFO 的小写入次数。日志特别多时可以调高单段大小，但会增加 LittleFS 占用和页面读取时间。
+4×16KB 通常足够定位现场问题，同时不会让 `/logs` 页面过慢。正式固件建议文件日志保持默认 ERROR，默认情况下只有错误日志才写 Flash；需要现场定位问题时再临时切到 WARN 或 INFO。INFO 会启用 512B/2s 低优先级缓存减少小写入次数，但仍不建议长期默认开启。日志特别多时可以调高单段大小，但会增加 LittleFS 占用和页面读取时间。

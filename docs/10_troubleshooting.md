@@ -145,9 +145,9 @@ time_synchronized actual_time=...
 
 处理：
 
-- 确认 `Esp8266BaseFileLog::mode()` 不是 `OFF`，或在 System 页面切到 WARN/INFO。
+- 确认 `Esp8266BaseFileLog::mode()` 不是 `OFF`，或在 System 页面切到 ERROR/WARN/INFO。
 - 确认 Config/LittleFS ready。
-- 确认当前模式是否过滤 INFO；WARN 模式只写 WARN/ERROR。
+- 确认当前模式是否过滤低级别日志；默认 ERROR 只写 ERROR，WARN 模式只写 WARN/ERROR。
 - 查看 `/logs` 页面显示的 path、max per file、segments。
 
 文件满时会轮转。极端异常时会截断当前文件恢复写入，允许丢少量日志但避免功能失效。

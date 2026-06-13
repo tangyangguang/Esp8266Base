@@ -99,7 +99,7 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | `eb_web_pass` | string | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 | 立即 |
 | `eb_wdt_count` | int32 | WDT 重启累计次数，超时重启后的正常启动阶段补写 | immediate |
 | `eb_boot_count` | uint32 string | 重启计数，库自动维护；上电、外部复位、软件重启和 WDT 恢复会递增，deep sleep 唤醒不递增；达到 4,294,967,295 后饱和 | immediate |
-| `eb_filelog_mode` | int32 | 文件日志运行模式，保存 OFF/WARN/INFO 对应整数值 | immediate |
+| `eb_filelog_mode` | int32 | 文件日志运行模式，保存 OFF/ERROR/WARN/INFO 对应整数值 | immediate |
 
 ---
 
@@ -142,7 +142,7 @@ Esp8266BaseConfig::setIntDeferred("app_counter", cnt);
 // handle() 会在后续 loop() 中自动刷盘
 ```
 
-`eb_boot_count` 是库保留 key，由 `Esp8266Base::begin()` 自动维护。上电、外部复位、软件重启和 WDT 恢复会读取、递增并立即写入；deep sleep 唤醒不递增，只沿用当前值，避免周期性休眠设备每次唤醒都写 Flash。内部用无符号十进制字符串保存，避免 `int32_t` 溢出；应用代码不要复用这个 key。
+`eb_boot_count` 是库保留 key，由 `Esp8266Base::begin()` 自动维护，语义是重启计数而不是每次唤醒计数。上电、外部复位、软件重启和 WDT 恢复会读取、递增并立即写入；deep sleep 唤醒不递增，只沿用当前值，避免周期性休眠设备每次唤醒都写 Flash。内部用无符号十进制字符串保存，避免 `int32_t` 溢出；应用代码不要复用这个 key。
 
 ### WiFi 配网保存凭证（立即写入）
 

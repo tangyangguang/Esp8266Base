@@ -459,7 +459,7 @@ void setup() {
     char heapBuf[16];
     Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
     ESP8266BASE_LOG_I("App ",
-                      "app_started boot_count=%ld wake_reason=%s previous_watchdog_reset=%s watchdog_reset_count=%lu free_heap=%s",
+                      "app_started restart_count=%ld wake_reason=%s previous_watchdog_reset=%s watchdog_reset_count=%lu free_heap=%s",
                       (long)g_bootCount,
                       Esp8266BaseSleep::wakeReason(),
                       Esp8266BaseWatchdog::wasWatchdogReset() ? "yes" : "no",

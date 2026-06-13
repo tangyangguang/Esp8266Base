@@ -68,7 +68,7 @@ pio run -e esp12f -t upload --upload-port /dev/cu.usbserial-120
 - 日志必须可读、字段清晰；大字节数使用 KB/MB；启动必须有 boot session 分割线。
 - WiFi 密码、Web Auth 密码和配置审计值按设计明文输出，不视为 bug。
 - NTP 同步后必须输出实际时间、uptime、boot time、millis 映射，并切换日志时间戳。
-- 文件日志只支持 OFF/WARN/INFO 运行模式；默认 WARN；WARN/ERROR 立即写文件；INFO 缓存由构建期资源策略决定。
+- 文件日志只支持 OFF/ERROR/WARN/INFO 运行模式；默认 ERROR；ERROR/WARN 立即写文件；INFO 缓存由构建期资源策略决定。
 - WiFi 无凭证进入 AP；有凭证连接失败时保持 STA 持续重连，不自动进 AP。
 - Web 表单必须防重复提交；危险操作必须二次确认；POST 成功后用 303 重定向。
 - OTA 使用 `Update.begin(ESP.getFreeSketchSpace())`，不要使用 ESP32 的 `UPDATE_SIZE_UNKNOWN`。

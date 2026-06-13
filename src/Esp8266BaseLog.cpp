@@ -92,7 +92,7 @@ void Esp8266BaseLog::beginBootSession(const char* firmware,
     char heapBuf[16];
     Esp8266BaseUtil::formatBytes(freeHeap, heapBuf, sizeof(heapBuf));
     log(1, "Boot", "============================================================");
-    log(1, "Boot", "boot_session_start boot_count=%lu", (unsigned long)bootCount);
+    log(1, "Boot", "boot_session_start restart_count=%lu", (unsigned long)bootCount);
     log(1, "Boot", "boot_reason=%s boot_desc=%s", reason, _bootReasonDesc(reason));
     log(1, "Boot", "firmware=%s version=%s free_heap=%s",
         firmware ? firmware : "",
