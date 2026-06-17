@@ -66,10 +66,8 @@ public:
     static bool isRunning();
 
     // 注册应用自定义路由（begin() 之后调用）
-    static bool addPage(const char* path, Esp8266BaseWebHandler handler);
     static bool addPage(const char* path, const char* title, Esp8266BaseWebHandler handler);
     static bool addApi (const char* path, Esp8266BaseWebHandler handler);
-    static bool addNavItem(const char* path, const char* title);
 
     // 应用 Web 信息架构配置（通常在 begin() 前调用）
     static void setDeviceName(const char* name);

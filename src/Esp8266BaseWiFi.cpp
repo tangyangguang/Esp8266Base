@@ -148,7 +148,6 @@ void Esp8266BaseWiFi::handle() {
         }
 
         case Esp8266BaseWiFiState::IDLE:
-        case Esp8266BaseWiFiState::FAILED:
         default:
             break;
     }
@@ -277,9 +276,6 @@ void Esp8266BaseWiFi::_startSTA(const char* ssid, const char* pass, bool keepAP)
 }
 
 void Esp8266BaseWiFi::_startAP() {
-    char apPass[32] = "";
-    Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_AP_PASS, apPass, sizeof(apPass), "");
-
     // Clean state before switching to AP
     WiFi.disconnect(true);
     delay(100);
@@ -290,11 +286,7 @@ void Esp8266BaseWiFi::_startAP() {
     int channel = 6;
     bool hidden = false;
 
-    if (strlen(apPass) > 0) {
-        WiFi.softAP(_apSSID, apPass, channel, hidden);
-    } else {
-        WiFi.softAP(_apSSID, nullptr, channel, hidden);
-    }
+    WiFi.softAP(_apSSID, nullptr, channel, hidden);
     _state = Esp8266BaseWiFiState::AP_CONFIG;
     char apIp[16];
     _formatIP(WiFi.softAPIP(), apIp, sizeof(apIp));

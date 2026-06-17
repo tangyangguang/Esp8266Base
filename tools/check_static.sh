@@ -39,9 +39,9 @@ for token in '/system/hostname' '/api/system/hostname' '重启生效'; do
   rg -n "$token" src docs README.md >/dev/null || fail "hostname Web/API documentation token missing: $token"
 done
 
-if rg -n 'eb_wdt_pending|ESP8266BASE_CFG_KEY_WDT_PENDING|旧行为|旧固件|旧无前缀|兼容旧|兼容标记' \
+if rg -n 'eb_wdt_pending|ESP8266BASE_CFG_KEY_WDT_PENDING|eb_ap_pass|ESP8266BASE_CFG_KEY_AP_PASS|eb_web_user|ESP8266BASE_CFG_KEY_WEB_USER|旧行为|旧固件|旧无前缀|兼容旧|兼容标记' \
   src README.md docs; then
-  fail "historical compatibility wording or WDT pending compatibility key found"
+  fail "historical compatibility wording, WDT pending key, or pseudo config key found"
 fi
 
 echo "[static] checking example log levels"

@@ -41,9 +41,7 @@
 // 库保留配置 key 统一使用 eb_ 前缀，业务项目不要复用。
 #define ESP8266BASE_CFG_KEY_WIFI_SSID    "eb_wifi_ssid"
 #define ESP8266BASE_CFG_KEY_WIFI_PASS    "eb_wifi_pass"
-#define ESP8266BASE_CFG_KEY_AP_PASS      "eb_ap_pass"
 #define ESP8266BASE_CFG_KEY_HOSTNAME     "eb_hostname"
-#define ESP8266BASE_CFG_KEY_WEB_USER     "eb_web_user"
 #define ESP8266BASE_CFG_KEY_WEB_PASS     "eb_web_pass"
 #define ESP8266BASE_CFG_KEY_WDT_COUNT    "eb_wdt_count"
 #define ESP8266BASE_CFG_KEY_BOOT_COUNT   "eb_boot_count"

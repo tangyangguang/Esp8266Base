@@ -305,8 +305,16 @@ def test_web_auth_contract() -> None:
         "docs/03_api_reference.md",
         "docs/06_web_ota.md",
     ]:
-        if "setAuth(" in read(path):
+        text = read(path)
+        if "setAuth(" in text:
             fail(f"old setAuth API must not remain in {path}")
+        if "addNavItem" in text:
+            fail(f"old addNavItem API must not remain in {path}")
+
+    if "addPage(const char* path, Esp8266BaseWebHandler handler)" in web_h:
+        fail("old title-less addPage overload must not remain")
+    if "ESP8266BASE_CFG_KEY_WEB_USER" in web_cpp or "eb_web_user" in api or "eb_web_user" in web_doc:
+        fail("persisted Web Auth username pseudo config must not remain")
 
     required = [
         (web_h, "setDefaultAuth"),
@@ -567,6 +575,17 @@ def test_web_home_contract() -> None:
                     "/reboot/filelog", "<h2>Tools</h2>"]:
             if old in text:
                 fail(f"{old} must not remain in {label}")
+    wifi_cpp = read("src/Esp8266BaseWiFi.cpp")
+    config_h = read("src/Esp8266BaseConfig.h")
+    config_doc = read("docs/05_config_storage.md")
+    networking = read("docs/08_networking.md")
+    for text, label in [(wifi_h, "wifi_h"), (wifi_cpp, "wifi_cpp"), (config_h, "config_h"),
+                        (config_doc, "config_doc"), (networking, "networking"), (api, "api")]:
+        for old in ["Esp8266BaseWiFiState::FAILED", "ESP8266BASE_CFG_KEY_AP_PASS", "eb_ap_pass"]:
+            if old in text:
+                fail(f"{old} must not remain in {label}")
+    if "FAILED" in wifi_h:
+        fail("unreachable WiFi FAILED state must not remain")
     require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::HOME, "Status");',
                   "Web doc Status nav label")
     require_token(web_doc, 'Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel::SYSTEM, "System");',

@@ -1,24 +1,21 @@
 # AGENTS.md
 
-本文件是 Codex / 代码代理在本仓库工作的核心规范。详细行为以 `README.md` 和 `docs/` 为准；代码、文档、测试和方案讨论都必须遵守本文件。
+本文件是 Codex / 代码代理在本仓库工作的项目级规范。详细行为以 `README.md` 和 `docs/` 为准；如果本文件与代码或文档不一致，先核实事实并提出修正方案，不要凭印象修改。
 
-## 1. 项目立场
+## 1. 项目边界
 
 - Esp8266Base 是 **ESP8266-only** Arduino 基础库，只服务 ESP8266 / ESP-12F。
 - 禁止新增 ESP32 支持、`#ifdef ESP32`、跨芯片 HAL、事件总线、通用调度框架。
 - 优先级：稳定、低 RAM、可诊断、易集成。
-- 当前按 1.0.0 对外发布标准维护；不为旧方案保留兼容包袱。
+- 当前按 1.0.0 发布标准维护；不为旧方案保留兼容包袱，除非用户明确要求重新评估兼容策略。
 
-## 2. 反馈处理原则
+## 2. 工作原则
 
 - 业务项目反馈必须先判断是否属于本库的通用问题或基础能力。
-- 属于本库职责时，在本库中根治，不要求业务项目绕开。
+- 属于本库职责时，在本库中根治；不要求业务项目绕开。
 - 不属于本库职责时，说明边界、原因和业务侧处理方式。
-- 新需求、bug、优化都不做临时补丁、局部绕路、旧行为兼容层。
-- 即使影响大量代码、API、示例和文档，也只做当前最优方案和最佳实践。
-- 实施前必须先读相关代码和文档，不能凭印象修改。
-
-一句话：**先定边界，再做根治；拒绝补丁式修修补补。**
+- 新需求、bug、优化不做临时补丁、局部绕路或旧行为兼容层。
+- 实施前必须先读相关代码和文档；行为变化必须同步 README、对应 docs、API 参考和示例。
 
 ## 3. 常用命令
 
@@ -27,56 +24,56 @@ tools/test_all.sh
 tools/test_all.sh --all-envs
 pio run -e esp12f
 cd examples/full_demo && pio run -e esp12f
+```
+
+硬件上传、串口监视、OTA、deep sleep、GPIO 按钮验收属于人工或需用户明确确认的操作。上传示例：
+
+```bash
 pio run -e esp12f -t upload --upload-port /dev/cu.usbserial-120
 ```
 
-串口监视优先用 Python；macOS 上 `pio device monitor` 可能有 termios 问题。
+macOS 上 `pio device monitor` 可能有 termios 问题；串口监视优先用 Python。
 
 ## 4. 测试原则
 
 - `tools/test_all.sh` 是默认测试入口。
 - 默认测试不烧录、不访问串口、不依赖 WiFi 或 ESP12F 在线。
-- 默认测试覆盖格式检查、静态一致性、轻量逻辑检查、根项目和全部 examples 的 `esp12f` 编译。
-- 硬件烧录、配网、OTA、deep sleep、GPIO 按钮属于人工或单独硬件验收。
+- 默认测试覆盖 `git diff --check`、静态一致性、轻量逻辑检查、根项目和全部 examples 的 `esp12f` 编译。
+- 扩展检查运行 `tools/test_all.sh --all-envs`。
 - 新增可自动验证的规则，优先放进 `tools/check_static.sh` 或 `tools/check_logic.py`。
 
 ## 5. 架构硬约束
 
-- 所有模块使用静态类；不实例化，不使用虚函数，不使用 `new` / `malloc`。
+- 库模块使用静态类；不实例化，不使用虚函数，不使用 `new` / `malloc`。
 - 入口固定为 `Esp8266Base::begin()` 和 `Esp8266Base::handle()`。
-- 初始化顺序：`Log → Sleep → Config(LittleFS) → FileLog → WiFi → Watchdog → Web → OTA → logDiagnostics()`。
-- `handle()` 顺序：`Config → FileLog → WiFi → NTP/mDNS trigger → NTP → mDNS → Web → Watchdog`。
-- NTP 和 mDNS 只在 WiFi STA 连接后由 `handle()` 触发。
-- 模块依赖必须单向，禁止循环依赖。
+- 初始化顺序和 `handle()` 顺序以 `docs/02_architecture.md` 为准；NTP 和 mDNS 只在 WiFi STA 连接后由 `handle()` 触发。
+- 模块依赖必须单向，禁止循环依赖；不要让底层模块依赖业务代码。
 
 ## 6. RAM 与实现硬约束
 
-- 库自身全局静态 RAM 按 profile 控制：核心裁剪 <1.25KB，全模块默认 <=2.9KB，全模块 INFO FileLog <=3.4KB。
-- 禁止单个全局/静态缓冲超过 512B。
+- RAM 预算以 `docs/04_memory_budget.md` 为唯一权威来源。
+- 禁止单个全局/静态缓冲超过 512B；Web handler 临时缓冲优先 <= 64B。
 - HTML 必须放 `PROGMEM`，不得放 DRAM。
 - Web 必须用 `sendContent_P()` / `sendChunk()` 流式输出，不拼整页 `String`。
 - 禁止 `std::function`、STL 容器、递归。
 - 模块全局状态不得保存 `String`；使用固定长度 `char[]`。
-- 新增模块或明显增加 RAM 时，必须同步 `docs/04_memory_budget.md`。
-- 目标 free heap：正常联网 Web 空闲 >= 24KB；Web 页面 >= 18KB；OTA 中 >= 12KB；AP 配网 >= 18KB。
+- 新增模块或明显增加常驻 RAM 时，必须同步 `docs/04_memory_budget.md`。
 
 ## 7. 关键行为规范
 
-- 配置存储使用 LittleFS `/cfg_<key>`；库保留 key 必须使用 `eb_` 前缀，业务项目不得复用。
+- 配置存储使用 LittleFS `/cfg_<key>`；库保留 key 以 `docs/05_config_storage.md` 为准，必须使用 `eb_` 前缀，业务项目不得复用。
 - 配置写入必须写前比较；高频计数使用 deferred；正常重启、deep sleep、OTA 成功前 flush 配置和文件日志；WDT 超时异常路径只写 RTC 标记，不写 LittleFS。
 - LittleFS 挂载失败默认不格式化，只有 `ESP8266BASE_CFG_FORMAT_ON_FAIL=1` 才允许。
-- 日志必须可读、字段清晰；大字节数使用 KB/MB；启动必须有 boot session 分割线。
-- WiFi 密码、Web Auth 密码和配置审计值按设计明文输出，不视为 bug。
-- NTP 同步后必须输出实际时间、uptime、boot time、millis 映射，并切换日志时间戳。
-- 文件日志只支持 OFF/ERROR/WARN/INFO 运行模式；默认 ERROR；ERROR/WARN 立即写文件；INFO 缓存由构建期资源策略决定。
 - WiFi 无凭证进入 AP；有凭证连接失败时保持 STA 持续重连，不自动进 AP。
 - Web 表单必须防重复提交；危险操作必须二次确认；POST 成功后用 303 重定向。
 - OTA 使用 `Update.begin(ESP.getFreeSketchSpace())`，不要使用 ESP32 的 `UPDATE_SIZE_UNKNOWN`。
 - deep sleep 后 Web 不响应是正常行为；唤醒依赖 GPIO16→RST 或外部复位。
+- WiFi 密码、Web Auth 密码和配置审计值明文日志是当前设计，不按 bug 处理；但不要把含敏感值的日志提交、公开或外发。
 
 ## 8. 文档、分区与发布
 
-- 代码行为变化必须同步文档；文档描述当前正确行为，不记录历史过程。
 - 文档使用中文；API、宏、路径保持英文原文。
+- 文档描述当前正确行为，不记录历史过程。
 - ESP-12F 默认使用 `partitions/esp8266-4mb-2mfs.ld`，并必须保留 `INCLUDE "local.eagle.app.v6.common.ld"`。
-- 默认发布检查运行 `tools/test_all.sh`，扩展检查运行 `tools/test_all.sh --all-envs`。
+- 涉及 ESP8266 Arduino Core、PlatformIO、LittleFS、Update、硬件引脚或协议细节时，优先依据权威资料；无法核实时明确说明不确定性和风险。
+- 发布前默认运行 `tools/test_all.sh`；需要扩展验证时运行 `tools/test_all.sh --all-envs`。

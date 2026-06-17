@@ -101,7 +101,6 @@ static void printStatus() {
         case Esp8266BaseWiFiState::CONNECTING: stateStr = "CONNECTING"; break;
         case Esp8266BaseWiFiState::CONNECTED:  stateStr = "CONNECTED";  break;
         case Esp8266BaseWiFiState::AP_CONFIG:  stateStr = "AP_CONFIG";  break;
-        case Esp8266BaseWiFiState::FAILED:     stateStr = "FAILED";     break;
         default:                               stateStr = "IDLE";       break;
     }
 

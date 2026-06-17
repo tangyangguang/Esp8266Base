@@ -87,7 +87,7 @@ void setup() {
     Esp8266Base::begin();
 
     // 注册自定义路由（必须在 begin() 之后，Web 服务已启动）
-    Esp8266BaseWeb::addPage("/status",     handleStatusPage);
+    Esp8266BaseWeb::addPage("/status", "Status", handleStatusPage);
     Esp8266BaseWeb::addApi ("/api/status", handleStatusApi);
 }
 

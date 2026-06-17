@@ -69,7 +69,7 @@ void setup() {
     Esp8266Base::setFirmwareInfo("fan-ctrl", "1.0.0");
     Esp8266Base::begin();
 
-    Esp8266BaseWeb::addPage("/fan", handleFanPage);
+    Esp8266BaseWeb::addPage("/fan", "Fan", handleFanPage);
     Esp8266BaseWeb::addApi("/api/fan", handleFanApi);
 }
 
@@ -284,9 +284,7 @@ static void enableConfigReadAudit(bool enabled);
 |-----|------|
 | `eb_wifi_ssid` | WiFi STA SSID |
 | `eb_wifi_pass` | WiFi STA 密码 |
-| `eb_ap_pass` | AP 配网密码 |
 | `eb_hostname` | 设备持久化 hostname，覆盖 `ESP8266BASE_DEFAULT_HOSTNAME` |
-| `eb_web_user` | Web Auth 持久化用户名，覆盖默认用户名 |
 | `eb_web_pass` | Web Auth 持久化密码，`/auth` 修改后写入，覆盖默认密码 |
 | `eb_wdt_count` | WDT 重启累计次数 |
 | `eb_boot_count` | 重启计数，无符号十进制字符串；不是每次唤醒计数；上电、外部复位、软件重启和 WDT 恢复会递增，deep sleep 唤醒不递增，最大 4,294,967,295，达到上限后饱和 |
@@ -319,7 +317,7 @@ ESP.restart();
 
 ```cpp
 enum class Esp8266BaseWiFiState : uint8_t {
-    IDLE, CONNECTING, CONNECTED, AP_CONFIG, FAILED
+    IDLE, CONNECTING, CONNECTED, AP_CONFIG
 };
 ```
 
@@ -370,7 +368,7 @@ static const char* apSSID();
 | 快速重试次数 | 3（`ESP8266BASE_WIFI_RETRY_FAST_COUNT`） |
 | 慢速重试间隔 | 60000ms（`ESP8266BASE_WIFI_RETRY_SLOW`） |
 | AP SSID | `ESP8266-Config-<ChipID后4位>` |
-| AP 密码 | 空（开放），可通过 key `eb_ap_pass` 配置 |
+| AP 密码 | 空（开放 AP） |
 
 ---
 
@@ -415,12 +413,10 @@ static void handle();
 `server.handleClient()`，每轮调用。
 
 ```cpp
-static bool addPage(const char* path, Esp8266BaseWebHandler handler);
 static bool addPage(const char* path, const char* title, Esp8266BaseWebHandler handler);
 static bool addApi (const char* path, Esp8266BaseWebHandler handler);
-static bool addNavItem(const char* path, const char* title);
 ```
-注册应用路由。必须在 `Esp8266Base::begin()` 之后调用。`addPage` 注册 GET 并默认加入业务导航；带 `title` 的重载用于设置导航标签。`addNavItem` 用于覆盖已注册页面的导航标签。`addApi` 同时响应 GET 和 POST。路径必须以 `/` 开头，长度小于 24 字符，只允许字母、数字、`/`、`-`、`_`、`.`；上限分别 4 / 6 个。
+注册应用路由。必须在 `Esp8266Base::begin()` 之后调用。`addPage` 注册 GET 并使用 `title` 作为业务导航标签；`addApi` 同时响应 GET 和 POST。路径必须以 `/` 开头，长度小于 24 字符，只允许字母、数字、`/`、`-`、`_`、`.`；上限分别 4 / 6 个。
 
 ```cpp
 static void setDeviceName(const char* name);
@@ -481,7 +477,7 @@ static bool isRunning();
 |---:|---|---|
 | 1 | `ESP8266BASE_WEB_AUTH_USER/PASS` | 编译期默认值 |
 | 2 | `setDefaultAuth(user, pass)` | 业务代码默认值，覆盖编译期默认值 |
-| 3 | `eb_web_user` / `eb_web_pass` | 设备持久化值，覆盖所有默认值 |
+| 3 | `eb_web_pass` | 设备持久化密码，覆盖默认密码 |
 
 内置 `/auth` 页面当前只修改 `eb_web_pass`，不修改用户名。保存成功后运行时立即使用新密码；`clearAll()` 删除配置后恢复为 `setDefaultAuth()` 或编译期默认值。
 

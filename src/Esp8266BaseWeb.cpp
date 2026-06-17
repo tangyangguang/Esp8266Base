@@ -523,10 +523,6 @@ bool Esp8266BaseWeb::isRunning() {
     return _running;
 }
 
-bool Esp8266BaseWeb::addPage(const char* path, Esp8266BaseWebHandler handler) {
-    return addPage(path, nullptr, handler);
-}
-
 bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWebHandler handler) {
     if (!path || !handler) return false;
     if (!_running) {
@@ -610,21 +606,6 @@ bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     return true;
 }
 
-bool Esp8266BaseWeb::addNavItem(const char* path, const char* title) {
-    if (!_isValidPath(path) || !title || !title[0]) return false;
-    for (uint8_t i = 0; i < _pageCount; i++) {
-        if (strcmp(_pages[i].path, path) == 0) {
-            strncpy(_pages[i].title, title, sizeof(_pages[i].title) - 1);
-            _pages[i].title[sizeof(_pages[i].title) - 1] = '\0';
-            _pages[i].showInNav = true;
-            ESP8266BASE_LOG_I("Web ", "app_nav_registered path=%s title=%s", path, _pages[i].title);
-            return true;
-        }
-    }
-    ESP8266BASE_LOG_W("Web ", "addNavItem path not registered");
-    return false;
-}
-
 void Esp8266BaseWeb::setDeviceName(const char* name) {
     if (!name) return;
     strncpy(_deviceName, name, sizeof(_deviceName) - 1);
@@ -703,25 +684,17 @@ bool Esp8266BaseWeb::verifyAuth() {
 }
 
 void Esp8266BaseWeb::_loadPersistedAuth() {
-    char user[24] = "";
     char pass[24] = "";
-    bool userFound = false;
     bool passFound = false;
     if (Esp8266BaseConfig::isReady()) {
-        userFound = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WEB_USER, user, sizeof(user), "");
         passFound = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WEB_PASS, pass, sizeof(pass), "");
-    }
-    if (userFound && user[0]) {
-        strncpy(_authUser, user, sizeof(_authUser) - 1);
-        _authUser[sizeof(_authUser) - 1] = '\0';
     }
     if (passFound && pass[0]) {
         strncpy(_authPass, pass, sizeof(_authPass) - 1);
         _authPass[sizeof(_authPass) - 1] = '\0';
     }
-    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s password=%s user_source=%s pass_source=%s password_length=%u",
+    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s password=%s pass_source=%s password_length=%u",
                       _authUser, _authPass,
-                      (userFound && user[0]) ? "persisted" : "default",
                       (passFound && pass[0]) ? "persisted" : "default",
                       (unsigned)strlen(_authPass));
 }

@@ -106,7 +106,7 @@ Esp8266BaseWeb::addPage("/sensor", "Sensor", handleSensorPage);
 |---:|---|---|
 | 1 | `ESP8266BASE_WEB_AUTH_USER/PASS` | 编译期默认用户名和密码 |
 | 2 | `Esp8266BaseWeb::setDefaultAuth(user, pass)` | 业务代码默认值，必须在 `Esp8266Base::begin()` 前设置 |
-| 3 | `eb_web_user` / `eb_web_pass` | 设备持久化值，优先级最高 |
+| 3 | `eb_web_pass` | 设备持久化密码，优先级最高 |
 
 `setDefaultAuth()` 不是强制覆盖用户保存的密码。设备上已经保存 `eb_web_pass` 时，启动后会优先使用保存值。Web 已启动后再调用 `setDefaultAuth()` 会被忽略。
 

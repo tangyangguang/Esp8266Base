@@ -23,7 +23,6 @@ NTP 和 mDNS 不在 `begin()` 中启动，而是在 `handle()` 中检测到 WiFi
 |---|---|
 | `eb_wifi_ssid` | STA SSID |
 | `eb_wifi_pass` | STA 密码 |
-| `eb_ap_pass` | 配网 AP 密码，空表示开放 AP |
 
 WiFi 密码会在日志中明文输出，并带 `password_length`，用于现场观察和调试。
 
@@ -46,7 +45,7 @@ config_ap_started ssid=ESP8266-Config-18E7 ip=192.168.4.1 channel=6
 - SSID：`ESP8266-Config-XXXX`
 - IP：`192.168.4.1`
 - channel：6
-- 密码：默认空，可通过 `eb_ap_pass` 配置
+- 密码：空，开放 AP
 
 连接 AP 后访问 `http://192.168.4.1/wifi` 保存 STA 凭证。
 
