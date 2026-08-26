@@ -44,6 +44,15 @@ enum class Esp8266BaseMQTTDisconnectReason : uint8_t {
     UNKNOWN
 };
 
+enum class Esp8266BaseMQTTClientError : uint8_t {
+    SUCCESS = 0,
+    OUT_OF_MEMORY = 1,
+    MAX_RETRIES = 2,
+    MALFORMED_PARAMETER = 3,
+    MISC_ERROR = 4,
+    UNKNOWN = 255
+};
+
 struct Esp8266BaseMQTTConfig {
     const char* host;
     uint16_t port;
@@ -66,6 +75,13 @@ typedef void (*Esp8266BaseMQTTMessageCallback)(uint8_t qos, bool dup, bool retai
                                                uint16_t packetId, const char* topic,
                                                const uint8_t* payload, size_t len,
                                                size_t index, size_t total);
+// returnCodes 是只读 uint8_t 数组，仅在回调期间有效；0x80 表示订阅被拒绝。
+typedef void (*Esp8266BaseMQTTSubscribeAckCallback)(uint16_t packetId,
+                                                    const uint8_t* returnCodes,
+                                                    size_t length);
+typedef void (*Esp8266BaseMQTTPublishAckCallback)(uint16_t packetId);
+typedef void (*Esp8266BaseMQTTClientErrorCallback)(uint16_t packetId,
+                                                   Esp8266BaseMQTTClientError error);
 
 class Esp8266BaseMQTT {
 public:
@@ -74,7 +90,10 @@ public:
     static bool configure(const Esp8266BaseMQTTConfig& config);
     static void setCallbacks(Esp8266BaseMQTTConnectedCallback connected,
                              Esp8266BaseMQTTDisconnectedCallback disconnected,
-                             Esp8266BaseMQTTMessageCallback message);
+                             Esp8266BaseMQTTMessageCallback message,
+                             Esp8266BaseMQTTSubscribeAckCallback subscribeAck = nullptr,
+                             Esp8266BaseMQTTPublishAckCallback publishAck = nullptr,
+                             Esp8266BaseMQTTClientErrorCallback clientError = nullptr);
     static bool begin();
     static void handle();
 
@@ -92,6 +111,9 @@ public:
     static uint32_t nextAttemptAt();
     static Esp8266BaseMQTTDisconnectReason lastDisconnectReason();
     static const char* lastDisconnectReasonName();
+    static int lastTlsErrorCode();
+    // 指向内部固定缓冲；下一次连接尝试会清空，调用方不得保存或修改。
+    static const char* lastTlsErrorText();
 
     // 由 OTA 编排调用。先停止消息分发，再尝试正常 DISCONNECT；必要时强制释放 TLS。
     static bool pauseForOTA();
@@ -125,14 +147,21 @@ private:
     static Esp8266BaseMQTTConnectedCallback _connectedCallback;
     static Esp8266BaseMQTTDisconnectedCallback _disconnectedCallback;
     static Esp8266BaseMQTTMessageCallback _messageCallback;
+    static Esp8266BaseMQTTSubscribeAckCallback _subscribeAckCallback;
+    static Esp8266BaseMQTTPublishAckCallback _publishAckCallback;
+    static Esp8266BaseMQTTClientErrorCallback _clientErrorCallback;
 
     static void _scheduleRetry();
+    static bool _isDue(uint32_t now, uint32_t due);
     static void _disconnectForGate(Esp8266BaseMQTTState waitingState);
     static void _onConnect(bool sessionPresent);
     static void _onDisconnect(uint8_t reason);
     static void _onMessage(uint8_t qos, bool dup, bool retain, uint16_t packetId,
                            const char* topic, const uint8_t* payload,
                            size_t len, size_t index, size_t total);
+    static void _onSubscribeAck(uint16_t packetId, const uint8_t* returnCodes, size_t length);
+    static void _onPublishAck(uint16_t packetId);
+    static void _onClientError(uint16_t packetId, uint8_t error);
 };
 
 #endif

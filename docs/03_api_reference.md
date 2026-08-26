@@ -502,7 +502,7 @@ static bool isRunning();
 | `/api/system/hostname` | POST | 保存 hostname 表单参数 `hostname`（需要 Basic Auth，重启生效） |
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
 | `/reboot` | POST | flush Config 后重启 |
-| `/health` | GET | 固定 JSON：firmware/version/uptime/heap/maxBlock/wifi/ip/ntp/MQTT 状态与 attempt/last reason/WDT/OTA（无需认证，不含敏感配置） |
+| `/health` | GET | 固定 JSON：firmware/version/uptime/heap/maxBlock/wifi/ip/ntp/MQTT 状态、attempt、last reason、TLS error code、WDT/OTA（无需认证，不含错误长文本和敏感配置） |
 
 页面式路由和未知路径使用 Basic Auth 挑战；未知路径认证通过后返回 404。`/api/system/hostname` 未认证时返回 JSON 401，不发送 `WWW-Authenticate`，调用方需要显式提供 `Authorization` header。`/health` 保持免认证。
 
@@ -542,12 +542,15 @@ void handleSensorPage() {
 static bool configure(const Esp8266BaseMQTTConfig& config);
 static void setCallbacks(Esp8266BaseMQTTConnectedCallback connected,
                          Esp8266BaseMQTTDisconnectedCallback disconnected,
-                         Esp8266BaseMQTTMessageCallback message);
+                         Esp8266BaseMQTTMessageCallback message,
+                         Esp8266BaseMQTTSubscribeAckCallback subscribeAck = nullptr,
+                         Esp8266BaseMQTTPublishAckCallback publishAck = nullptr,
+                         Esp8266BaseMQTTClientErrorCallback clientError = nullptr);
 static bool begin();
 static void handle();
 ```
 
-`configure()` 必须在 `Esp8266Base::begin()` 前调用。必需字段是 host、非零 port、clientId、非零 keepAliveSeconds 和 `BearSSL::X509List` trust anchor；缺失时返回 `false`，主入口 `begin()` 也返回失败并记录 `missing_required_config`。短字符串复制到固定缓冲；trust anchor 与可选 LWT payload 由业务持有并须覆盖整个 MQTT 生命周期。
+`configure()` 必须在 `Esp8266Base::begin()` 前调用。必需字段是 host、非零 port、clientId、非零 keepAliveSeconds 和 `BearSSL::X509List` trust anchor；password 非空但 username 为空、或 LWT payload 非空但 willTopic 为空也会拒绝。短字符串复制到固定缓冲；trust anchor 与可选 LWT payload 由业务持有并须覆盖整个 MQTT 生命周期。
 
 ```cpp
 static uint16_t publish(const char* topic, uint8_t qos, bool retain,
@@ -557,7 +560,7 @@ static uint16_t publish(const char* topic, uint8_t qos, bool retain,
 static uint16_t subscribe(const char* topic, uint8_t qos);
 ```
 
-支持 QoS 0/1/2；未连接、OTA 暂停、空参数或非法 QoS 返回 0。LWT 通过 `Esp8266BaseMQTTConfig::willTopic/willPayload/willQos/willRetain` 配置。connected callback 每次成功连接都会调用，业务必须在其中重新订阅；message callback 保留上游分块参数 `len/index/total`，payload 不保证以 `\0` 结尾。
+支持 QoS 0/1/2；未连接、OTA 暂停、空参数或非法 QoS 返回 0。LWT 通过 `Esp8266BaseMQTTConfig::willTopic/willPayload/willQos/willRetain` 配置。connected callback 每次成功连接都会调用，业务必须在其中重新订阅；subscribeAck 提供 packetId 和固定 `uint8_t` return codes，`0x80` 表示拒绝；publishAck 对 QoS1 为 PUBACK、QoS2 为 PUBCOMP；clientError 使用 `Esp8266BaseMQTTClientError` 稳定枚举。message callback 保留上游分块参数 `len/index/total`。
 
 ```cpp
 static bool connected();
@@ -568,9 +571,11 @@ static uint32_t attemptCount();
 static uint32_t nextAttemptAt();
 static Esp8266BaseMQTTDisconnectReason lastDisconnectReason();
 static const char* lastDisconnectReasonName();
+static int lastTlsErrorCode();
+static const char* lastTlsErrorText();
 ```
 
-只读诊断不返回 broker、clientId、用户名、密码或证书。状态包括 `UNCONFIGURED/WAITING_WIFI/WAITING_TIME/BACKOFF/CONNECTING/CONNECTED/PAUSED_OTA`。`pauseForOTA()`、`resumeAfterOTAFailure()`、`keepPausedAfterOTASuccess()` 是 OTA 编排接口，业务通常不直接调用。
+只读诊断不返回 broker、clientId、用户名、密码或证书。TLS code/detail 在 BearSSL transport 释放前捕获；text 指向内部 96B 固定缓冲，并在下一轮连接前清空，不得长期保存。`/health` 只提供 TLS code。状态包括 `UNCONFIGURED/WAITING_WIFI/WAITING_TIME/BACKOFF/CONNECTING/CONNECTED/PAUSED_OTA`。
 
 基础库 API 和状态只保存固定函数指针；传给 `espMqttClient 1.7.3` 后，上游内部 callback 包装、出站队列、证书解析和 TLS 会话仍可能使用动态堆。MQTT 收发缓冲保持上游默认值，BearSSL 缓冲为 4096/1024。
 

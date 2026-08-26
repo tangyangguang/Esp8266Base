@@ -110,7 +110,7 @@ Config 正式配置写入必须使用安全策略：
 tools/test_all.sh
 ```
 
-`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、静态/逻辑检查、根项目和全部示例 `esp12f` 编译，包括完整模式与 `mqtt_terminal`。`--all-envs` 还验证可用的 `nodemcuv2` 环境。
+`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、源码契约/顺序检查、wrap-safe due 与有界退避纯策略检查、根项目和全部示例编译。它不动态验证 DNS/TLS、实际 MQTT 状态迁移、SUBACK/PUBACK 或 OTA；这些仍需真机和真实测试 broker。
 
 硬件：
 

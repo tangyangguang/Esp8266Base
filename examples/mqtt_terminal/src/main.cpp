@@ -46,6 +46,24 @@ static void onMqttDisconnected(Esp8266BaseMQTTDisconnectReason reason) {
     ESP8266BASE_LOG_W("App ", "mqtt_disconnected reason=%u", (unsigned)reason);
 }
 
+static void onMqttSubscribeAck(uint16_t packetId, const uint8_t* returnCodes, size_t length) {
+    bool accepted = length > 0;
+    for (size_t i = 0; i < length; i++) {
+        if (returnCodes[i] == 0x80U) accepted = false;
+    }
+    ESP8266BASE_LOG_I("App ", "mqtt_suback packet_id=%u accepted=%s count=%u",
+                      (unsigned)packetId, accepted ? "yes" : "no", (unsigned)length);
+}
+
+static void onMqttPublishAck(uint16_t packetId) {
+    ESP8266BASE_LOG_I("App ", "mqtt_publish_ack packet_id=%u", (unsigned)packetId);
+}
+
+static void onMqttClientError(uint16_t packetId, Esp8266BaseMQTTClientError error) {
+    ESP8266BASE_LOG_E("App ", "mqtt_client_error packet_id=%u error=%u",
+                      (unsigned)packetId, (unsigned)error);
+}
+
 static void onMqttMessage(uint8_t qos, bool dup, bool retain, uint16_t packetId,
                           const char* topic, const uint8_t* payload,
                           size_t len, size_t index, size_t total) {
@@ -68,7 +86,8 @@ void setup() {
     config.cleanSession = true;
     config.trustAnchors = &mqttTrustAnchor;
     Esp8266BaseMQTT::configure(config);
-    Esp8266BaseMQTT::setCallbacks(onMqttConnected, onMqttDisconnected, onMqttMessage);
+    Esp8266BaseMQTT::setCallbacks(onMqttConnected, onMqttDisconnected, onMqttMessage,
+                                  onMqttSubscribeAck, onMqttPublishAck, onMqttClientError);
 
     Esp8266Base::begin();
 }

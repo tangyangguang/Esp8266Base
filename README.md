@@ -201,9 +201,11 @@ OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Bas
 
 正式智能终端设置 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1`。它保留 `GET /` 极小入口、WiFi/Auth、Health、`POST /ota` 与显式容量的应用路由；不编译完整首页、Logs、System、hostname、reboot、导航或 `GET /ota`。AP 配网时 `/` 返回 `303 /wifi`，STA 时返回 `303 /health`。应用页/API 容量设为 `0` 时不保留对应路由数组。
 
-MQTT 连接配置必须在 `Esp8266Base::begin()` 前通过 `Esp8266BaseMQTT::configure()` 提供。host、clientId、用户名/密码和 LWT topic 会复制到固定缓冲；`BearSSL::X509List` trust anchor 与可选 LWT payload 由业务长期持有。配置可来自业务的私有构建配置或 `Esp8266BaseConfig`，库不新增 MQTT 持久化 key，也不接受不安全 TLS。不要把真实 broker 凭据写入仓库。
+MQTT 连接配置必须在 `Esp8266Base::begin()` 前通过 `Esp8266BaseMQTT::configure()` 提供。host、clientId、用户名/密码和 LWT topic 会复制到固定缓冲；password 非空时 username 必须非空，LWT payload 非空时 willTopic 必须非空。`BearSSL::X509List` trust anchor 与可选 LWT payload 由业务长期持有并覆盖整个 MQTT 生命周期。配置可来自业务的私有构建配置或 `Esp8266BaseConfig`，库不新增 MQTT 持久化 key，也不接受不安全 TLS。不要把真实 broker 凭据写入仓库。
 
 MQTT 使用 `bertmelis/espMqttClient 1.7.3` 同步 TLS 客户端。PlatformIO 构建需加入该依赖、`ESP32Async/ESPAsyncTCP 2.0.0`（上游 1.7.3 的显式 ESP8266 依赖）和 `lib_ldf_mode = deep+`，见 `examples/mqtt_terminal`。库不定义 `EMC_RX_BUFFER_SIZE`/`EMC_TX_BUFFER_SIZE`，并把 BearSSL 缓冲保持为 `4096/1024`。第三方会为 MQTT 出站队列、callback 包装、证书解析和 TLS 会话使用动态内存；基础库自身不调用 `new`/`malloc`。ESP8266 底层 DNS/TCP/TLS connect 单次尝试仍可能阻塞到网络超时，这是同步安全客户端的已知边界，外围状态机和退避不会忙循环。
+
+连接回调之外还可注册 SUBACK、publish acknowledgement 和 client error 回调。SUBACK return code `0x80` 表示 broker 拒绝订阅；publish acknowledgement 对 QoS1 对应 PUBACK、对 QoS2 对应 PUBCOMP。TLS 失败会在 BearSSL transport 释放前保存 code/detail，`lastTlsErrorCode()`、`lastTlsErrorText()` 和断线日志可用于排障；`/health` 只输出错误码。每次新连接前会清除旧 TLS 错误。
 
 OTA 仍只使用 `Esp8266BaseOTA`。业务 prepare callback 先检查执行器是否安全；通过后基础库自动停止 MQTT 消息分发并断开 MQTT/TLS，再调用 `Update.begin()`。任何失败恢复 Watchdog 与 MQTT 重连许可；成功保持 MQTT 关闭、flush 配置/日志并重启。业务不再需要自行释放基础 MQTT 模块，但仍负责执行器安全检查。
 
@@ -229,7 +231,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 tools/test_all.sh
 ```
 
-默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、静态和逻辑检查，并编译根项目及全部示例的 `esp12f` 环境；`mqtt_terminal` 独立覆盖正式模式。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
+默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、源码契约/顺序检查、纯退避策略检查，并编译根项目及全部示例的 `esp12f` 环境；`mqtt_terminal` 独立覆盖正式模式。它不动态验证 DNS/TLS、实际 MQTT 状态迁移、SUBACK/PUBACK 或 OTA。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
 
 ```bash
 tools/test_all.sh --all-envs

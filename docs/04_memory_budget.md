@@ -43,7 +43,7 @@
 | Esp8266BaseWeb | <= 1.20KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + auth/device/home/hostname/firmware/title/labels/active request 状态；页面临时缓冲在栈上 |
 | Esp8266BaseWeb（MQTT_TERMINAL 0+0 路由） | <= 640B | ESP8266WebServer + auth/device/hostname/firmware/active request；应用数组和完整导航状态均排除 |
 | Esp8266BaseOTA | <= 160B | 上传状态/计时 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
-| Esp8266BaseMQTT | <= 2.5KB | `espMqttClientSecure` 静态对象约 1,932B + 固定配置/状态/回调约 450B；不含动态 TLS/证书/LWT payload/出站队列 |
+| Esp8266BaseMQTT | <= 3.0KB | `espMqttClientSecure`、固定配置/状态/回调及 96B TLS 错误文本；不含动态 TLS/证书/LWT payload/出站队列 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
@@ -68,12 +68,12 @@
 |------|----------|-----|-------|
 | `basic_wifi` | 基础裁剪，`ESP8266BASE_USE_MQTT=0`，无 MQTT 对象 | 33,972B | 315,051B |
 | `sleep_watchdog` | Sleep + WDT | 33,884B | 316,259B |
-| `custom_web` | Web + mDNS + WDT | 40,720B | 396,104B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 44,260B | 421,768B |
-| `full_demo` | 完整 Web + OTA + NTP + mDNS + Sleep + WDT，MQTT 排除 | 45,908B | 429,608B |
-| `mqtt_terminal` | MQTT_TERMINAL 0+0 应用路由，含 MQTT 静态对象；构建期/尚未建连 | 44,400B | 502,397B |
+| `custom_web` | Web + mDNS + WDT | 40,740B | 396,124B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 44,276B | 421,784B |
+| `full_demo` | 完整 Web + OTA + NTP + mDNS + Sleep + WDT，MQTT 排除 | 45,928B | 429,644B |
+| `mqtt_terminal` | MQTT_TERMINAL 0+0 应用路由，含 MQTT 静态对象；构建期/尚未建连 | 44,996B | 508,777B |
 
-这些数值来自 PlatformIO 链接结果，只能证明静态 RAM/Flash 趋势。`MQTT_TERMINAL` 强制启用 MQTT，因此不存在“该模式但不含 MQTT 对象”的正式构建组合；无对象基线由 `basic_wifi` 给出。未连接、连接尝试、TLS 已连接和断开后的 free heap/max block 只能在真机测量，不能由 44,400B 静态 RAM 推算。
+这些数值来自 PlatformIO 链接结果，只能证明静态 RAM/Flash 趋势。`MQTT_TERMINAL` 强制启用 MQTT，因此不存在“该模式但不含 MQTT 对象”的正式构建组合；无对象基线由 `basic_wifi` 给出。未连接、连接尝试、TLS 已连接和断开后的 free heap/max block 只能在真机测量，不能由 44,996B 静态 RAM 推算。新增 TLS 诊断使用 96B 固定文本缓冲，不缩小通信缓冲。
 
 本轮没有定义 `EMC_RX_BUFFER_SIZE` 或 `EMC_TX_BUFFER_SIZE`，MQTT 收发保持 `espMqttClient 1.7.3` 上游默认值；BearSSL 显式保持 4096B RX / 1024B TX。第三方会为证书解析、TLS 会话、callback 包装与出站 MQTT packet 动态分配，峰值和碎片必须真机记录。
 

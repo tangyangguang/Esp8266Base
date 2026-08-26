@@ -163,7 +163,9 @@ log_timestamp_mode=absolute_datetime
 
 配置由业务在 `Esp8266Base::begin()` 前提供：host/clientId/username/password/LWT topic 复制到固定缓冲；trust anchor `BearSSL::X509List` 和可选 LWT payload 由业务持有且生命周期必须覆盖 MQTT。来源可以是业务私有构建配置或 Config，但仓库示例只含 `.invalid` host、占位 clientId 和公开根证书，不含真实凭据。基础库不新增 broker 配置持久化 key，也不在 `/health` 输出 host、clientId、用户名、密码或证书。
 
-断线重试为 2s、4s、8s、16s、32s、60s，之后保持 60s。日志包含 `connect_attempt`、`connected`、`disconnected reason=`、`reconnect_scheduled` 以及 free heap/max block；`stateName()`、`attemptCount()`、`lastDisconnectReasonName()` 提供小型只读诊断。connected callback 每次连接都会调用，业务应在其中重新订阅。
+断线重试为 2s、4s、8s、16s、32s、60s，之后保持 60s。日志包含 `connect_attempt`、`connected`、`disconnected reason=`、`reconnect_scheduled` 以及 free heap/max block。TCP_DISCONNECTED 时若 BearSSL 存在错误，还会输出真实 `tls_code/tls_detail`；无 TLS 错误时不伪造。`lastTlsErrorCode()`/`lastTlsErrorText()` 提供只读诊断，`/health` 只含 code；新连接前清除旧值。
+
+SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定 `uint8_t` code 数组；publish acknowledgement 回调在 QoS1 PUBACK 或 QoS2 PUBCOMP 后触发。`OUT_OF_MEMORY`、`MAX_RETRIES`、`MALFORMED_PARAMETER` 等 client error 会映射为基础库枚举、记录日志并交给业务。自动源码检查只验证绑定、顺序、映射和退避策略，不等于真实 broker ACL、SUBACK/PUBACK 或 TLS 握手验证。
 
 使用 `espMqttClient 1.7.3` 的同步安全客户端。MQTT 收发缓冲保持上游默认值，BearSSL 显式为 4096/1024；未降低证书校验。该客户端的大部分 MQTT 状态分步推进，但 ESP8266 底层 DNS/TCP/TLS connect 单次尝试可能阻塞到网络超时，无法宣称严格零阻塞；外围有界退避可避免忙循环。
 

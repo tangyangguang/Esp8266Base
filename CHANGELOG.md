@@ -46,6 +46,8 @@
 
 - OTA 在 `Update.end(true)` 前检查 Config 和 FileLog flush 结果；失败时中止 Update、返回明确错误并恢复 Watchdog/业务失败回调，不留下待启动镜像。
 - MQTT_TERMINAL 的 `GET /` 在 AP_CONFIG 下 `303 /wifi`、STA 下 `303 /health`，修复无凭据首次访问根路径无法直接进入配网的问题。
+- TLS transport 释放前保存 BearSSL code/detail，新增 SUBACK、publish acknowledgement、client error 回调与拒绝日志；新连接会清理陈旧 TLS 错误。
+- 拒绝 password 无 username、LWT payload 无 willTopic 的不一致 MQTT 配置。
 
 ### 行为变化 / 使用建议
 

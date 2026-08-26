@@ -1559,11 +1559,13 @@ void Esp8266BaseWeb::_handleHealth() {
     const char* mqttReason = "none";
     uint32_t mqttAttempt = 0;
     bool mqttConnected = false;
+    int mqttTlsError = 0;
 #if ESP8266BASE_USE_MQTT
     mqttState = Esp8266BaseMQTT::stateName();
     mqttReason = Esp8266BaseMQTT::lastDisconnectReasonName();
     mqttAttempt = Esp8266BaseMQTT::attemptCount();
     mqttConnected = Esp8266BaseMQTT::connected();
+    mqttTlsError = Esp8266BaseMQTT::lastTlsErrorCode();
 #endif
 
     // 分块输出固定 JSON，不包含 SSID、broker、clientId、用户名、密码或证书。
@@ -1584,9 +1586,9 @@ void Esp8266BaseWeb::_handleHealth() {
              wifiState, ip, ntpState, mqttState, mqttConnected ? "true" : "false");
     client.write((const uint8_t*)json, strlen(json));
     snprintf(json, sizeof(json),
-             "\"mqttAttempt\":%lu,\"mqttLastReason\":\"%s\","
+             "\"mqttAttempt\":%lu,\"mqttLastReason\":\"%s\",\"mqttTlsError\":%d,"
              "\"lastWdtReset\":%s,\"otaInProgress\":%s}",
-             (unsigned long)mqttAttempt, mqttReason,
+             (unsigned long)mqttAttempt, mqttReason, mqttTlsError,
              lastWdtReset ? "true" : "false", otaInProgress ? "true" : "false");
     client.write((const uint8_t*)json, strlen(json));
     client.flush();

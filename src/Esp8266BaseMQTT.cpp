@@ -7,7 +7,54 @@
 #include "Esp8266BaseWiFi.h"
 #include <espMqttClient.h>
 
-static espMqttClientSecure mqttClient;
+namespace Esp8266BaseMQTTInternal {
+
+// 仅在基础库实现内暴露 espMqttClient 的 protected transport/state。TLS 错误
+// 必须在 disconnectingTcp1 调用 transport.stop() 释放 BearSSL 前读取。
+class DiagnosticSecureClient : public espMqttClientSecure {
+public:
+    DiagnosticSecureClient() : _lastTlsCode(0) { _lastTlsText[0] = '\0'; }
+
+    bool connect() {
+        clearTlsError();
+        return MqttClient::connect();
+    }
+
+    void loop() {
+        if (_state == State::disconnectingTcp1) captureTlsError();
+        MqttClient::loop();
+        if (_state == State::disconnectingTcp1) captureTlsError();
+    }
+
+    void setClientErrorCallback(espMqttClientTypes::OnErrorCallback callback) {
+        _onErrorCallback = callback;
+    }
+
+    int lastTlsErrorCode() const { return _lastTlsCode; }
+    const char* lastTlsErrorText() const { return _lastTlsText; }
+
+private:
+    int _lastTlsCode;
+    char _lastTlsText[96];
+
+    void clearTlsError() {
+        _lastTlsCode = 0;
+        _lastTlsText[0] = '\0';
+    }
+
+    void captureTlsError() {
+        char detail[sizeof(_lastTlsText)] = "";
+        int code = _client.client.getLastSSLError(detail, sizeof(detail));
+        if (code == 0) return;
+        _lastTlsCode = code;
+        strncpy(_lastTlsText, detail, sizeof(_lastTlsText) - 1);
+        _lastTlsText[sizeof(_lastTlsText) - 1] = '\0';
+    }
+};
+
+}  // namespace Esp8266BaseMQTTInternal
+
+static Esp8266BaseMQTTInternal::DiagnosticSecureClient mqttClient;
 
 bool Esp8266BaseMQTT::_configured = false;
 bool Esp8266BaseMQTT::_begun = false;
@@ -33,6 +80,9 @@ const BearSSL::X509List* Esp8266BaseMQTT::_trustAnchors = nullptr;
 Esp8266BaseMQTTConnectedCallback Esp8266BaseMQTT::_connectedCallback = nullptr;
 Esp8266BaseMQTTDisconnectedCallback Esp8266BaseMQTT::_disconnectedCallback = nullptr;
 Esp8266BaseMQTTMessageCallback Esp8266BaseMQTT::_messageCallback = nullptr;
+Esp8266BaseMQTTSubscribeAckCallback Esp8266BaseMQTT::_subscribeAckCallback = nullptr;
+Esp8266BaseMQTTPublishAckCallback Esp8266BaseMQTT::_publishAckCallback = nullptr;
+Esp8266BaseMQTTClientErrorCallback Esp8266BaseMQTT::_clientErrorCallback = nullptr;
 
 static bool copyText(const char* source, char* target, size_t capacity, bool required) {
     if (!target || capacity == 0) return false;
@@ -68,17 +118,23 @@ bool Esp8266BaseMQTT::configure(const Esp8266BaseMQTTConfig& config) {
                      copyText(config.username, _username, sizeof(_username), false) &&
                      copyText(config.password, _password, sizeof(_password), false) &&
                      copyText(config.willTopic, _willTopic, sizeof(_willTopic), false);
+    bool credentialsOk = config.password == nullptr || config.password[0] == '\0' ||
+                         (config.username != nullptr && config.username[0] != '\0');
     bool willOk = config.willPayloadLength <= 65535U &&
                   (config.willPayloadLength == 0 || config.willPayload != nullptr) &&
+                  (config.willPayloadLength == 0 ||
+                   (config.willTopic != nullptr && config.willTopic[0] != '\0')) &&
                   config.willQos <= 2;
     bool requiredOk = config.port != 0 && config.keepAliveSeconds != 0 &&
                       config.trustAnchors != nullptr;
-    if (!stringsOk || !willOk || !requiredOk) {
+    if (!stringsOk || !credentialsOk || !willOk || !requiredOk) {
         _configured = false;
         _state = Esp8266BaseMQTTState::UNCONFIGURED;
-        ESP8266BASE_LOG_E("MQTT", "configure_rejected reason=invalid_or_missing_config host=%s port=%u client_id_length=%u trust_anchor=%s",
+        ESP8266BASE_LOG_E("MQTT", "configure_rejected reason=invalid_or_missing_config host=%s port=%u client_id_length=%u trust_anchor=%s credentials=%s lwt=%s",
                           _host[0] ? "set" : "missing", (unsigned)config.port,
-                          (unsigned)strlen(_clientId), config.trustAnchors ? "set" : "missing");
+                          (unsigned)strlen(_clientId), config.trustAnchors ? "set" : "missing",
+                          credentialsOk ? "valid" : "password_without_username",
+                          willOk ? "valid" : "invalid");
         return false;
     }
     _willPayload = config.willPayload;
@@ -99,10 +155,16 @@ bool Esp8266BaseMQTT::configure(const Esp8266BaseMQTTConfig& config) {
 
 void Esp8266BaseMQTT::setCallbacks(Esp8266BaseMQTTConnectedCallback connected,
                                     Esp8266BaseMQTTDisconnectedCallback disconnected,
-                                    Esp8266BaseMQTTMessageCallback message) {
+                                    Esp8266BaseMQTTMessageCallback message,
+                                    Esp8266BaseMQTTSubscribeAckCallback subscribeAck,
+                                    Esp8266BaseMQTTPublishAckCallback publishAck,
+                                    Esp8266BaseMQTTClientErrorCallback clientError) {
     _connectedCallback = connected;
     _disconnectedCallback = disconnected;
     _messageCallback = message;
+    _subscribeAckCallback = subscribeAck;
+    _publishAckCallback = publishAck;
+    _clientErrorCallback = clientError;
 }
 
 bool Esp8266BaseMQTT::begin() {
@@ -123,12 +185,24 @@ bool Esp8266BaseMQTT::begin() {
               .onDisconnect([](espMqttClientTypes::DisconnectReason reason) {
                   Esp8266BaseMQTT::_onDisconnect((uint8_t)reason);
               })
+              .onSubscribe([](uint16_t packetId,
+                              const espMqttClientTypes::SubscribeReturncode* returnCodes,
+                              size_t length) {
+                  Esp8266BaseMQTT::_onSubscribeAck(
+                      packetId, reinterpret_cast<const uint8_t*>(returnCodes), length);
+              })
+              .onPublish([](uint16_t packetId) {
+                  Esp8266BaseMQTT::_onPublishAck(packetId);
+              })
               .onMessage([](const espMqttClientTypes::MessageProperties& properties,
                             const char* topic, const uint8_t* payload,
                             size_t len, size_t index, size_t total) {
                   Esp8266BaseMQTT::_onMessage(properties.qos, properties.dup, properties.retain,
                                               properties.packetId, topic, payload, len, index, total);
               });
+    mqttClient.setClientErrorCallback([](uint16_t packetId, espMqttClientTypes::Error error) {
+        Esp8266BaseMQTT::_onClientError(packetId, (uint8_t)error);
+    });
     if (_username[0]) mqttClient.setCredentials(_username, _password);
     if (_willTopic[0]) mqttClient.setWill(_willTopic, _willQos, _willRetain, _willPayload, _willLength);
     _retryAt = millis();
@@ -162,7 +236,7 @@ void Esp8266BaseMQTT::handle() {
     }
 
     uint32_t now = millis();
-    if ((int32_t)(now - _retryAt) < 0) {
+    if (!_isDue(now, _retryAt)) {
         _state = Esp8266BaseMQTTState::BACKOFF;
         return;
     }
@@ -176,6 +250,10 @@ void Esp8266BaseMQTT::handle() {
         ESP8266BASE_LOG_E("MQTT", "connect_queue_failed attempt=%lu", (unsigned long)_attemptCount);
         _scheduleRetry();
     }
+}
+
+bool Esp8266BaseMQTT::_isDue(uint32_t now, uint32_t due) {
+    return (int32_t)(now - due) >= 0;
 }
 
 uint16_t Esp8266BaseMQTT::publish(const char* topic, uint8_t qos, bool retain,
@@ -202,6 +280,8 @@ Esp8266BaseMQTTState Esp8266BaseMQTT::state() { return _state; }
 uint32_t Esp8266BaseMQTT::attemptCount() { return _attemptCount; }
 uint32_t Esp8266BaseMQTT::nextAttemptAt() { return _retryAt; }
 Esp8266BaseMQTTDisconnectReason Esp8266BaseMQTT::lastDisconnectReason() { return _lastReason; }
+int Esp8266BaseMQTT::lastTlsErrorCode() { return mqttClient.lastTlsErrorCode(); }
+const char* Esp8266BaseMQTT::lastTlsErrorText() { return mqttClient.lastTlsErrorText(); }
 
 const char* Esp8266BaseMQTT::stateName() {
     switch (_state) {
@@ -309,9 +389,17 @@ void Esp8266BaseMQTT::_onConnect(bool sessionPresent) {
 
 void Esp8266BaseMQTT::_onDisconnect(uint8_t reason) {
     _lastReason = mapReason((espMqttClientTypes::DisconnectReason)reason);
-    ESP8266BASE_LOG_W("MQTT", "disconnected reason=%s reason_code=%u free_heap=%u max_block=%u",
-                      lastDisconnectReasonName(), (unsigned)reason,
-                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
+    if (_lastReason == Esp8266BaseMQTTDisconnectReason::TCP_DISCONNECTED &&
+        mqttClient.lastTlsErrorCode() != 0) {
+        ESP8266BASE_LOG_W("MQTT", "disconnected reason=%s reason_code=%u tls_code=%d tls_detail=%s free_heap=%u max_block=%u",
+                          lastDisconnectReasonName(), (unsigned)reason,
+                          mqttClient.lastTlsErrorCode(), mqttClient.lastTlsErrorText(),
+                          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
+    } else {
+        ESP8266BASE_LOG_W("MQTT", "disconnected reason=%s reason_code=%u free_heap=%u max_block=%u",
+                          lastDisconnectReasonName(), (unsigned)reason,
+                          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
+    }
     if (_disconnectedCallback) _disconnectedCallback(_lastReason);
     if (_otaPaused) {
         _state = Esp8266BaseMQTTState::PAUSED_OTA;
@@ -325,6 +413,44 @@ void Esp8266BaseMQTT::_onMessage(uint8_t qos, bool dup, bool retain, uint16_t pa
                                  size_t len, size_t index, size_t total) {
     if (_otaPaused || !_messageCallback) return;
     _messageCallback(qos, dup, retain, packetId, topic, payload, len, index, total);
+}
+
+void Esp8266BaseMQTT::_onSubscribeAck(uint16_t packetId, const uint8_t* returnCodes,
+                                      size_t length) {
+    bool rejected = false;
+    for (size_t i = 0; returnCodes && i < length; i++) {
+        if (returnCodes[i] == 0x80U) {
+            rejected = true;
+            ESP8266BASE_LOG_E("MQTT", "suback_rejected packet_id=%u index=%u code=0x80",
+                              (unsigned)packetId, (unsigned)i);
+        }
+    }
+    if (!rejected) {
+        ESP8266BASE_LOG_I("MQTT", "suback_accepted packet_id=%u count=%u",
+                          (unsigned)packetId, (unsigned)length);
+    }
+    if (_subscribeAckCallback) _subscribeAckCallback(packetId, returnCodes, length);
+}
+
+void Esp8266BaseMQTT::_onPublishAck(uint16_t packetId) {
+    ESP8266BASE_LOG_I("MQTT", "publish_ack packet_id=%u", (unsigned)packetId);
+    if (_publishAckCallback) _publishAckCallback(packetId);
+}
+
+void Esp8266BaseMQTT::_onClientError(uint16_t packetId, uint8_t error) {
+    Esp8266BaseMQTTClientError mapped = Esp8266BaseMQTTClientError::UNKNOWN;
+    const char* name = "unknown";
+    switch (error) {
+        case 0: mapped = Esp8266BaseMQTTClientError::SUCCESS; name = "success"; break;
+        case 1: mapped = Esp8266BaseMQTTClientError::OUT_OF_MEMORY; name = "out_of_memory"; break;
+        case 2: mapped = Esp8266BaseMQTTClientError::MAX_RETRIES; name = "max_retries"; break;
+        case 3: mapped = Esp8266BaseMQTTClientError::MALFORMED_PARAMETER; name = "malformed_parameter"; break;
+        case 4: mapped = Esp8266BaseMQTTClientError::MISC_ERROR; name = "misc_error"; break;
+        default: break;
+    }
+    ESP8266BASE_LOG_E("MQTT", "client_error packet_id=%u error=%u name=%s",
+                      (unsigned)packetId, (unsigned)mapped, name);
+    if (_clientErrorCallback) _clientErrorCallback(packetId, mapped);
 }
 
 #endif

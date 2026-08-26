@@ -440,6 +440,7 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         require_token(mqtt_h, state, f"MQTT state {state}")
     require_token(mqtt_cpp, "if (_retryDelay < ESP8266BASE_MQTT_RETRY_MAX_MS)", "bounded backoff")
     require_token(mqtt_cpp, "_retryDelay * 2UL", "exponential backoff")
+    require_token(mqtt_cpp, "return (int32_t)(now - due) >= 0;", "wrap-safe retry due check")
     delays = []
     delay = 2000
     for _ in range(7):
@@ -447,15 +448,50 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         delay = min(delay * 2, 60000)
     if delays != [2000, 4000, 8000, 16000, 32000, 60000, 60000]:
         fail("MQTT backoff model is not bounded exponential")
+    def due(now: int, deadline: int) -> bool:
+        delta = (now - deadline) & 0xFFFFFFFF
+        signed = delta if delta < 0x80000000 else delta - 0x100000000
+        return signed >= 0
+    if due(0xFFFFFFF0, 0x00000010) or not due(0x00000010, 0xFFFFFFF0):
+        fail("MQTT retry due policy is not uint32 wrap-safe")
     require_token(mqtt_cpp, "if (_connectedCallback) _connectedCallback(sessionPresent);",
                   "business resubscribe callback on every connect")
     require_token(mqtt_cpp, "missing_required_config", "missing MQTT config failure")
+    require_token(mqtt_cpp, "config.password == nullptr || config.password[0] == '\\0' ||",
+                  "password requires username")
+    require_token(mqtt_cpp, "config.willTopic != nullptr && config.willTopic[0] != '\\0'",
+                  "LWT payload requires topic")
     require_token(mqtt_cpp, ".setBufferSizes(4096, 1024)", "reliable TLS buffer baseline")
     if "EMC_RX_BUFFER_SIZE" in mqtt_cpp or "EMC_TX_BUFFER_SIZE" in terminal_ini:
         fail("MQTT_TERMINAL must not shrink espMqttClient communication buffers")
-    for api in ["publish", "subscribe", "setWill", "setKeepAlive", "onMessage", "onDisconnect"]:
+    for api in ["publish", "subscribe", "setWill", "setKeepAlive", "onMessage", "onDisconnect",
+                "onSubscribe", "onPublish", "setClientErrorCallback"]:
         require_token(mqtt_cpp, api, f"MQTT transport API {api}")
     require_token(terminal_example, "Esp8266BaseMQTT::setCallbacks", "generic MQTT callback example")
+    for callback in ["onMqttSubscribeAck", "onMqttPublishAck", "onMqttClientError"]:
+        require_token(terminal_example, callback, f"MQTT example callback {callback}")
+    require_token(mqtt_cpp, "class DiagnosticSecureClient", "private diagnostic secure client")
+    require_token(mqtt_cpp, "State::disconnectingTcp1", "TLS error capture before transport release")
+    require_token(mqtt_cpp, "getLastSSLError", "BearSSL last TLS error capture")
+    require_token(mqtt_cpp, "clearTlsError();", "clear stale TLS error before connect")
+    require_token(mqtt_cpp, "suback_rejected", "SUBACK rejection diagnostic")
+    require_token(mqtt_cpp, "client_error", "MQTT client error diagnostic")
+    require_token(mqtt_h, "lastTlsErrorCode", "TLS error code diagnostic API")
+    require_token(mqtt_h, "lastTlsErrorText", "TLS error text diagnostic API")
+    require_token(mqtt_h, "Esp8266BaseMQTTSubscribeAckCallback", "stable SUBACK callback API")
+    require_token(mqtt_h, "Esp8266BaseMQTTPublishAckCallback", "stable publish ack callback API")
+    require_token(mqtt_h, "Esp8266BaseMQTTClientError", "stable client error mapping")
+    if "espMqttClientTypes" in mqtt_h or "espMqttClient.h" in mqtt_h:
+        fail("third-party MQTT types must not leak into the public header")
+
+    diagnostic_start = mqtt_cpp.index("class DiagnosticSecureClient")
+    diagnostic_end = mqtt_cpp.index("}  // namespace Esp8266BaseMQTTInternal", diagnostic_start)
+    diagnostic = mqtt_cpp[diagnostic_start:diagnostic_end]
+    base_loop = diagnostic.index("MqttClient::loop();")
+    first_capture = diagnostic.index("captureTlsError();")
+    second_capture = diagnostic.index("captureTlsError();", first_capture + 1)
+    if not first_capture < base_loop < second_capture:
+        fail("TLS error capture must bracket the third-party loop before transport release")
 
     prepare_call = ota_cpp.index("_prepareCallback(_failureMessage")
     update_begin = ota_cpp.index("Update.begin(ESP.getFreeSketchSpace())")
@@ -503,8 +539,12 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
 
     for token in ["firmware", "version", "uptime", "heap", "maxBlock", "wifi", "ip",
                   "ntp", "mqtt", "mqttConnected", "mqttAttempt", "mqttLastReason",
-                  "lastWdtReset", "otaInProgress"]:
+                  "mqttTlsError", "lastWdtReset", "otaInProgress"]:
         require_token(web_cpp, token, f"health field {token}")
+    health_start = web_cpp.index("void Esp8266BaseWeb::_handleHealth()")
+    health_end = web_cpp.index("void Esp8266BaseWeb::_handleNotFound()", health_start)
+    if "lastTlsErrorText" in web_cpp[health_start:health_end]:
+        fail("health endpoint must not expose long TLS error text")
 
     require_token(upload_script, "curl --fail", "curl fail behavior")
     require_token(upload_script, 'firmware=@${firmware}', "curl firmware field")

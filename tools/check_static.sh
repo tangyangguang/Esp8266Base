@@ -23,6 +23,10 @@ if rg -n '#include\s*<espMqttClient\.h>' src | rg -v 'src/Esp8266BaseMQTT.cpp'; 
 fi
 rg -n 'setBufferSizes\(4096, 1024\)' src/Esp8266BaseMQTT.cpp >/dev/null || \
   fail "MQTT TLS buffers must keep the 4096/1024 baseline"
+rg -n 'namespace Esp8266BaseMQTTInternal' src/Esp8266BaseMQTT.cpp >/dev/null || \
+  fail "project-private MQTT diagnostic namespace missing"
+rg -n 'getLastSSLError' src/Esp8266BaseMQTT.cpp >/dev/null || \
+  fail "MQTT TLS last-error capture missing"
 if rg -n 'EMC_(RX|TX)_BUFFER_SIZE|setBufferSizes\((512|1024),\s*(512|1024)\)' src examples platformio.ini; then
   fail "MQTT/TLS communication buffer shrinking found"
 fi
