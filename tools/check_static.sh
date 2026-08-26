@@ -15,6 +15,14 @@ if rg -n '#\s*(if|ifdef|ifndef|elif)\b.*ESP32|platform\s*=\s*espressif32|board\s
   fail "ESP32 conditional/platform branch found"
 fi
 
+if rg -n '#include\s*[<"].*(MQTT|PubSubClient)|setBufferSize\s*\(|setBufferSizes\s*\(' src; then
+  fail "MQTT dependency or transport buffer resizing found in base library"
+fi
+
+if rg -n '\b(new|malloc|calloc|realloc)\s*\(|std::function\s*[<(]|std::(vector|map|list)\s*<|\bvirtual\s+' src; then
+  fail "forbidden dynamic allocation, STL container/function, or virtual API found"
+fi
+
 echo "[static] checking reserved config keys"
 if rg -n '#define\s+ESP8266BASE_CFG_KEY_.*"(wifi_ssid|wifi_pass|ap_pass|hostname|web_user|web_pass|wdt_count|wdt_pending|boot_count|filelog_mode)"' src; then
   fail "reserved config key without eb_ prefix found"
@@ -77,5 +85,16 @@ for file in src/Esp8266BaseOTA.cpp src/Esp8266BaseSleep.cpp examples/*/src/main.
     rg -n '#if ESP8266BASE_USE_WATCHDOG' "$file" >/dev/null || fail "Watchdog call without feature guard in $file"
   fi
 done
+
+echo "[static] checking minimal Web and command-line OTA contract"
+rg -n '#define ESP8266BASE_WEB_PROFILE_MINIMAL 0' src/Esp8266BaseOptions.h >/dev/null || \
+  fail "minimal Web profile default must remain disabled"
+rg -n 'ESP8266BASE_WEB_PROFILE_MINIMAL=1' examples/minimal_web_ota/platformio.ini >/dev/null || \
+  fail "minimal Web example build flag missing"
+rg -n -- '--fail' tools/ota_upload.sh >/dev/null || fail "OTA upload script must use curl --fail"
+rg -n 'firmware=@' tools/ota_upload.sh >/dev/null || fail "OTA upload script firmware multipart field missing"
+if rg -n 'admin:[^$<{]' tools/ota_upload.sh README.md docs examples/minimal_web_ota; then
+  fail "hard-coded OTA password found"
+fi
 
 echo "[static] ok"

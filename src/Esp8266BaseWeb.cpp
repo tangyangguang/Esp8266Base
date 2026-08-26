@@ -7,6 +7,9 @@
 #include "Esp8266BaseWiFi.h"
 #include "Esp8266BaseUtil.h"
 #include "Esp8266Base.h"
+#if ESP8266BASE_USE_OTA
+#include "Esp8266BaseOTA.h"
+#endif
 #if ESP8266BASE_USE_NTP
 #include "Esp8266BaseNTP.h"
 #endif
@@ -31,23 +34,38 @@ bool                     Esp8266BaseWeb::_running   = false;
 char                     Esp8266BaseWeb::_authUser[24] = ESP8266BASE_WEB_AUTH_USER;
 char                     Esp8266BaseWeb::_authPass[24] = ESP8266BASE_WEB_AUTH_PASS;
 char                     Esp8266BaseWeb::_deviceName[24] = "";
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 char                     Esp8266BaseWeb::_homePath[24] = "";
+#endif
 char                     Esp8266BaseWeb::_hostname[33] = "esp8266base";
 char                     Esp8266BaseWeb::_fwName[24] = "esp8266base";
 char                     Esp8266BaseWeb::_fwVersion[16] = "1.0.0";
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 uint32_t                 Esp8266BaseWeb::_bootCount = 0;
 char                     Esp8266BaseWeb::_titleBuf[80] = "ESP8266";
+#endif
 char                     Esp8266BaseWeb::_activeUri[32] = "";
 char                     Esp8266BaseWeb::_activeMethod[5] = "";
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 char                     Esp8266BaseWeb::_builtinLabels[3][16] = {
     "Status", "Logs", "System"
 };
 Esp8266BaseWebHomeMode Esp8266BaseWeb::_homeMode = Esp8266BaseWebHomeMode::DEFAULT_SYSTEM_HOME;
 Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSystemNavMode::TOP_NAV;
+#endif
 
 // ----------------------------------------------------------------------------
 // PROGMEM HTML 片段（全部在 Flash，不占 DRAM）
 // ----------------------------------------------------------------------------
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+static const char WEB_HEAD[] PROGMEM =
+    "<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+    "<style>body{font-family:Arial,sans-serif;padding:12px;max-width:640px;margin:auto;line-height:1.45}"
+    "nav{margin-bottom:14px}a,input{margin:3px;padding:6px}footer{color:#666;font-size:12px;margin-top:14px}</style>"
+    "<script>function once(f){if(f.dataset.busy)return false;f.dataset.busy=1;"
+    "var b=f.querySelector('[type=submit]');if(b)b.disabled=true;return true;}</script>"
+    "</head><body><nav>";
+#else
 static const char WEB_HEAD[] PROGMEM =
     "<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>"
     "<style>"
@@ -91,6 +109,7 @@ static const char WEB_HEAD[] PROGMEM =
     "function once(f){if(f.dataset.busy)return false;f.dataset.busy=1;"
     "var b=f.querySelector('[type=submit]');if(b)b.disabled=true;return true;}"
     "</script></head><body><nav>";
+#endif
 
 static const char WEB_NAV_END[]    PROGMEM = "</nav>";
 static const char WEB_FOOT_PRE[]   PROGMEM = "<footer>";
@@ -116,7 +135,7 @@ static const char WEB_WIFI_FORM_POST[] PROGMEM =
     "<input type=submit value='Save &amp; Connect'>"
     "</form>";
 
-#if ESP8266BASE_USE_OTA
+#if ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL
 static const char WEB_OTA_FORM[] PROGMEM =
     "<h2>OTA Update</h2>"
     "<form id=f>"
@@ -165,6 +184,7 @@ static const char WEB_AUTH_FORM[] PROGMEM =
     "<input type=submit value='Update Password'>"
     "</form>";
 
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 static const char WEB_HOSTNAME_FORM_PRE[] PROGMEM =
     "<section><h3>Hostname</h3>"
     "<p>Current hostname: ";
@@ -212,7 +232,9 @@ static const char WEB_REBOOTING[] PROGMEM =
 
 static const char WEB_LOGS_PRE[] PROGMEM =
     "<h2>Logs</h2>";
+#endif
 
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 static void _trimWhitespace(char* s) {
     if (!s) return;
     char* start = s;
@@ -229,6 +251,7 @@ static void _trimWhitespace(char* s) {
         s[--len] = '\0';
     }
 }
+#endif
 
 static void _sendAttrEscaped(const char* s) {
     if (!s) return;
@@ -269,6 +292,7 @@ static void _sendAttrEscaped(const char* s) {
     }
 }
 
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 static void _sendLogFileEscaped(const char* path) {
     if (!path || !LittleFS.exists(path)) return;
     File f = LittleFS.open(path, "r");
@@ -295,6 +319,7 @@ static void _sendLogSection(const char* label, const char* path, uint32_t size) 
     Esp8266BaseWeb::sendChunk(" -----\n");
     _sendLogFileEscaped(path);
 }
+#endif
 
 static void _redirect(const char* url) {
     Esp8266BaseWeb::server().sendHeader("Location", url);
@@ -302,6 +327,7 @@ static void _redirect(const char* url) {
     Esp8266BaseWeb::server().send(303);
 }
 
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 static void _sendFileLogModeOption(const char* value,
                                    const char* label,
                                    Esp8266BaseFileLog::Mode mode) {
@@ -403,6 +429,7 @@ static void _sendFileLogSystemSection() {
 #endif
     Esp8266BaseWeb::sendChunk("<p>Mode is capped by the build log level.</p><input type=submit value='Save File Log'></form></section>");
 }
+#endif
 
 static bool _isValidPath(const char* path) {
     if (!path || path[0] != '/') return false;
@@ -419,9 +446,11 @@ static bool _isValidPath(const char* path) {
     return true;
 }
 
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 const char* Esp8266BaseWeb::_builtinLabel(Esp8266BaseWebBuiltinLabel label) {
     return _builtinLabels[(uint8_t)label];
 }
+#endif
 
 void Esp8266BaseWeb::_sendLink(const char* path, const char* title, const char* cls) {
     Esp8266BaseWeb::sendChunk("<a href='");
@@ -437,6 +466,7 @@ void Esp8266BaseWeb::_sendLink(const char* path, const char* title, const char* 
     Esp8266BaseWeb::sendChunk("</a>");
 }
 
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 const char* Esp8266BaseWeb::_brandTitle() {
     return _deviceName[0] ? _deviceName : _titleBuf;
 }
@@ -456,6 +486,7 @@ void Esp8266BaseWeb::_sendSystemLinks() {
     _sendLink("/logs", _builtinLabel(Esp8266BaseWebBuiltinLabel::LOGS), nullptr);
     _sendLink("/system", _builtinLabel(Esp8266BaseWebBuiltinLabel::SYSTEM), nullptr);
 }
+#endif
 
 void Esp8266BaseWeb::_sendAppLinks() {
     for (uint8_t i = 0; i < _pageCount; i++) {
@@ -473,16 +504,17 @@ bool Esp8266BaseWeb::begin() {
     _loadPersistedAuth();
 
     // 注册内置路由（静态成员函数指针，无捕获，无 std::function 对象驻留堆）
-    _server.on("/",       HTTP_GET,  _handleRoot);
-    _server.on("/esp8266base", HTTP_GET, _handleSystemHome);
     _server.on("/wifi",   HTTP_GET,  _handleWiFiGet);
     _server.on("/wifi",   HTTP_POST, _handleWiFiPost);
     _server.on("/auth",   HTTP_GET,  _handleAuthGet);
     _server.on("/auth",   HTTP_POST, _handleAuthPost);
-#if ESP8266BASE_USE_OTA
+#if ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL
     _server.on("/ota",    HTTP_GET,  _handleOtaGet);
     // POST /ota 由 Esp8266BaseOTA::begin() 注册（需要 upload handler）
 #endif
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+    _server.on("/",       HTTP_GET,  _handleRoot);
+    _server.on("/esp8266base", HTTP_GET, _handleSystemHome);
     _server.on("/logs",   HTTP_GET,  _handleLogsGet);
     _server.on("/logs/clear", HTTP_POST, _handleLogsClearPost);
     _server.on("/system", HTTP_GET,  _handleSystemGet);
@@ -491,12 +523,18 @@ bool Esp8266BaseWeb::begin() {
     _server.on("/api/system/hostname", HTTP_GET, _handleHostnameApiGet);
     _server.on("/api/system/hostname", HTTP_POST, _handleHostnameApiPost);
     _server.on("/reboot", HTTP_POST, _handleRebootPost);
+#endif
     _server.on("/health", HTTP_GET,  _handleHealth);
     _server.onNotFound(_handleNotFound);
 
     _server.begin();
     _running = true;
-    ESP8266BASE_LOG_I("Web ", "web_server_started auth_required=yes builtin_routes=17 app_pages_registered=%d/%d app_apis_registered=%d/%d",
+    ESP8266BASE_LOG_I("Web ", "web_server_started profile=%s auth_required=yes builtin_routes=%u app_pages_registered=%d/%d app_apis_registered=%d/%d",
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+                      "minimal", 5U,
+#else
+                      "full", (unsigned)(15 + (ESP8266BASE_USE_OTA ? 1 : 0)),
+#endif
                       (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES,
                       (int)_apiCount,  ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
@@ -613,25 +651,42 @@ void Esp8266BaseWeb::setDeviceName(const char* name) {
 }
 
 void Esp8266BaseWeb::setHomePath(const char* path) {
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+    (void)path;
+#else
     if (!_isValidPath(path)) return;
     strncpy(_homePath, path, sizeof(_homePath) - 1);
     _homePath[sizeof(_homePath) - 1] = '\0';
+#endif
 }
 
 void Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode mode) {
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+    (void)mode;
+#else
     _homeMode = mode;
+#endif
 }
 
 void Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode mode) {
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+    (void)mode;
+#else
     _systemNavMode = mode;
+#endif
 }
 
 void Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const char* title) {
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+    (void)label;
+    (void)title;
+#else
     if (!title) return;
     uint8_t index = (uint8_t)label;
     if (index >= 3) return;
     strncpy(_builtinLabels[index], title, sizeof(_builtinLabels[index]) - 1);
     _builtinLabels[index][sizeof(_builtinLabels[index]) - 1] = '\0';
+#endif
 }
 
 void Esp8266BaseWeb::setDefaultAuth(const char* user, const char* pass) {
@@ -656,6 +711,9 @@ void Esp8266BaseWeb::setSystemInfo(const char* hostname, const char* fw, const c
         strncpy(_fwVersion, ver, sizeof(_fwVersion) - 1);
         _fwVersion[sizeof(_fwVersion) - 1] = '\0';
     }
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+    (void)bootCount;
+#else
     _bootCount = bootCount;
     strncpy(_titleBuf, _hostname, sizeof(_titleBuf) - 1);
     _titleBuf[sizeof(_titleBuf) - 1] = '\0';
@@ -664,6 +722,7 @@ void Esp8266BaseWeb::setSystemInfo(const char* hostname, const char* fw, const c
     strncat(_titleBuf, " ", sizeof(_titleBuf) - strlen(_titleBuf) - 1);
     strncat(_titleBuf, _fwVersion, sizeof(_titleBuf) - strlen(_titleBuf) - 1);
     strncat(_titleBuf, ")", sizeof(_titleBuf) - strlen(_titleBuf) - 1);
+#endif
 }
 
 ESP8266WebServer& Esp8266BaseWeb::server() {
@@ -796,18 +855,33 @@ void Esp8266BaseWeb::sendHeader() {
                    "Connection: close\r\n"
                    "Cache-Control: no-store\r\n\r\n"));
     sendChunk("<!DOCTYPE html><html><head><title>");
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+    _sendAttrEscaped(_deviceName[0] ? _deviceName : _fwName);
+#else
     _sendAttrEscaped(_titleBuf);
+#endif
     sendChunk("</title>");
     sendContent_P(WEB_HEAD);
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
     _sendLink(_brandHref(), _brandTitle(), "brand");
+#endif
     _sendAppLinks();
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
     if (_systemNavMode == Esp8266BaseWebSystemNavMode::TOP_NAV) {
         _sendSystemLinks();
     }
+#endif
     sendContent_P(WEB_NAV_END);
 }
 
 void Esp8266BaseWeb::sendFooter() {
+#if ESP8266BASE_WEB_PROFILE_MINIMAL
+    sendChunk("<footer>Free heap: ");
+    char heap[16];
+    Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heap, sizeof(heap));
+    sendChunk(heap);
+    sendChunk("</footer></body></html>");
+#else
     if (_systemNavMode == Esp8266BaseWebSystemNavMode::BOTTOM_NAV) {
         sendChunk("<div class=sysnav>");
         _sendSystemLinks();
@@ -834,6 +908,7 @@ void Esp8266BaseWeb::sendFooter() {
     sendContent_P(WEB_FOOT_RSSI_PRE);
     sendChunk(rssi);
     sendContent_P(WEB_FOOT_POST);
+#endif
     _server.client().flush();
     _server.client().stop();
     yield();
@@ -868,6 +943,7 @@ void Esp8266BaseWeb::sendChunk(const char* content) {
 // ----------------------------------------------------------------------------
 // 内置路由处理函数
 // ----------------------------------------------------------------------------
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 void Esp8266BaseWeb::_handleRoot() {
     _markRequest();
     if (_homePath[0] && _homeMode != Esp8266BaseWebHomeMode::DEFAULT_SYSTEM_HOME) {
@@ -985,6 +1061,7 @@ void Esp8266BaseWeb::_handleSystemHome() {
     sendChunk("</dl></section></div>");
     sendFooter();
 }
+#endif
 
 void Esp8266BaseWeb::_handleWiFiGet() {
     if (!checkAuth()) return;
@@ -1135,7 +1212,7 @@ void Esp8266BaseWeb::_handleAuthPost() {
     _redirect("/auth?saved=1");
 }
 
-#if ESP8266BASE_USE_OTA
+#if ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL
 void Esp8266BaseWeb::_handleOtaGet() {
     if (!checkAuth()) return;
     sendHeader();
@@ -1144,6 +1221,7 @@ void Esp8266BaseWeb::_handleOtaGet() {
 }
 #endif
 
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
 void Esp8266BaseWeb::_handleLogsGet() {
     if (!checkAuth()) return;
     sendHeader();
@@ -1389,19 +1467,47 @@ void Esp8266BaseWeb::_handleRebootPost() {
     delay(500);
     ESP.restart();
 }
+#endif
 
 void Esp8266BaseWeb::_handleHealth() {
     _markRequest();
-    // 不需要 Auth（健康检查通常开放）
-    char json[160];
+    const char* wifiState = "idle";
+    const char* ip = "";
+    if (Esp8266BaseWiFi::isConnected()) {
+        wifiState = "connected";
+        ip = Esp8266BaseWiFi::ip();
+    } else if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG) {
+        wifiState = "ap_config";
+        ip = "192.168.4.1";
+    } else if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::CONNECTING) {
+        wifiState = "connecting";
+    }
+
+    const char* ntpState = "disabled";
+#if ESP8266BASE_USE_NTP
+    ntpState = Esp8266BaseNTP::isSynced() ? "synced" : "pending";
+#endif
+    bool lastWdtReset = false;
+#if ESP8266BASE_USE_WATCHDOG
+    lastWdtReset = Esp8266BaseWatchdog::wasWatchdogReset();
+#endif
+    bool otaInProgress = false;
+#if ESP8266BASE_USE_OTA
+    otaInProgress = Esp8266BaseOTA::isInProgress();
+#endif
+
+    // 固定小型 JSON，不包含 SSID、密码、凭据或证书。
+    char json[288];
     snprintf(json, sizeof(json),
-             "{\"heap\":%u,\"maxBlock\":%u,\"ip\":\"%s\","
-             "\"uptime\":%lu,\"wifi\":\"%s\"}",
+             "{\"firmware\":\"%s\",\"version\":\"%s\",\"uptime\":%lu,"
+             "\"heap\":%u,\"maxBlock\":%u,\"wifi\":\"%s\",\"ip\":\"%s\","
+             "\"ntp\":\"%s\",\"lastWdtReset\":%s,\"otaInProgress\":%s}",
+             _fwName, _fwVersion, millis() / 1000UL,
              (unsigned)ESP.getFreeHeap(),
              (unsigned)ESP.getMaxFreeBlockSize(),
-             Esp8266BaseWiFi::ip(),
-             millis() / 1000UL,
-             Esp8266BaseWiFi::isConnected() ? "connected" : "disconnected");
+             wifiState, ip, ntpState,
+             lastWdtReset ? "true" : "false",
+             otaInProgress ? "true" : "false");
     _server.send(200, "application/json", json);
 }
 

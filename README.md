@@ -68,7 +68,7 @@ void loop() {
 | 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
-| OTA | `Esp8266BaseOTA` | Web OTA 上传、进度显示、WDT 联动 |
+| OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、业务安全生命周期回调 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
 | Sleep | `Esp8266BaseSleep` | modem/deep sleep 封装、唤醒原因 |
@@ -111,6 +111,7 @@ Esp8266Base/
 │   ├── basic_wifi/                 # WiFi STA/AP 配网示例
 │   ├── wifi_config_ota/            # Web 配网 + OTA 示例
 │   ├── custom_web/                 # 自定义 Web 页面示例
+│   ├── minimal_web_ota/             # 最小 Web 模式 + OTA 生命周期示例
 │   ├── sleep_watchdog/             # Sleep + Watchdog 示例
 │   └── full_demo/                  # 全模块演示（参考实现）
 ├── tools/
@@ -162,6 +163,7 @@ build_flags =
 | `ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
+| `ESP8266BASE_WEB_PROFILE_MINIMAL` | `0` | `1` 时只注册 WiFi/Auth、Health、OTA POST 和应用路由 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
@@ -192,6 +194,10 @@ Hostname 策略：默认 hostname 来自 `ESP8266BASE_DEFAULT_HOSTNAME`；设备
 
 OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
 
+MQTT 智能终端可设置 `ESP8266BASE_WEB_PROFILE_MINIMAL=1`，并把应用路由容量设为 `ESP8266BASE_WEB_MAX_APP_PAGES=1`、`ESP8266BASE_WEB_MAX_APP_APIS=3`。该模式不注册 `/`、`/esp8266base`、`/system`、`/logs`、hostname、reboot 和 `GET /ota`；`POST /ota` 仍由 `Esp8266BaseOTA` 注册，可直接使用 `tools/ota_upload.sh` 上传。默认值 `0` 保持完整模式。
+
+业务项目可通过 `Esp8266BaseOTA::setLifecycleCallbacks()` 在首个有效固件块通过头检查后、`Update.begin()` 前执行安全检查和释放 MQTT/TLS 资源；失败回调用于幂等恢复通信许可。基础库不依赖 MQTT，也不改变 TLS、MQTT 或业务报文缓冲。
+
 日志与回显策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段；`/wifi` GET 表单也会回显已保存密码，页面默认隐藏，可手动显示。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
 
 可选文件日志和配置审计：
@@ -214,7 +220,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 tools/test_all.sh
 ```
 
-默认测试不烧录、不访问串口、不要求 ESP12F 在线。它会执行格式检查、静态一致性检查、轻量逻辑检查，并编译根项目和 5 个示例的 `esp12f` 环境。需要额外验证 `nodemcuv2` 编译时运行；当前 `--all-envs` 会编译根项目 `nodemcuv2` 和除 `full_demo` 外的示例 `nodemcuv2` 环境：
+默认测试不烧录、不访问串口、不要求 ESP12F 在线。它会执行格式检查、静态一致性检查、轻量逻辑检查，并编译根项目和 6 个示例的 `esp12f` 环境，其中 `minimal_web_ota` 独立覆盖最小 Web 模式。需要额外验证 `nodemcuv2` 编译时运行；当前 `--all-envs` 会编译根项目 `nodemcuv2` 和除 `full_demo`、`minimal_web_ota` 外的示例 `nodemcuv2` 环境：
 
 ```bash
 tools/test_all.sh --all-envs

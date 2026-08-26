@@ -8,6 +8,16 @@
 #define ESP8266BASE_USE_OTA 0
 #endif
 
+// Web 运行模式：0=完整管理模式，1=MQTT 终端最小运维模式。
+// 最小模式只保留 WiFi/Auth、POST OTA、Health 和应用注册路由。
+#ifndef ESP8266BASE_WEB_PROFILE_MINIMAL
+#define ESP8266BASE_WEB_PROFILE_MINIMAL 0
+#endif
+
+#if ESP8266BASE_WEB_PROFILE_MINIMAL != 0 && ESP8266BASE_WEB_PROFILE_MINIMAL != 1
+#error "ESP8266BASE_WEB_PROFILE_MINIMAL must be 0 or 1"
+#endif
+
 #ifndef ESP8266BASE_DEFAULT_HOSTNAME
 #define ESP8266BASE_DEFAULT_HOSTNAME "esp8266base"
 #endif

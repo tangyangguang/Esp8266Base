@@ -370,8 +370,86 @@ def test_watchdog_and_ota_failure_contract() -> None:
     require_token(ota_cpp, "_updateStarted", "OTA Update.begin state")
     require_token(ota_cpp, "Invalid upload: no firmware data", "OTA empty upload rejection")
     require_token(ota_cpp, "OTA_PROGRESS_STEP = 25", "OTA progress log step")
-    require_token(ota_cpp, '_failUpload(500, "Update failed: write failed", true)',
+    require_token(ota_cpp, '_failUpload(500, "Update failed: write failed", true,',
                   "OTA write failure immediate closeout")
+
+
+def test_minimal_web_and_ota_lifecycle_contract() -> None:
+    options_h = read("src/Esp8266BaseOptions.h")
+    web_cpp = read("src/Esp8266BaseWeb.cpp")
+    web_h = read("src/Esp8266BaseWeb.h")
+    ota_cpp = read("src/Esp8266BaseOTA.cpp")
+    ota_h = read("src/Esp8266BaseOTA.h")
+    minimal_ini = read("examples/minimal_web_ota/platformio.ini")
+    upload_script = read("tools/ota_upload.sh")
+    config_cpp = read("src/Esp8266BaseConfig.cpp")
+
+    require_token(options_h, "#define ESP8266BASE_WEB_PROFILE_MINIMAL 0", "minimal profile default")
+    require_token(minimal_ini, "-DESP8266BASE_WEB_PROFILE_MINIMAL=1", "minimal profile build")
+    require_token(minimal_ini, "-DESP8266BASE_WEB_MAX_APP_PAGES=1", "minimal page capacity")
+    require_token(minimal_ini, "-DESP8266BASE_WEB_MAX_APP_APIS=3", "minimal API capacity")
+
+    begin_start = web_cpp.index("bool Esp8266BaseWeb::begin()")
+    begin_end = web_cpp.index("void Esp8266BaseWeb::handle()", begin_start)
+    begin_body = web_cpp[begin_start:begin_end]
+    for route in ["/wifi", "/auth", "/health"]:
+        require_token(begin_body, f'_server.on("{route}"', f"minimal retained route {route}")
+    full_guard_start = begin_body.index("#if !ESP8266BASE_WEB_PROFILE_MINIMAL")
+    full_guard_end = begin_body.index("#endif", full_guard_start)
+    full_routes = begin_body[full_guard_start:full_guard_end]
+    for route in ["/esp8266base", "/logs", "/system", "/reboot"]:
+        require_token(full_routes, route, f"full-only route {route}")
+    require_token(ota_cpp, 'server().on("/ota", HTTP_POST', "OTA POST route independent of GET page")
+    if '_server.on("/ota",    HTTP_GET' not in web_cpp:
+        fail("full Web mode OTA GET route missing")
+    require_token(web_h, "ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL",
+                  "minimal OTA GET exclusion")
+
+    prepare_call = ota_cpp.index("_prepareCallback(_failureMessage")
+    update_begin = ota_cpp.index("Update.begin(ESP.getFreeSketchSpace())")
+    if prepare_call >= update_begin:
+        fail("OTA prepare callback must run before Update.begin")
+    rejection_return = ota_cpp.index("return;", prepare_call)
+    if rejection_return >= update_begin:
+        fail("OTA prepare rejection must return before Update.begin")
+    require_token(ota_cpp, "if (_prepareCallback &&", "optional prepare callback")
+    require_token(ota_cpp, "if (_failureCallback)", "optional failure callback")
+    require_token(ota_cpp, "if (_successCallback)", "optional success callback")
+    require_token(ota_cpp, "if (_failureNotified) return;", "failure callback once guard")
+    require_token(ota_cpp, "_failureNotified = false;", "failure callback per-request reset")
+    require_token(ota_cpp, "_resumeWatchdog();\n    _notifyFailure(failure);",
+                  "Watchdog resumes before business failure callback")
+    for failure in ["UNAUTHORIZED", "INVALID_FIRMWARE", "PREPARE_REJECTED",
+                    "UPDATE_BEGIN_FAILED", "UPDATE_WRITE_FAILED", "UPDATE_END_FAILED",
+                    "UPLOAD_ABORTED", "NO_FIRMWARE_DATA", "CONFIG_FLUSH_FAILED"]:
+        require_token(ota_h, failure, f"OTA failure reason {failure}")
+    require_token(ota_cpp, "pre_reboot_config_flush_failed", "OTA config flush failure diagnostic")
+    require_token(ota_cpp, "action=abort_update", "OTA flush failure aborts update")
+    config_flush = ota_cpp.index("if (!Esp8266BaseConfig::flush())")
+    update_end = ota_cpp.index("if (Update.end(true))")
+    if config_flush >= update_end:
+        fail("OTA Config flush must succeed before Update.end(true)")
+    require_token(ota_cpp, '"Config flush failed; update aborted", true,',
+                  "OTA Config flush failure aborts Update")
+    require_token(ota_cpp, "保留首个失败的 HTTP 状态", "OTA first failure status preservation")
+    require_token(ota_cpp, "if (_status == 200 && (!_started || _uploadedBytes == 0))",
+                  "OTA completion preserves prior rejection status")
+    require_token(ota_cpp, "upload_failed status=%u", "OTA failure diagnostic before state reset")
+    require_token(ota_cpp, "_resetRequestState();\n    }", "OTA failure internal state reset")
+
+    for token in ["firmware", "version", "uptime", "heap", "maxBlock", "wifi", "ip",
+                  "ntp", "lastWdtReset", "otaInProgress"]:
+        require_token(web_cpp, token, f"health field {token}")
+
+    require_token(upload_script, "curl --fail", "curl fail behavior")
+    require_token(upload_script, 'firmware=@${firmware}', "curl firmware field")
+    require_token(upload_script, "Firmware size:", "OTA script firmware size output")
+    require_token(upload_script, "HTTP result:", "OTA script HTTP result output")
+    require_token(upload_script, "Device response:", "OTA script response output")
+
+    for token in [".tmp", ".bak", "verify_failed", "backup_rename_failed",
+                  "commit_rename_failed", "LittleFS.rename(bak, path)"]:
+        require_token(config_cpp, token, f"Config recovery invariant {token}")
 
 
 def test_public_default_tables() -> None:
@@ -610,6 +688,7 @@ def main() -> None:
     test_boot_session_log_contract()
     test_web_auth_contract()
     test_watchdog_and_ota_failure_contract()
+    test_minimal_web_and_ota_lifecycle_contract()
     test_public_default_tables()
     test_web_home_contract()
     print("[logic] ok")

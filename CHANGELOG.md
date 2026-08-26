@@ -34,6 +34,23 @@
 
 没有内容的小节可以省略。
 
+## 2026-08-26
+
+### 新增
+
+- 新增 `ESP8266BASE_WEB_PROFILE_MINIMAL`：只保留 WiFi/Auth、Health、OTA POST 和固定容量应用路由，适合 MQTT 智能终端。
+- `Esp8266BaseOTA` 新增 prepare/failure/success 固定函数指针回调，业务可在 `Update.begin()` 前完成执行器安全检查并释放 MQTT/TLS，在失败后幂等恢复通信。
+- 新增 `examples/minimal_web_ota` 独立构建覆盖和 `tools/ota_upload.sh` 命令行上传脚本。
+
+### 修复
+
+- OTA 在 `Update.end(true)` 前检查 Config 和 FileLog flush 结果；失败时中止 Update、返回明确错误并恢复 Watchdog/业务失败回调，不留下待启动镜像。
+
+### 行为变化 / 使用建议
+
+- 默认完整 Web 模式不变。最小模式不提供 `GET /ota` 页面，但保留相同 Basic Auth 的 `POST /ota`。
+- OTA failure callback 每个失败请求最多调用一次，并可能由未认证或无效固件请求触发；业务恢复逻辑必须幂等。
+
 ## 2026-05-14
 
 ### 优化

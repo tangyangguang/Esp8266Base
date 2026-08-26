@@ -115,6 +115,9 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 **规则 4：深睡/重启前 flush**  
 进入 deep sleep 或调用 `ESP.restart()` 前，必须调用 `Esp8266BaseConfig::flush()` 写完所有 pending，并检查返回值。只有全部 pending 写入成功才返回 `true`；失败项会保留在 deferred 队列中，等待后续 `handle()` 或下一次 `flush()` 重试。
 
+**规则 5：提交中断恢复**
+读取正式文件前会检查同路径的 `.bak` 和 `.tmp`：正式文件缺失时优先恢复 `.bak`，没有备份时才提交 `.tmp`。写入流程在临时文件写完并读回校验后，才把旧正式文件切换为备份并提交新文件。OTA 完成路径在 `Update.end(true)` 前执行 `flush()`；返回 `false` 时会记录 `pre_reboot_config_flush_failed`、中止 Update 并返回失败，不会静默丢弃 pending 配置或留下待启动镜像。
+
 ---
 
 ## 七、错误处理

@@ -41,7 +41,8 @@
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb | <= 1.20KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + auth/device/home/hostname/firmware/title/labels/active request 状态；页面临时缓冲在栈上 |
-| Esp8266BaseOTA | <= 160B | _inProgress/_rejected/_started/_status + 上传计时、字节数和 25% 进度日志状态 |
+| Esp8266BaseWeb（最小模式 1+3 路由） | <= 768B | ESP8266WebServer + AppRoute 1×52+3×52=208B + auth/device/hostname/firmware/active request 状态；不保留完整导航状态 |
+| Esp8266BaseOTA | <= 160B | 上传状态/计时 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
@@ -64,11 +65,14 @@
 
 | 示例 | 启用模块 | RAM | Flash |
 |------|----------|-----|-------|
-| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,940B | 315,035B |
-| `sleep_watchdog` | Sleep + WDT | 33,784B | 316,127B |
-| `custom_web` | Web + mDNS + WDT | 40,512B | 395,696B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 43,688B | 420,524B |
-| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 45,744B | 428,876B |
+| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,952B | 315,015B |
+| `sleep_watchdog` | Sleep + WDT | 33,864B | 316,223B |
+| `custom_web` | Web + mDNS + WDT | 40,612B | 395,740B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 44,164B | 421,392B |
+| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 45,812B | 429,248B |
+| `minimal_web_ota` | 最小 Web(1+3) + OTA + NTP + mDNS + WDT | 41,056B | 405,532B |
+
+本轮改造前，同一工具链下 `full_demo` 为 45,324B RAM / 428,224B Flash，`wifi_config_ota` 为 43,672B RAM / 420,364B Flash。改造后完整模式分别增加 488B / 1,024B 和 492B / 1,028B；最小模式相对改造后的 `full_demo` 减少 4,756B RAM / 23,716B Flash。未修改 TLS、MQTT 或业务报文缓冲。
 
 Arduino SDK 内部开销（不可控，参考值）：
 

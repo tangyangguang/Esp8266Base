@@ -6,7 +6,9 @@
 // ----------------------------------------------------------------------------
 // Esp8266BaseWeb — 极简管理 Web
 //
-// 内置路由：GET / GET /esp8266base GET /system GET/POST /wifi GET/POST /auth GET/POST /ota GET /logs POST /logs/clear POST /system/filelog POST /system/hostname GET/POST /api/system/hostname POST /reboot GET /health
+// 完整模式提供全部管理路由；ESP8266BASE_WEB_PROFILE_MINIMAL=1 时只注册
+// GET/POST /wifi、GET/POST /auth、GET /health、POST /ota（由 OTA 模块注册）
+// 和应用扩展路由。
 // /system 是维护入口页面；/reboot 只保留 POST 重启动作
 // 应用扩展：最多 4 页面 + 6 API（静态数组，不动态分配）
 // Basic Auth 默认开启
@@ -109,17 +111,23 @@ private:
     static char             _authUser[24];                      // 24B
     static char             _authPass[24];                      // 24B
     static char             _deviceName[24];                    // 24B
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
     static char             _homePath[24];                      // 24B
+#endif
     static char             _hostname[33];                      // 33B
     static char             _fwName[24];                        // 24B
     static char             _fwVersion[16];                     // 16B
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
     static uint32_t         _bootCount;                         // 4B
     static char             _titleBuf[80];                      // "hostname (fw ver)" 80B
+#endif
     static char             _activeUri[32];                     // 当前请求 URI，用于慢请求日志
     static char             _activeMethod[5];                   // GET/POST
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
     static char             _builtinLabels[3][16];              // Status/Logs/System
     static Esp8266BaseWebHomeMode      _homeMode;
     static Esp8266BaseWebSystemNavMode _systemNavMode;
+#endif
 
     // 内置路由处理函数（静态，无捕获）
     static void _markRequest();
@@ -135,15 +143,16 @@ private:
     static void _handleAppApi3();
     static void _handleAppApi4();
     static void _handleAppApi5();
-    static void _handleRoot();
-    static void _handleSystemHome();
     static void _handleWiFiGet();
     static void _handleWiFiPost();
     static void _handleAuthGet();
     static void _handleAuthPost();
-#if ESP8266BASE_USE_OTA
+#if ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL
     static void _handleOtaGet();   // OTA GET 由此处理，POST 由 Esp8266BaseOTA 注册
 #endif
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+    static void _handleRoot();
+    static void _handleSystemHome();
     static void _handleLogsGet();
     static void _handleLogsClearPost();
     static void _handleFileLogPost();
@@ -152,14 +161,17 @@ private:
     static void _handleHostnameApiPost();
     static void _handleSystemGet();
     static void _handleRebootPost();
+#endif
     static void _handleHealth();
     static void _handleNotFound();
+#if !ESP8266BASE_WEB_PROFILE_MINIMAL
     static const char* _builtinLabel(Esp8266BaseWebBuiltinLabel label);
     static const char* _brandTitle();
     static const char* _brandHref();
+    static void _sendSystemLinks();
+#endif
     static void _sendLink(const char* path, const char* title, const char* cls = nullptr);
     static void _sendAppLinks();
-    static void _sendSystemLinks();
     static void _loadPersistedAuth();
     static void _formatDuration(uint32_t seconds, char* out, size_t len);
     static void _formatFooterUptime(uint32_t seconds, char* out, size_t len);

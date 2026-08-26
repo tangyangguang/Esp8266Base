@@ -107,7 +107,7 @@ Config 正式配置写入必须使用安全策略：
 tools/test_all.sh
 ```
 
-`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、静态一致性检查、轻量逻辑检查、根项目 `esp12f` 编译和全部示例 `esp12f` 编译。需要额外验证非发布板型时运行 `tools/test_all.sh --all-envs`。
+`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、静态一致性检查、轻量逻辑检查、根项目 `esp12f` 编译和全部示例 `esp12f` 编译，包括完整 Web 与 `minimal_web_ota` 最小 Web 两种模式。需要额外验证非发布板型时运行 `tools/test_all.sh --all-envs`。
 
 硬件：
 

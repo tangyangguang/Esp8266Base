@@ -82,7 +82,7 @@ Esp8266Base/
 | 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
-| OTA | `Esp8266BaseOTA` | Web OTA 上传、进度显示、WDT 联动 |
+| OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、业务安全生命周期回调 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
 | Sleep | `Esp8266BaseSleep` | modem/deep sleep 封装、唤醒原因 |
@@ -134,6 +134,7 @@ build_flags =
 | `ESP8266BASE_LOG_LEVEL` | `1` | 0=D, 1=I, 2=W, 3=E, 4=关闭 |
 | `ESP8266BASE_DEFAULT_HOSTNAME` | `"esp8266base"` | 编译期默认 hostname，合法 `eb_hostname` 优先 |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
+| `ESP8266BASE_WEB_PROFILE_MINIMAL` | `0` | `1` 时只保留 WiFi/Auth、Health、OTA POST 和应用路由 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |

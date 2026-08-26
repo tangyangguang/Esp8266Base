@@ -157,6 +157,8 @@ http://<device-ip>/ota
 
 上传页面显示百分比、已上传大小和结果。OTA 上传期间 Watchdog 会暂停，结束后恢复。`GET /ota` 和 `POST /ota` 都使用同一组 Basic Auth。
 
+MQTT 终端可启用 `ESP8266BASE_WEB_PROFILE_MINIMAL=1`；此时没有 `GET /ota` 页面，但 `POST /ota` 仍可用。使用 `tools/ota_upload.sh <device-url> <firmware.bin> [username]` 上传，密码通过 `OTA_PASSWORD` 或隐藏式提示输入。业务需要在 OTA 前停命令、断开 MQTT/TLS 时，注册 `Esp8266BaseOTA::setLifecycleCallbacks()`；完整示例见 `examples/minimal_web_ota`。
+
 ---
 
 ## 七、启用文件日志和配置审计

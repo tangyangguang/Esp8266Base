@@ -130,6 +130,8 @@ Esp8266Base（主入口）
 
 ## 七、Web 路由架构
 
+`ESP8266BASE_WEB_PROFILE_MINIMAL=0`（默认）使用完整路由：
+
 ```text
 ESP8266WebServer（端口 80）
   ├── 内置路由（固定）
@@ -154,6 +156,18 @@ ESP8266WebServer（端口 80）
         _pages[0..3]   GET handler   （最多 4 个）
         _apis [0..5]   GET+POST      （最多 6 个）
 ```
+
+`ESP8266BASE_WEB_PROFILE_MINIMAL=1` 只注册以下基础路由：
+
+```text
+GET/POST /wifi
+GET/POST /auth
+GET       /health
+POST      /ota       （仅启用 OTA；由 Esp8266BaseOTA 独立注册）
+应用页面/API          （固定静态数组，建议 1 页面 + 3 API）
+```
+
+最小模式不注册完整系统首页、System、Logs、hostname、reboot 或 `GET /ota`，应用页面头部也不生成完整系统导航。`POST /ota` 不依赖上传页面，因此脚本和 curl 上传仍可工作。
 
 应用路由路径必须以 `/` 开头，长度小于 24 字符，并且只允许字母、数字、`/`、`-`、`_`、`.`。内置导航和系统首页会对应用提供的路径、标题和日志路径做 HTML 输出转义。
 

@@ -501,9 +501,11 @@ static bool isRunning();
 | `/api/system/hostname` | POST | 保存 hostname 表单参数 `hostname`（需要 Basic Auth，重启生效） |
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
 | `/reboot` | POST | flush Config 后重启 |
-| `/health` | GET | JSON 健康信息（heap/maxBlock/ip/uptime/wifi，无需认证） |
+| `/health` | GET | 固定小型 JSON：firmware/version/uptime/heap/maxBlock/wifi/ip/ntp/lastWdtReset/otaInProgress（无需认证） |
 
 页面式路由和未知路径使用 Basic Auth 挑战；未知路径认证通过后返回 404。`/api/system/hostname` 未认证时返回 JSON 401，不发送 `WWW-Authenticate`，调用方需要显式提供 `Authorization` header。`/health` 保持免认证。
+
+`ESP8266BASE_WEB_PROFILE_MINIMAL=1` 时只注册 `GET/POST /wifi`、`GET/POST /auth`、`GET /health`、启用 OTA 时的 `POST /ota` 和应用路由。完整系统首页、Logs、System、hostname、reboot 与 `GET /ota` 均不注册；首页/导航配置 API 保留签名但在最小模式不产生系统页面或系统导航。
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
@@ -551,6 +553,19 @@ static bool isInProgress();
 ```
 OTA 上传是否正在进行。
 
+```cpp
+enum class Esp8266BaseOTAFailure : uint8_t;
+typedef bool (*Esp8266BaseOTAPrepareCallback)(char* reason, size_t reasonLen);
+typedef void (*Esp8266BaseOTAFailureCallback)(Esp8266BaseOTAFailure failure);
+typedef void (*Esp8266BaseOTASuccessCallback)();
+
+static void setLifecycleCallbacks(Esp8266BaseOTAPrepareCallback prepare,
+                                  Esp8266BaseOTAFailureCallback failure,
+                                  Esp8266BaseOTASuccessCallback success = nullptr);
+```
+
+回调均为可选固定函数指针。prepare 在首个固件块通过头检查后、`Update.begin()` 前运行，可写入最长 63 字符的拒绝原因；返回 `false` 时服务端返回 409，且不启动 Update。failure 对每个失败请求最多调用一次，覆盖未认证、无效镜像、prepare 拒绝、Update begin/write/end 失败、中止、无固件数据和成功提交前 flush 失败；Watchdog 在 failure 之前恢复，业务恢复逻辑应幂等。Config/FileLog flush 在 `Update.end(true)` 前执行，失败会中止 Update，不留下待启动镜像。success 仅在 Update 成功后调用。
+
 ### OTA 行为
 
 1. GET /ota 页面使用 Web Basic Auth；页面内用 XMLHttpRequest 上传并显示进度
@@ -559,7 +574,7 @@ OTA 上传是否正在进行。
 4. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，日志输出 `upload_started`
 5. 首个数据块：服务端再次做 ESP8266 固件头快速校验，拒绝 ESP32 固件、gzip 包和非固件文件；校验通过后调用 `Update.begin(ESP.getFreeSketchSpace())`
 6. 上传期间：分块写入固件，每块后 `yield()`，按 25% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
-7. 上传完成：输出 `upload_finished`，启用 Watchdog 时 `resume()`，成功后输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
+7. 上传完成：先检查 Config/FileLog flush，再调用 `Update.end(true)`；输出 `upload_finished`，启用 Watchdog 时 `resume()`，执行 success callback、输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
 8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息
 
 OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。当前不计算 SHA256；页面预检和服务端 ESP8266 镜像头快速校验用于提前拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，接收是否成功由 `Update.write()` 和 `Update.end(true)` 的写入与镜像校验结果决定。浏览器进度条表示上传进度，不代表服务端已经接受固件。
@@ -791,6 +806,7 @@ void loop() {
 | `ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
+| `ESP8266BASE_WEB_PROFILE_MINIMAL` | `0` | `1` 时只编译最小 Web 运行模式；默认完整模式 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
