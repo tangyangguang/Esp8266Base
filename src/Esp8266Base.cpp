@@ -180,7 +180,14 @@ bool Esp8266Base::begin() {
     Esp8266BaseOTA::begin();
 #endif
 
-    // 9. NTP / mDNS — 需要 WiFi 连接后触发（在 handle() 中检测）
+    // 9. MQTT — 配置由业务在 begin() 前提供；实际连接由 handle() 等待 WiFi/NTP。
+#if ESP8266BASE_USE_MQTT
+    if (!Esp8266BaseMQTT::begin()) {
+        ok = false;
+    }
+#endif
+
+    // 10. NTP / mDNS — 需要 WiFi 连接后触发（在 handle() 中检测）
 
     // 输出启动诊断
     logDiagnostics();
@@ -247,7 +254,19 @@ void Esp8266Base::handle() {
     }
 #endif
 
-    // 6. Web handle（server.handleClient()）
+
+    // 6. MQTT handle：NTP 本轮推进后再检查时间门控。
+#if ESP8266BASE_USE_MQTT
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+    Esp8266BaseMQTT::handle();
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+#endif
+
+    // 7. Web handle（server.handleClient()）
     // Feed around Web I/O so slow clients do not trip the library watchdog.
     // Do not pause/resume here: handle() runs every loop and Debug logs would flood serial.
 #if ESP8266BASE_USE_WEB
@@ -260,7 +279,7 @@ void Esp8266Base::handle() {
 #endif
 #endif
 
-    // 7. Watchdog handle — 最后检查，再喂狗，确保本轮所有模块都已执行且未超时
+    // 8. Watchdog handle — 最后检查，再喂狗，确保本轮所有模块都已执行且未超时
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::handle();
     Esp8266BaseWatchdog::feed();
@@ -306,7 +325,12 @@ void Esp8266Base::logDiagnostics() {
 #endif
 
 #if ESP8266BASE_USE_WEB
-    ESP8266BASE_LOG_I("Web ", "web_enabled=yes ota_enabled=%s",
+    ESP8266BASE_LOG_I("Web ", "web_enabled=yes profile=%s ota_enabled=%s",
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
+                      "mqtt_terminal",
+#else
+                      "full",
+#endif
 #if ESP8266BASE_USE_OTA
                       "yes"
 #else
@@ -315,6 +339,15 @@ void Esp8266Base::logDiagnostics() {
     );
 #else
     ESP8266BASE_LOG_I("Web ", "web_enabled=no ota_enabled=no");
+#endif
+
+#if ESP8266BASE_USE_MQTT
+    ESP8266BASE_LOG_I("MQTT", "mqtt_enabled=yes configured=%s state=%s attempt=%lu",
+                      Esp8266BaseMQTT::isConfigured() ? "yes" : "no",
+                      Esp8266BaseMQTT::stateName(),
+                      (unsigned long)Esp8266BaseMQTT::attemptCount());
+#else
+    ESP8266BASE_LOG_I("MQTT", "mqtt_enabled=no");
 #endif
 
     ESP8266BASE_LOG_I("Heap", "free_heap=%s max_block=%s", heapBuf, maxBuf);

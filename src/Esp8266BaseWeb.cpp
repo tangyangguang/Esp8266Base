@@ -19,6 +19,9 @@
 #if ESP8266BASE_USE_WATCHDOG
 #include "Esp8266BaseWatchdog.h"
 #endif
+#if ESP8266BASE_USE_MQTT
+#include "Esp8266BaseMQTT.h"
+#endif
 #include <LittleFS.h>
 #include <time.h>
 
@@ -26,27 +29,35 @@
 // 静态成员定义
 // ----------------------------------------------------------------------------
 ESP8266WebServer         Esp8266BaseWeb::_server(80);
+#if ESP8266BASE_WEB_MAX_APP_PAGES > 0
 Esp8266BaseWeb::AppRoute Esp8266BaseWeb::_pages[ESP8266BASE_WEB_MAX_APP_PAGES];
+#endif
+#if ESP8266BASE_WEB_MAX_APP_APIS > 0
 Esp8266BaseWeb::AppRoute Esp8266BaseWeb::_apis [ESP8266BASE_WEB_MAX_APP_APIS];
+#endif
+#if ESP8266BASE_WEB_MAX_APP_PAGES > 0
 uint8_t                  Esp8266BaseWeb::_pageCount = 0;
+#endif
+#if ESP8266BASE_WEB_MAX_APP_APIS > 0
 uint8_t                  Esp8266BaseWeb::_apiCount  = 0;
+#endif
 bool                     Esp8266BaseWeb::_running   = false;
 char                     Esp8266BaseWeb::_authUser[24] = ESP8266BASE_WEB_AUTH_USER;
 char                     Esp8266BaseWeb::_authPass[24] = ESP8266BASE_WEB_AUTH_PASS;
 char                     Esp8266BaseWeb::_deviceName[24] = "";
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 char                     Esp8266BaseWeb::_homePath[24] = "";
 #endif
 char                     Esp8266BaseWeb::_hostname[33] = "esp8266base";
 char                     Esp8266BaseWeb::_fwName[24] = "esp8266base";
 char                     Esp8266BaseWeb::_fwVersion[16] = "1.0.0";
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 uint32_t                 Esp8266BaseWeb::_bootCount = 0;
 char                     Esp8266BaseWeb::_titleBuf[80] = "ESP8266";
 #endif
 char                     Esp8266BaseWeb::_activeUri[32] = "";
 char                     Esp8266BaseWeb::_activeMethod[5] = "";
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 char                     Esp8266BaseWeb::_builtinLabels[3][16] = {
     "Status", "Logs", "System"
 };
@@ -57,7 +68,7 @@ Esp8266BaseWebSystemNavMode Esp8266BaseWeb::_systemNavMode = Esp8266BaseWebSyste
 // ----------------------------------------------------------------------------
 // PROGMEM HTML 片段（全部在 Flash，不占 DRAM）
 // ----------------------------------------------------------------------------
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
 static const char WEB_HEAD[] PROGMEM =
     "<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>"
     "<style>body{font-family:Arial,sans-serif;padding:12px;max-width:640px;margin:auto;line-height:1.45}"
@@ -135,7 +146,7 @@ static const char WEB_WIFI_FORM_POST[] PROGMEM =
     "<input type=submit value='Save &amp; Connect'>"
     "</form>";
 
-#if ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_USE_OTA && !ESP8266BASE_PROFILE_MQTT_TERMINAL
 static const char WEB_OTA_FORM[] PROGMEM =
     "<h2>OTA Update</h2>"
     "<form id=f>"
@@ -184,7 +195,7 @@ static const char WEB_AUTH_FORM[] PROGMEM =
     "<input type=submit value='Update Password'>"
     "</form>";
 
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 static const char WEB_HOSTNAME_FORM_PRE[] PROGMEM =
     "<section><h3>Hostname</h3>"
     "<p>Current hostname: ";
@@ -234,7 +245,7 @@ static const char WEB_LOGS_PRE[] PROGMEM =
     "<h2>Logs</h2>";
 #endif
 
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 static void _trimWhitespace(char* s) {
     if (!s) return;
     char* start = s;
@@ -292,7 +303,7 @@ static void _sendAttrEscaped(const char* s) {
     }
 }
 
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 static void _sendLogFileEscaped(const char* path) {
     if (!path || !LittleFS.exists(path)) return;
     File f = LittleFS.open(path, "r");
@@ -327,7 +338,7 @@ static void _redirect(const char* url) {
     Esp8266BaseWeb::server().send(303);
 }
 
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 static void _sendFileLogModeOption(const char* value,
                                    const char* label,
                                    Esp8266BaseFileLog::Mode mode) {
@@ -431,6 +442,7 @@ static void _sendFileLogSystemSection() {
 }
 #endif
 
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL || ESP8266BASE_WEB_MAX_APP_PAGES > 0 || ESP8266BASE_WEB_MAX_APP_APIS > 0
 static bool _isValidPath(const char* path) {
     if (!path || path[0] != '/') return false;
     size_t len = strlen(path);
@@ -445,8 +457,9 @@ static bool _isValidPath(const char* path) {
     }
     return true;
 }
+#endif
 
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 const char* Esp8266BaseWeb::_builtinLabel(Esp8266BaseWebBuiltinLabel label) {
     return _builtinLabels[(uint8_t)label];
 }
@@ -466,7 +479,7 @@ void Esp8266BaseWeb::_sendLink(const char* path, const char* title, const char* 
     Esp8266BaseWeb::sendChunk("</a>");
 }
 
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 const char* Esp8266BaseWeb::_brandTitle() {
     return _deviceName[0] ? _deviceName : _titleBuf;
 }
@@ -489,10 +502,12 @@ void Esp8266BaseWeb::_sendSystemLinks() {
 #endif
 
 void Esp8266BaseWeb::_sendAppLinks() {
+#if ESP8266BASE_WEB_MAX_APP_PAGES > 0
     for (uint8_t i = 0; i < _pageCount; i++) {
         if (!_pages[i].showInNav) continue;
         _sendLink(_pages[i].path, _pages[i].title, nullptr);
     }
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -508,11 +523,11 @@ bool Esp8266BaseWeb::begin() {
     _server.on("/wifi",   HTTP_POST, _handleWiFiPost);
     _server.on("/auth",   HTTP_GET,  _handleAuthGet);
     _server.on("/auth",   HTTP_POST, _handleAuthPost);
-#if ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_USE_OTA && !ESP8266BASE_PROFILE_MQTT_TERMINAL
     _server.on("/ota",    HTTP_GET,  _handleOtaGet);
     // POST /ota 由 Esp8266BaseOTA::begin() 注册（需要 upload handler）
 #endif
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     _server.on("/",       HTTP_GET,  _handleRoot);
     _server.on("/esp8266base", HTTP_GET, _handleSystemHome);
     _server.on("/logs",   HTTP_GET,  _handleLogsGet);
@@ -523,6 +538,8 @@ bool Esp8266BaseWeb::begin() {
     _server.on("/api/system/hostname", HTTP_GET, _handleHostnameApiGet);
     _server.on("/api/system/hostname", HTTP_POST, _handleHostnameApiPost);
     _server.on("/reboot", HTTP_POST, _handleRebootPost);
+#else
+    _server.on("/",       HTTP_GET,  _handleTerminalRoot);
 #endif
     _server.on("/health", HTTP_GET,  _handleHealth);
     _server.onNotFound(_handleNotFound);
@@ -530,13 +547,23 @@ bool Esp8266BaseWeb::begin() {
     _server.begin();
     _running = true;
     ESP8266BASE_LOG_I("Web ", "web_server_started profile=%s auth_required=yes builtin_routes=%u app_pages_registered=%d/%d app_apis_registered=%d/%d",
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
-                      "minimal", 5U,
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
+                      "mqtt_terminal", 6U,
 #else
                       "full", (unsigned)(15 + (ESP8266BASE_USE_OTA ? 1 : 0)),
 #endif
-                      (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES,
-                      (int)_apiCount,  ESP8266BASE_WEB_MAX_APP_APIS);
+#if ESP8266BASE_WEB_MAX_APP_PAGES > 0
+                      (int)_pageCount,
+#else
+                      0,
+#endif
+                      ESP8266BASE_WEB_MAX_APP_PAGES,
+#if ESP8266BASE_WEB_MAX_APP_APIS > 0
+                      (int)_apiCount,
+#else
+                      0,
+#endif
+                      ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
 }
 
@@ -562,6 +589,12 @@ bool Esp8266BaseWeb::isRunning() {
 }
 
 bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWebHandler handler) {
+#if ESP8266BASE_WEB_MAX_APP_PAGES == 0
+    (void)title;
+    (void)handler;
+    ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=capacity_disabled path=%s", path ? path : "(null)");
+    return false;
+#else
     if (!path || !handler) return false;
     if (!_running) {
         ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=web_not_running path=%s", path);
@@ -602,9 +635,15 @@ bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWeb
     ESP8266BASE_LOG_I("Web ", "app_page_registered path=%s title=%s app_pages_registered=%d/%d",
                       path, _pages[index].title, (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES);
     return true;
+#endif
 }
 
 bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
+#if ESP8266BASE_WEB_MAX_APP_APIS == 0
+    (void)handler;
+    ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=capacity_disabled path=%s", path ? path : "(null)");
+    return false;
+#else
     if (!path || !handler) return false;
     if (!_running) {
         ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=web_not_running path=%s", path);
@@ -642,6 +681,7 @@ bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
     ESP8266BASE_LOG_I("Web ", "app_api_registered path=%s app_apis_registered=%d/%d",
                       path, (int)_apiCount, ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
+#endif
 }
 
 void Esp8266BaseWeb::setDeviceName(const char* name) {
@@ -651,7 +691,7 @@ void Esp8266BaseWeb::setDeviceName(const char* name) {
 }
 
 void Esp8266BaseWeb::setHomePath(const char* path) {
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
     (void)path;
 #else
     if (!_isValidPath(path)) return;
@@ -661,7 +701,7 @@ void Esp8266BaseWeb::setHomePath(const char* path) {
 }
 
 void Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode mode) {
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
     (void)mode;
 #else
     _homeMode = mode;
@@ -669,7 +709,7 @@ void Esp8266BaseWeb::setHomeMode(Esp8266BaseWebHomeMode mode) {
 }
 
 void Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode mode) {
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
     (void)mode;
 #else
     _systemNavMode = mode;
@@ -677,7 +717,7 @@ void Esp8266BaseWeb::setSystemNavMode(Esp8266BaseWebSystemNavMode mode) {
 }
 
 void Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const char* title) {
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
     (void)label;
     (void)title;
 #else
@@ -711,7 +751,7 @@ void Esp8266BaseWeb::setSystemInfo(const char* hostname, const char* fw, const c
         strncpy(_fwVersion, ver, sizeof(_fwVersion) - 1);
         _fwVersion[sizeof(_fwVersion) - 1] = '\0';
     }
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
     (void)bootCount;
 #else
     _bootCount = bootCount;
@@ -815,20 +855,30 @@ void Esp8266BaseWeb::_markRequest() {
 
 void Esp8266BaseWeb::_handleAppPage(uint8_t index) {
     _markRequest();
+#if ESP8266BASE_WEB_MAX_APP_PAGES > 0
     if (index < _pageCount && _pages[index].handler) {
         _pages[index].handler();
     } else {
         _server.send(404, "text/plain", "Page route not found");
     }
+#else
+    (void)index;
+    _server.send(404, "text/plain", "Page routes disabled");
+#endif
 }
 
 void Esp8266BaseWeb::_handleAppApi(uint8_t index) {
     _markRequest();
+#if ESP8266BASE_WEB_MAX_APP_APIS > 0
     if (index < _apiCount && _apis[index].handler) {
         _apis[index].handler();
     } else {
         _server.send(404, "text/plain", "API route not found");
     }
+#else
+    (void)index;
+    _server.send(404, "text/plain", "API routes disabled");
+#endif
 }
 
 void Esp8266BaseWeb::_handleAppPage0() { _handleAppPage(0); }
@@ -855,18 +905,18 @@ void Esp8266BaseWeb::sendHeader() {
                    "Connection: close\r\n"
                    "Cache-Control: no-store\r\n\r\n"));
     sendChunk("<!DOCTYPE html><html><head><title>");
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
     _sendAttrEscaped(_deviceName[0] ? _deviceName : _fwName);
 #else
     _sendAttrEscaped(_titleBuf);
 #endif
     sendChunk("</title>");
     sendContent_P(WEB_HEAD);
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     _sendLink(_brandHref(), _brandTitle(), "brand");
 #endif
     _sendAppLinks();
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     if (_systemNavMode == Esp8266BaseWebSystemNavMode::TOP_NAV) {
         _sendSystemLinks();
     }
@@ -875,7 +925,7 @@ void Esp8266BaseWeb::sendHeader() {
 }
 
 void Esp8266BaseWeb::sendFooter() {
-#if ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
     sendChunk("<footer>Free heap: ");
     char heap[16];
     Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heap, sizeof(heap));
@@ -943,7 +993,7 @@ void Esp8266BaseWeb::sendChunk(const char* content) {
 // ----------------------------------------------------------------------------
 // 内置路由处理函数
 // ----------------------------------------------------------------------------
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 void Esp8266BaseWeb::_handleRoot() {
     _markRequest();
     if (_homePath[0] && _homeMode != Esp8266BaseWebHomeMode::DEFAULT_SYSTEM_HOME) {
@@ -1212,7 +1262,7 @@ void Esp8266BaseWeb::_handleAuthPost() {
     _redirect("/auth?saved=1");
 }
 
-#if ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_USE_OTA && !ESP8266BASE_PROFILE_MQTT_TERMINAL
 void Esp8266BaseWeb::_handleOtaGet() {
     if (!checkAuth()) return;
     sendHeader();
@@ -1221,7 +1271,7 @@ void Esp8266BaseWeb::_handleOtaGet() {
 }
 #endif
 
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 void Esp8266BaseWeb::_handleLogsGet() {
     if (!checkAuth()) return;
     sendHeader();
@@ -1467,6 +1517,15 @@ void Esp8266BaseWeb::_handleRebootPost() {
     delay(500);
     ESP.restart();
 }
+#else
+void Esp8266BaseWeb::_handleTerminalRoot() {
+    _markRequest();
+    if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG) {
+        _redirect("/wifi");
+    } else {
+        _redirect("/health");
+    }
+}
 #endif
 
 void Esp8266BaseWeb::_handleHealth() {
@@ -1496,19 +1555,42 @@ void Esp8266BaseWeb::_handleHealth() {
     otaInProgress = Esp8266BaseOTA::isInProgress();
 #endif
 
-    // 固定小型 JSON，不包含 SSID、密码、凭据或证书。
-    char json[288];
+    const char* mqttState = "disabled";
+    const char* mqttReason = "none";
+    uint32_t mqttAttempt = 0;
+    bool mqttConnected = false;
+#if ESP8266BASE_USE_MQTT
+    mqttState = Esp8266BaseMQTT::stateName();
+    mqttReason = Esp8266BaseMQTT::lastDisconnectReasonName();
+    mqttAttempt = Esp8266BaseMQTT::attemptCount();
+    mqttConnected = Esp8266BaseMQTT::connected();
+#endif
+
+    // 分块输出固定 JSON，不包含 SSID、broker、clientId、用户名、密码或证书。
+    WiFiClient& client = _server.client();
+    client.setNoDelay(true);
+    client.print(F("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                   "Connection: close\r\nCache-Control: no-store\r\n\r\n"));
+    char json[160];
     snprintf(json, sizeof(json),
              "{\"firmware\":\"%s\",\"version\":\"%s\",\"uptime\":%lu,"
-             "\"heap\":%u,\"maxBlock\":%u,\"wifi\":\"%s\",\"ip\":\"%s\","
-             "\"ntp\":\"%s\",\"lastWdtReset\":%s,\"otaInProgress\":%s}",
+             "\"heap\":%u,\"maxBlock\":%u,",
              _fwName, _fwVersion, millis() / 1000UL,
-             (unsigned)ESP.getFreeHeap(),
-             (unsigned)ESP.getMaxFreeBlockSize(),
-             wifiState, ip, ntpState,
-             lastWdtReset ? "true" : "false",
-             otaInProgress ? "true" : "false");
-    _server.send(200, "application/json", json);
+             (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
+    client.write((const uint8_t*)json, strlen(json));
+    snprintf(json, sizeof(json),
+             "\"wifi\":\"%s\",\"ip\":\"%s\",\"ntp\":\"%s\","
+             "\"mqtt\":\"%s\",\"mqttConnected\":%s,",
+             wifiState, ip, ntpState, mqttState, mqttConnected ? "true" : "false");
+    client.write((const uint8_t*)json, strlen(json));
+    snprintf(json, sizeof(json),
+             "\"mqttAttempt\":%lu,\"mqttLastReason\":\"%s\","
+             "\"lastWdtReset\":%s,\"otaInProgress\":%s}",
+             (unsigned long)mqttAttempt, mqttReason,
+             lastWdtReset ? "true" : "false", otaInProgress ? "true" : "false");
+    client.write((const uint8_t*)json, strlen(json));
+    client.flush();
+    client.stop();
 }
 
 void Esp8266BaseWeb::_handleNotFound() {

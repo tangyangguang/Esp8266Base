@@ -31,7 +31,7 @@
    │        │        │          │
 ┌──▼──┐ ┌──▼──┐ ┌───▼──┐  ┌───▼────────────────┐
 │ Log │ │ Cfg │ │ WiFi │  │   Network Layer     │
-│     │ │     │ │      │  │  Web / OTA          │
+│     │ │     │ │      │  │  Web / OTA / MQTT   │
 └─────┘ └─────┘ └──────┘  │  NTP / mDNS         │
                            └─────────────────────┘
 ┌───────────────────────────────────────────────┐
@@ -54,6 +54,7 @@ Esp8266Base（主入口）
   │     └── Esp8266BaseOTA  （依赖 Web server 已启动；GET 页面使用 Web Basic Auth）
   ├── Esp8266BaseNTP        （WiFi 连接后由 handle() 触发 begin()；SNTP + 主动 UDP NTP 双路径对时）
   ├── Esp8266BaseMDNS       （WiFi 连接后由 handle() 触发 begin()；WiFi 掉线后重置，重连自动重启）
+  ├── Esp8266BaseMQTT       （可选；依赖 WiFi + NTP 就绪；业务通过固定函数指针接入）
   ├── Esp8266BaseSleep      （deepSleep 前调用 Config::flush()；启用 Watchdog 时先 pause）
   └── Esp8266BaseWatchdog   （启用时 OTA 期间自动 pause/resume；handle() 最后执行，确保其他模块已运行）
 ```
@@ -75,7 +76,8 @@ Esp8266Base（主入口）
 6. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
 7. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）
 8. Esp8266BaseOTA::begin()          — `ESP8266BASE_USE_OTA=1` 时（要求 Web，注册 POST /ota）
-9. Esp8266Base::logDiagnostics()    — 输出启动诊断日志
+9. Esp8266BaseMQTT::begin()         — `ESP8266BASE_USE_MQTT=1` 时校验配置并绑定回调，不立即建连
+10. Esp8266Base::logDiagnostics()   — 输出启动诊断日志
 ```
 
 > NTP 和 mDNS 不在 `begin()` 中初始化，而是在 `handle()` 检测到 WiFi 连接时自动触发。
@@ -95,12 +97,13 @@ Esp8266Base（主入口）
                                        WiFi 掉线时：重置 mDNS 状态，等待重连后重启
 6. Esp8266BaseNTP::handle()         — `ESP8266BASE_USE_NTP=1` 时
 7. Esp8266BaseMDNS::handle()        — `ESP8266BASE_USE_MDNS=1` 时
-8. Esp8266BaseWeb::handle()         — `ESP8266BASE_USE_WEB=1` 时，请求前后喂库级 WDT
-9. Esp8266BaseWatchdog::handle()    — `ESP8266BASE_USE_WATCHDOG=1` 时
+8. Esp8266BaseMQTT::handle()        — `ESP8266BASE_USE_MQTT=1` 时；WiFi/NTP 门控后推进连接
+9. Esp8266BaseWeb::handle()         — `ESP8266BASE_USE_WEB=1` 时，请求前后喂库级 WDT
+10. Esp8266BaseWatchdog::handle()   — `ESP8266BASE_USE_WATCHDOG=1` 时
    Esp8266BaseWatchdog::feed()      — 本轮完成后喂狗
 ```
 
-每个 handle() 不得有长阻塞。长操作必须分步推进或在操作中定期 `yield()`。
+库自有状态机不得忙等或长阻塞。`espMqttClient` 的 MQTT 状态机分步推进，但 ESP8266 同步安全传输的 DNS/TCP/TLS connect 单次尝试可能阻塞到网络超时；有界退避保证失败后不会立即重试。
 
 ---
 
@@ -130,7 +133,7 @@ Esp8266Base（主入口）
 
 ## 七、Web 路由架构
 
-`ESP8266BASE_WEB_PROFILE_MINIMAL=0`（默认）使用完整路由：
+`ESP8266BASE_PROFILE_MQTT_TERMINAL=0`（默认）使用完整路由：
 
 ```text
 ESP8266WebServer（端口 80）
@@ -157,17 +160,18 @@ ESP8266WebServer（端口 80）
         _apis [0..5]   GET+POST      （最多 6 个）
 ```
 
-`ESP8266BASE_WEB_PROFILE_MINIMAL=1` 只注册以下基础路由：
+`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 只注册以下基础路由：
 
 ```text
+GET       /           （AP_CONFIG 时 303 /wifi；STA 时 303 /health）
 GET/POST /wifi
 GET/POST /auth
 GET       /health
 POST      /ota       （仅启用 OTA；由 Esp8266BaseOTA 独立注册）
-应用页面/API          （固定静态数组，建议 1 页面 + 3 API）
+应用页面/API          （仅按显式容量编译；容量为 0 时没有对应数组）
 ```
 
-最小模式不注册完整系统首页、System、Logs、hostname、reboot 或 `GET /ota`，应用页面头部也不生成完整系统导航。`POST /ota` 不依赖上传页面，因此脚本和 curl 上传仍可工作。
+MQTT_TERMINAL 不注册完整系统首页、System、Logs、hostname、reboot 或 `GET /ota`，也不生成完整系统导航。`POST /ota` 不依赖上传页面，因此脚本和 curl 上传仍可工作。
 
 应用路由路径必须以 `/` 开头，长度小于 24 字符，并且只允许字母、数字、`/`、`-`、`_`、`.`。内置导航和系统首页会对应用提供的路径、标题和日志路径做 HTML 输出转义。
 
@@ -184,9 +188,21 @@ struct AppRoute {
 // 总计：4×48 + 6×48 = 480B
 ```
 
+业务容量为 0 时，`_pages` 或 `_apis` 数组由预处理直接排除；完整模式默认容量仍为 4+6。
+
 ---
 
-## 八、Config 存储架构
+## 八、MQTT 与 OTA 单向编排
+
+依赖方向固定为 `Esp8266Base → Esp8266BaseMQTT` 与 `Esp8266BaseOTA → Esp8266BaseMQTT`。MQTT 模块不调用 OTA、Web 或业务代码；业务只注册 connected/disconnected/message 普通函数指针。connected callback 每次成功连接都会触发，重新订阅由业务完成。
+
+MQTT 状态为 `UNCONFIGURED → WAITING_WIFI → WAITING_TIME → BACKOFF/CONNECTING → CONNECTED`。断线按 2s、4s、8s、16s、32s、60s 有界指数退避；WiFi 或 NTP 不就绪时回到门控状态。底层同步 BearSSL connect 在 ESP8266 上可能阻塞到单次网络超时，但外围不会忙循环。
+
+OTA 顺序为：业务 prepare 判断 → `Esp8266BaseMQTT::pauseForOTA()` 禁止消息并正常 DISCONNECT（超时才强制释放）→ `Update.begin()`。失败路径先恢复 Watchdog，再恢复 MQTT 重连许可，最后调用业务 failure callback；成功路径保持 MQTT 为 `PAUSED_OTA`，flush 配置/日志后重启。没有事件总线，也不让 MQTT 依赖执行器状态。
+
+---
+
+## 九、Config 存储架构
 
 文件系统布局（LittleFS）：
 
@@ -218,13 +234,13 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 
 ---
 
-## 九、全局 RAM 预算
+## 十、全局 RAM 预算
 
 全局静态 RAM 预算以 `docs/04_memory_budget.md` 为唯一权威来源。本文只描述架构关系，避免维护两份预算表导致数值漂移。
 
 ---
 
-## 十、关键不做项
+## 十一、关键不做项
 
 | 项目 | 原因 |
 |------|------|

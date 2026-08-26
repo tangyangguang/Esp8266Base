@@ -17,12 +17,13 @@
 - [Esp8266BaseConfig — 配置存储](#4-esp8266baseconfig--配置存储)
 - [Esp8266BaseWiFi — WiFi 管理](#5-esp8266basewifi--wifi-管理)
 - [Esp8266BaseWeb — Web 服务](#6-esp8266baseweb--web-服务)
-- [Esp8266BaseOTA — OTA 更新](#7-esp8266baseota--ota-更新)
-- [Esp8266BaseNTP — 网络对时](#8-esp8266basentp--网络对时)
-- [Esp8266BaseMDNS — mDNS 服务](#9-esp8266basemdns--mdns-服务)
-- [Esp8266BaseSleep — 睡眠管理](#10-esp8266basesleep--睡眠管理)
-- [Esp8266BaseWatchdog — 看门狗](#11-esp8266basewatchdog--看门狗)
-- [编译宏](#12-编译宏)
+- [Esp8266BaseMQTT — TLS MQTT 传输](#7-esp8266basemqtt--tls-mqtt-传输)
+- [Esp8266BaseOTA — OTA 更新](#8-esp8266baseota--ota-更新)
+- [Esp8266BaseNTP — 网络对时](#9-esp8266basentp--网络对时)
+- [Esp8266BaseMDNS — mDNS 服务](#10-esp8266basemdns--mdns-服务)
+- [Esp8266BaseSleep — 睡眠管理](#11-esp8266basesleep--睡眠管理)
+- [Esp8266BaseWatchdog — 看门狗](#12-esp8266basewatchdog--看门狗)
+- [编译宏](#13-编译宏)
 
 ---
 
@@ -501,11 +502,11 @@ static bool isRunning();
 | `/api/system/hostname` | POST | 保存 hostname 表单参数 `hostname`（需要 Basic Auth，重启生效） |
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
 | `/reboot` | POST | flush Config 后重启 |
-| `/health` | GET | 固定小型 JSON：firmware/version/uptime/heap/maxBlock/wifi/ip/ntp/lastWdtReset/otaInProgress（无需认证） |
+| `/health` | GET | 固定 JSON：firmware/version/uptime/heap/maxBlock/wifi/ip/ntp/MQTT 状态与 attempt/last reason/WDT/OTA（无需认证，不含敏感配置） |
 
 页面式路由和未知路径使用 Basic Auth 挑战；未知路径认证通过后返回 404。`/api/system/hostname` 未认证时返回 JSON 401，不发送 `WWW-Authenticate`，调用方需要显式提供 `Authorization` header。`/health` 保持免认证。
 
-`ESP8266BASE_WEB_PROFILE_MINIMAL=1` 时只注册 `GET/POST /wifi`、`GET/POST /auth`、`GET /health`、启用 OTA 时的 `POST /ota` 和应用路由。完整系统首页、Logs、System、hostname、reboot 与 `GET /ota` 均不注册；首页/导航配置 API 保留签名但在最小模式不产生系统页面或系统导航。
+`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 时只注册极小 `GET /` 引导、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`POST /ota` 和显式容量的应用路由。AP_CONFIG 下 `/` 为 `303 /wifi`，STA 下为 `303 /health`。完整系统首页、Logs、System、hostname、reboot 与 `GET /ota` 均不注册；容量为 0 时不保留对应应用路由数组。
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
@@ -533,7 +534,49 @@ void handleSensorPage() {
 
 ---
 
-## 7. Esp8266BaseOTA — OTA 更新
+## 7. Esp8266BaseMQTT — TLS MQTT 传输
+
+头文件：`Esp8266BaseMQTT.h`，仅 `ESP8266BASE_USE_MQTT=1` 时可用。
+
+```cpp
+static bool configure(const Esp8266BaseMQTTConfig& config);
+static void setCallbacks(Esp8266BaseMQTTConnectedCallback connected,
+                         Esp8266BaseMQTTDisconnectedCallback disconnected,
+                         Esp8266BaseMQTTMessageCallback message);
+static bool begin();
+static void handle();
+```
+
+`configure()` 必须在 `Esp8266Base::begin()` 前调用。必需字段是 host、非零 port、clientId、非零 keepAliveSeconds 和 `BearSSL::X509List` trust anchor；缺失时返回 `false`，主入口 `begin()` 也返回失败并记录 `missing_required_config`。短字符串复制到固定缓冲；trust anchor 与可选 LWT payload 由业务持有并须覆盖整个 MQTT 生命周期。
+
+```cpp
+static uint16_t publish(const char* topic, uint8_t qos, bool retain,
+                        const uint8_t* payload, size_t length);
+static uint16_t publish(const char* topic, uint8_t qos, bool retain,
+                        const char* payload);
+static uint16_t subscribe(const char* topic, uint8_t qos);
+```
+
+支持 QoS 0/1/2；未连接、OTA 暂停、空参数或非法 QoS 返回 0。LWT 通过 `Esp8266BaseMQTTConfig::willTopic/willPayload/willQos/willRetain` 配置。connected callback 每次成功连接都会调用，业务必须在其中重新订阅；message callback 保留上游分块参数 `len/index/total`，payload 不保证以 `\0` 结尾。
+
+```cpp
+static bool connected();
+static bool isConfigured();
+static Esp8266BaseMQTTState state();
+static const char* stateName();
+static uint32_t attemptCount();
+static uint32_t nextAttemptAt();
+static Esp8266BaseMQTTDisconnectReason lastDisconnectReason();
+static const char* lastDisconnectReasonName();
+```
+
+只读诊断不返回 broker、clientId、用户名、密码或证书。状态包括 `UNCONFIGURED/WAITING_WIFI/WAITING_TIME/BACKOFF/CONNECTING/CONNECTED/PAUSED_OTA`。`pauseForOTA()`、`resumeAfterOTAFailure()`、`keepPausedAfterOTASuccess()` 是 OTA 编排接口，业务通常不直接调用。
+
+基础库 API 和状态只保存固定函数指针；传给 `espMqttClient 1.7.3` 后，上游内部 callback 包装、出站队列、证书解析和 TLS 会话仍可能使用动态堆。MQTT 收发缓冲保持上游默认值，BearSSL 缓冲为 4096/1024。
+
+---
+
+## 8. Esp8266BaseOTA — OTA 更新
 
 头文件：`Esp8266BaseOTA.h`
 
@@ -564,7 +607,7 @@ static void setLifecycleCallbacks(Esp8266BaseOTAPrepareCallback prepare,
                                   Esp8266BaseOTASuccessCallback success = nullptr);
 ```
 
-回调均为可选固定函数指针。prepare 在首个固件块通过头检查后、`Update.begin()` 前运行，可写入最长 63 字符的拒绝原因；返回 `false` 时服务端返回 409，且不启动 Update。failure 对每个失败请求最多调用一次，覆盖未认证、无效镜像、prepare 拒绝、Update begin/write/end 失败、中止、无固件数据和成功提交前 flush 失败；Watchdog 在 failure 之前恢复，业务恢复逻辑应幂等。Config/FileLog flush 在 `Update.end(true)` 前执行，失败会中止 Update，不留下待启动镜像。success 仅在 Update 成功后调用。
+回调均为可选固定函数指针。prepare 在首个固件块通过头检查后运行，可写入最长 63 字符的拒绝原因；返回 `false` 时 MQTT 不受影响且不启动 Update。通过后基础库自动暂停 MQTT/TLS，再调用 `Update.begin()`。failure 对每个失败请求最多调用一次；Watchdog 与 MQTT 重连许可在 failure 之前恢复。Config/FileLog flush 在 `Update.end(true)` 前执行，失败会中止 Update。success 仅在 Update 成功后调用，MQTT 保持关闭等待重启。
 
 ### OTA 行为
 
@@ -572,7 +615,7 @@ static void setLifecycleCallbacks(Esp8266BaseOTAPrepareCallback prepare,
 2. POST /ota 在上传开始时强制验证 Basic Auth；未认证请求返回 `401 Unauthorized`
 3. 页面提交前：内置 OTA 页用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验，失败时不发起上传并提示 `Invalid firmware: not an ESP8266 app image`
 4. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，日志输出 `upload_started`
-5. 首个数据块：服务端再次做 ESP8266 固件头快速校验，拒绝 ESP32 固件、gzip 包和非固件文件；校验通过后调用 `Update.begin(ESP.getFreeSketchSpace())`
+5. 首个数据块：服务端做固件头检查，业务 prepare 通过后暂停 MQTT/TLS，再调用 `Update.begin(ESP.getFreeSketchSpace())`
 6. 上传期间：分块写入固件，每块后 `yield()`，按 25% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
 7. 上传完成：先检查 Config/FileLog flush，再调用 `Update.end(true)`；输出 `upload_finished`，启用 Watchdog 时 `resume()`，执行 success callback、输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
 8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息
@@ -581,7 +624,7 @@ OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZ
 
 ---
 
-## 8. Esp8266BaseNTP — 网络对时
+## 9. Esp8266BaseNTP — 网络对时
 
 头文件：`Esp8266BaseNTP.h`
 
@@ -628,7 +671,7 @@ if (Esp8266BaseNTP::formatTo(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S")) {
 
 ---
 
-## 9. Esp8266BaseMDNS — mDNS 服务
+## 10. Esp8266BaseMDNS — mDNS 服务
 
 头文件：`Esp8266BaseMDNS.h`
 
@@ -656,7 +699,7 @@ static bool isRunning();
 
 ---
 
-## 10. Esp8266BaseSleep — 睡眠管理
+## 11. Esp8266BaseSleep — 睡眠管理
 
 头文件：`Esp8266BaseSleep.h`
 
@@ -725,7 +768,7 @@ void collectAndSleep() {
 
 ---
 
-## 11. Esp8266BaseWatchdog — 看门狗
+## 12. Esp8266BaseWatchdog — 看门狗
 
 头文件：`Esp8266BaseWatchdog.h`
 
@@ -790,7 +833,7 @@ void loop() {
 
 ---
 
-## 12. 编译宏
+## 13. 编译宏
 
 在 `platformio.ini` 的 `build_flags` 中设置：
 
@@ -806,7 +849,10 @@ void loop() {
 | `ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
-| `ESP8266BASE_WEB_PROFILE_MINIMAL` | `0` | `1` 时只编译最小 Web 运行模式；默认完整模式 |
+| `ESP8266BASE_PROFILE_MQTT_TERMINAL` | `0` | 正式 MQTT 智能终端模式；要求 Web/OTA/NTP/WDT/MQTT |
+| `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译通用 TLS MQTT 模块；要求 NTP |
+| `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 初始退避 ms |
+| `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 退避上限 ms |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |

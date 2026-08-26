@@ -7,6 +7,9 @@
 #include "Esp8266BaseLog.h"
 #include "Esp8266BaseFileLog.h"
 #include "Esp8266BaseUtil.h"
+#if ESP8266BASE_USE_MQTT
+#include "Esp8266BaseMQTT.h"
+#endif
 #include <Updater.h>
 
 // ----------------------------------------------------------------------------
@@ -156,6 +159,9 @@ void Esp8266BaseOTA::_resetRequestState() {
         Update.end();
     }
     _resumeWatchdog();
+#if ESP8266BASE_USE_MQTT
+    Esp8266BaseMQTT::resumeAfterOTAFailure();
+#endif
     _inProgress = false;
     _rejected = false;
     _started = false;
@@ -183,6 +189,9 @@ void Esp8266BaseOTA::_notifyFailure(Esp8266BaseOTAFailure failure) {
 void Esp8266BaseOTA::_notifySuccess() {
     if (_successNotified) return;
     _successNotified = true;
+#if ESP8266BASE_USE_MQTT
+    Esp8266BaseMQTT::keepPausedAfterOTASuccess();
+#endif
     if (_successCallback) {
         _successCallback();
     }
@@ -205,6 +214,9 @@ void Esp8266BaseOTA::_failUpload(uint16_t status, const char* message, bool abor
         _updateStarted = false;
     }
     _resumeWatchdog();
+#if ESP8266BASE_USE_MQTT
+    Esp8266BaseMQTT::resumeAfterOTAFailure();
+#endif
     _notifyFailure(failure);
 }
 
@@ -320,6 +332,14 @@ void Esp8266BaseOTA::_handleUploadChunk() {
                                   _failureMessage);
                 return;
             }
+#if ESP8266BASE_USE_MQTT
+            if (!Esp8266BaseMQTT::pauseForOTA()) {
+                _failUpload(503, "MQTT/TLS did not stop for OTA", false,
+                            Esp8266BaseOTAFailure::MQTT_PAUSE_FAILED);
+                ESP8266BASE_LOG_E("OTA ", "upload_rejected reason=mqtt_pause_failed");
+                return;
+            }
+#endif
             if (!Update.begin(ESP.getFreeSketchSpace())) {
                 _failUpload(500, "Update failed: begin failed", false,
                             Esp8266BaseOTAFailure::UPDATE_BEGIN_FAILED);

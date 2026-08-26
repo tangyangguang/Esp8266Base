@@ -374,27 +374,46 @@ def test_watchdog_and_ota_failure_contract() -> None:
                   "OTA write failure immediate closeout")
 
 
-def test_minimal_web_and_ota_lifecycle_contract() -> None:
+def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     options_h = read("src/Esp8266BaseOptions.h")
+    mqtt_h = read("src/Esp8266BaseMQTT.h")
+    mqtt_cpp = read("src/Esp8266BaseMQTT.cpp")
     web_cpp = read("src/Esp8266BaseWeb.cpp")
     web_h = read("src/Esp8266BaseWeb.h")
     ota_cpp = read("src/Esp8266BaseOTA.cpp")
     ota_h = read("src/Esp8266BaseOTA.h")
-    minimal_ini = read("examples/minimal_web_ota/platformio.ini")
+    terminal_ini = read("examples/mqtt_terminal/platformio.ini")
+    terminal_example = read("examples/mqtt_terminal/src/main.cpp")
     upload_script = read("tools/ota_upload.sh")
     config_cpp = read("src/Esp8266BaseConfig.cpp")
 
-    require_token(options_h, "#define ESP8266BASE_WEB_PROFILE_MINIMAL 0", "minimal profile default")
-    require_token(minimal_ini, "-DESP8266BASE_WEB_PROFILE_MINIMAL=1", "minimal profile build")
-    require_token(minimal_ini, "-DESP8266BASE_WEB_MAX_APP_PAGES=1", "minimal page capacity")
-    require_token(minimal_ini, "-DESP8266BASE_WEB_MAX_APP_APIS=3", "minimal API capacity")
+    require_token(options_h, "#define ESP8266BASE_PROFILE_MQTT_TERMINAL 0", "MQTT_TERMINAL default")
+    require_token(options_h, 'ESP8266BASE_PROFILE_MQTT_TERMINAL must be 0 or 1', "profile value guard")
+    for dependency in ["ESP8266BASE_USE_WEB", "ESP8266BASE_USE_OTA", "ESP8266BASE_USE_NTP",
+                       "ESP8266BASE_USE_WATCHDOG", "ESP8266BASE_USE_MQTT"]:
+        require_token(options_h, f"ESP8266BASE_PROFILE_MQTT_TERMINAL && !{dependency}",
+                      f"MQTT_TERMINAL requires {dependency}")
+    require_token(terminal_ini, "-DESP8266BASE_PROFILE_MQTT_TERMINAL=1", "MQTT_TERMINAL build")
+    require_token(terminal_ini, "bertmelis/espMqttClient @ 1.7.3", "pinned MQTT client")
+    require_token(terminal_ini, "-DESP8266BASE_WEB_MAX_APP_PAGES=0", "zero page capacity")
+    require_token(terminal_ini, "-DESP8266BASE_WEB_MAX_APP_APIS=0", "zero API capacity")
+    require_token(web_h, "#if ESP8266BASE_WEB_MAX_APP_PAGES > 0", "page array compile exclusion")
+    require_token(web_h, "#if ESP8266BASE_WEB_MAX_APP_APIS > 0", "API array compile exclusion")
 
     begin_start = web_cpp.index("bool Esp8266BaseWeb::begin()")
     begin_end = web_cpp.index("void Esp8266BaseWeb::handle()", begin_start)
     begin_body = web_cpp[begin_start:begin_end]
     for route in ["/wifi", "/auth", "/health"]:
-        require_token(begin_body, f'_server.on("{route}"', f"minimal retained route {route}")
-    full_guard_start = begin_body.index("#if !ESP8266BASE_WEB_PROFILE_MINIMAL")
+        require_token(begin_body, f'_server.on("{route}"', f"terminal retained route {route}")
+    require_token(begin_body, '_server.on("/",       HTTP_GET,  _handleTerminalRoot);',
+                  "terminal root route")
+    root_start = web_cpp.index("void Esp8266BaseWeb::_handleTerminalRoot()")
+    root_end = web_cpp.index("#endif", root_start)
+    root_body = web_cpp[root_start:root_end]
+    require_token(root_body, 'Esp8266BaseWiFiState::AP_CONFIG', "AP root state check")
+    require_token(root_body, '_redirect("/wifi")', "AP root WiFi redirect")
+    require_token(root_body, '_redirect("/health")', "STA root health redirect")
+    full_guard_start = begin_body.index("#if !ESP8266BASE_PROFILE_MQTT_TERMINAL")
     full_guard_end = begin_body.index("#endif", full_guard_start)
     full_routes = begin_body[full_guard_start:full_guard_end]
     for route in ["/esp8266base", "/logs", "/system", "/reboot"]:
@@ -402,26 +421,71 @@ def test_minimal_web_and_ota_lifecycle_contract() -> None:
     require_token(ota_cpp, 'server().on("/ota", HTTP_POST', "OTA POST route independent of GET page")
     if '_server.on("/ota",    HTTP_GET' not in web_cpp:
         fail("full Web mode OTA GET route missing")
-    require_token(web_h, "ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL",
-                  "minimal OTA GET exclusion")
+    require_token(web_h, "ESP8266BASE_USE_OTA && !ESP8266BASE_PROFILE_MQTT_TERMINAL",
+                  "MQTT_TERMINAL OTA GET exclusion")
+
+    # WiFi and NTP must gate every MQTT/TLS attempt; loop/connect happen only afterward.
+    handle_start = mqtt_cpp.index("void Esp8266BaseMQTT::handle()")
+    handle_end = mqtt_cpp.index("uint16_t Esp8266BaseMQTT::publish", handle_start)
+    mqtt_handle = mqtt_cpp[handle_start:handle_end]
+    wifi_gate = mqtt_handle.index("!Esp8266BaseWiFi::isConnected()")
+    ntp_gate = mqtt_handle.index("!Esp8266BaseNTP::isSynced()")
+    client_loop = mqtt_handle.index("mqttClient.loop()")
+    connect_call = mqtt_handle.index("mqttClient.connect()")
+    if not (wifi_gate < ntp_gate < client_loop < connect_call):
+        fail("MQTT handle must gate client loop/connect on WiFi then NTP")
+
+    for state in ["UNCONFIGURED", "WAITING_WIFI", "WAITING_TIME", "BACKOFF",
+                  "CONNECTING", "CONNECTED", "PAUSED_OTA"]:
+        require_token(mqtt_h, state, f"MQTT state {state}")
+    require_token(mqtt_cpp, "if (_retryDelay < ESP8266BASE_MQTT_RETRY_MAX_MS)", "bounded backoff")
+    require_token(mqtt_cpp, "_retryDelay * 2UL", "exponential backoff")
+    delays = []
+    delay = 2000
+    for _ in range(7):
+        delays.append(delay)
+        delay = min(delay * 2, 60000)
+    if delays != [2000, 4000, 8000, 16000, 32000, 60000, 60000]:
+        fail("MQTT backoff model is not bounded exponential")
+    require_token(mqtt_cpp, "if (_connectedCallback) _connectedCallback(sessionPresent);",
+                  "business resubscribe callback on every connect")
+    require_token(mqtt_cpp, "missing_required_config", "missing MQTT config failure")
+    require_token(mqtt_cpp, ".setBufferSizes(4096, 1024)", "reliable TLS buffer baseline")
+    if "EMC_RX_BUFFER_SIZE" in mqtt_cpp or "EMC_TX_BUFFER_SIZE" in terminal_ini:
+        fail("MQTT_TERMINAL must not shrink espMqttClient communication buffers")
+    for api in ["publish", "subscribe", "setWill", "setKeepAlive", "onMessage", "onDisconnect"]:
+        require_token(mqtt_cpp, api, f"MQTT transport API {api}")
+    require_token(terminal_example, "Esp8266BaseMQTT::setCallbacks", "generic MQTT callback example")
 
     prepare_call = ota_cpp.index("_prepareCallback(_failureMessage")
     update_begin = ota_cpp.index("Update.begin(ESP.getFreeSketchSpace())")
     if prepare_call >= update_begin:
         fail("OTA prepare callback must run before Update.begin")
     rejection_return = ota_cpp.index("return;", prepare_call)
-    if rejection_return >= update_begin:
-        fail("OTA prepare rejection must return before Update.begin")
+    mqtt_pause = ota_cpp.index("Esp8266BaseMQTT::pauseForOTA()", prepare_call)
+    if not (rejection_return < mqtt_pause < update_begin):
+        fail("OTA prepare rejection must leave MQTT untouched; accepted prepare must pause MQTT before Update.begin")
     require_token(ota_cpp, "if (_prepareCallback &&", "optional prepare callback")
     require_token(ota_cpp, "if (_failureCallback)", "optional failure callback")
     require_token(ota_cpp, "if (_successCallback)", "optional success callback")
     require_token(ota_cpp, "if (_failureNotified) return;", "failure callback once guard")
     require_token(ota_cpp, "_failureNotified = false;", "failure callback per-request reset")
-    require_token(ota_cpp, "_resumeWatchdog();\n    _notifyFailure(failure);",
-                  "Watchdog resumes before business failure callback")
+    fail_start = ota_cpp.index("void Esp8266BaseOTA::_failUpload")
+    fail_end = ota_cpp.index("// ----------------------------------------------------------------------------", fail_start)
+    fail_body = ota_cpp[fail_start:fail_end]
+    if not (fail_body.index("_resumeWatchdog();") <
+            fail_body.index("Esp8266BaseMQTT::resumeAfterOTAFailure();") <
+            fail_body.index("_notifyFailure(failure);")):
+        fail("OTA failure must restore Watchdog and MQTT before business callback")
+    success_start = ota_cpp.index("void Esp8266BaseOTA::_notifySuccess()")
+    success_end = ota_cpp.index("void Esp8266BaseOTA::_failUpload", success_start)
+    success_body = ota_cpp[success_start:success_end]
+    require_token(success_body, "Esp8266BaseMQTT::keepPausedAfterOTASuccess();",
+                  "OTA success keeps MQTT paused")
     for failure in ["UNAUTHORIZED", "INVALID_FIRMWARE", "PREPARE_REJECTED",
                     "UPDATE_BEGIN_FAILED", "UPDATE_WRITE_FAILED", "UPDATE_END_FAILED",
-                    "UPLOAD_ABORTED", "NO_FIRMWARE_DATA", "CONFIG_FLUSH_FAILED"]:
+                    "UPLOAD_ABORTED", "NO_FIRMWARE_DATA", "CONFIG_FLUSH_FAILED",
+                    "FILELOG_FLUSH_FAILED", "MQTT_PAUSE_FAILED"]:
         require_token(ota_h, failure, f"OTA failure reason {failure}")
     require_token(ota_cpp, "pre_reboot_config_flush_failed", "OTA config flush failure diagnostic")
     require_token(ota_cpp, "action=abort_update", "OTA flush failure aborts update")
@@ -438,7 +502,8 @@ def test_minimal_web_and_ota_lifecycle_contract() -> None:
     require_token(ota_cpp, "_resetRequestState();\n    }", "OTA failure internal state reset")
 
     for token in ["firmware", "version", "uptime", "heap", "maxBlock", "wifi", "ip",
-                  "ntp", "lastWdtReset", "otaInProgress"]:
+                  "ntp", "mqtt", "mqttConnected", "mqttAttempt", "mqttLastReason",
+                  "lastWdtReset", "otaInProgress"]:
         require_token(web_cpp, token, f"health field {token}")
 
     require_token(upload_script, "curl --fail", "curl fail behavior")
@@ -688,7 +753,7 @@ def main() -> None:
     test_boot_session_log_contract()
     test_web_auth_contract()
     test_watchdog_and_ota_failure_contract()
-    test_minimal_web_and_ota_lifecycle_contract()
+    test_mqtt_terminal_and_ota_lifecycle_contract()
     test_public_default_tables()
     test_web_home_contract()
     print("[logic] ok")

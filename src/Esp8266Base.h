@@ -8,6 +8,9 @@
 #include "Esp8266BaseUtil.h"
 #include "Esp8266BaseConfig.h"
 #include "Esp8266BaseWiFi.h"
+#if ESP8266BASE_USE_MQTT
+#include "Esp8266BaseMQTT.h"
+#endif
 
 #if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
@@ -47,8 +50,8 @@ public:
 
     // ---- 核心 API ----
 
-    // 按序初始化：Log → Sleep → Config → FileLog → WiFi → Watchdog → Web → OTA → 诊断日志
-    // 返回 false 表示 Config 或 WiFi 初始化失败（仍继续运行）
+    // 按序初始化：Log → Sleep → Config → FileLog → WiFi → Watchdog → Web → OTA → MQTT → 诊断
+    // 返回 false 表示 Config、FileLog 或 MQTT 必要配置初始化失败（仍继续运行）
     static bool begin();
 
     // 在 loop() 中每轮调用，推进所有模块状态机

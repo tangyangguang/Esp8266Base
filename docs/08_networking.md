@@ -1,7 +1,7 @@
 # Esp8266Base 网络能力
 
 > 版本：1.0.0  
-> 模块：`Esp8266BaseWiFi` / `Esp8266BaseNTP` / `Esp8266BaseMDNS`
+> 模块：`Esp8266BaseWiFi` / `Esp8266BaseNTP` / `Esp8266BaseMDNS` / `Esp8266BaseMQTT`
 
 ---
 
@@ -10,6 +10,7 @@
 - WiFi：STA 连接、AP 配网、保存/清除凭证、持续重连。
 - NTP：联网后对时，输出实际时间和 boot time 映射。
 - mDNS：广播 `hostname.local` 和 `_http._tcp` 服务。
+- MQTT：可选 TLS MQTT 传输、WiFi/NTP 门控、有界退避和连接诊断。
 
 NTP 和 mDNS 不在 `begin()` 中启动，而是在 `handle()` 中检测到 WiFi STA 已连接后触发。
 
@@ -156,7 +157,19 @@ log_timestamp_mode=absolute_datetime
 
 ---
 
-## 九、常见排查
+## 九、MQTT_TERMINAL 网络生命周期
+
+`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 要求 Web、OTA、NTP、Watchdog 和 MQTT 同时启用。MQTT 只在 STA 已连接且 NTP 已同步后尝试 DNS/TCP/TLS/MQTT 建连；WiFi 或时间门控丢失时释放连接，恢复后重新进入退避状态机。
+
+配置由业务在 `Esp8266Base::begin()` 前提供：host/clientId/username/password/LWT topic 复制到固定缓冲；trust anchor `BearSSL::X509List` 和可选 LWT payload 由业务持有且生命周期必须覆盖 MQTT。来源可以是业务私有构建配置或 Config，但仓库示例只含 `.invalid` host、占位 clientId 和公开根证书，不含真实凭据。基础库不新增 broker 配置持久化 key，也不在 `/health` 输出 host、clientId、用户名、密码或证书。
+
+断线重试为 2s、4s、8s、16s、32s、60s，之后保持 60s。日志包含 `connect_attempt`、`connected`、`disconnected reason=`、`reconnect_scheduled` 以及 free heap/max block；`stateName()`、`attemptCount()`、`lastDisconnectReasonName()` 提供小型只读诊断。connected callback 每次连接都会调用，业务应在其中重新订阅。
+
+使用 `espMqttClient 1.7.3` 的同步安全客户端。MQTT 收发缓冲保持上游默认值，BearSSL 显式为 4096/1024；未降低证书校验。该客户端的大部分 MQTT 状态分步推进，但 ESP8266 底层 DNS/TCP/TLS connect 单次尝试可能阻塞到网络超时，无法宣称严格零阻塞；外围有界退避可避免忙循环。
+
+---
+
+## 十、常见排查
 
 | 现象 | 重点日志 |
 |---|---|

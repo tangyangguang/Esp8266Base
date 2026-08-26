@@ -15,8 +15,16 @@ if rg -n '#\s*(if|ifdef|ifndef|elif)\b.*ESP32|platform\s*=\s*espressif32|board\s
   fail "ESP32 conditional/platform branch found"
 fi
 
-if rg -n '#include\s*[<"].*(MQTT|PubSubClient)|setBufferSize\s*\(|setBufferSizes\s*\(' src; then
-  fail "MQTT dependency or transport buffer resizing found in base library"
+if rg -n '#include\s*[<"].*(PubSubClient|AsyncMqttClient)|setBufferSize\s*\(' src; then
+  fail "unapproved MQTT dependency or buffer resizing found in base library"
+fi
+if rg -n '#include\s*<espMqttClient\.h>' src | rg -v 'src/Esp8266BaseMQTT.cpp'; then
+  fail "espMqttClient include must stay inside optional MQTT module"
+fi
+rg -n 'setBufferSizes\(4096, 1024\)' src/Esp8266BaseMQTT.cpp >/dev/null || \
+  fail "MQTT TLS buffers must keep the 4096/1024 baseline"
+if rg -n 'EMC_(RX|TX)_BUFFER_SIZE|setBufferSizes\((512|1024),\s*(512|1024)\)' src examples platformio.ini; then
+  fail "MQTT/TLS communication buffer shrinking found"
 fi
 
 if rg -n '\b(new|malloc|calloc|realloc)\s*\(|std::function\s*[<(]|std::(vector|map|list)\s*<|\bvirtual\s+' src; then
@@ -86,15 +94,20 @@ for file in src/Esp8266BaseOTA.cpp src/Esp8266BaseSleep.cpp examples/*/src/main.
   fi
 done
 
-echo "[static] checking minimal Web and command-line OTA contract"
-rg -n '#define ESP8266BASE_WEB_PROFILE_MINIMAL 0' src/Esp8266BaseOptions.h >/dev/null || \
-  fail "minimal Web profile default must remain disabled"
-rg -n 'ESP8266BASE_WEB_PROFILE_MINIMAL=1' examples/minimal_web_ota/platformio.ini >/dev/null || \
-  fail "minimal Web example build flag missing"
+echo "[static] checking MQTT_TERMINAL and command-line OTA contract"
+rg -n '#define ESP8266BASE_PROFILE_MQTT_TERMINAL 0' src/Esp8266BaseOptions.h >/dev/null || \
+  fail "MQTT_TERMINAL profile default must remain disabled"
+rg -n 'ESP8266BASE_PROFILE_MQTT_TERMINAL=1' examples/mqtt_terminal/platformio.ini >/dev/null || \
+  fail "MQTT_TERMINAL example build flag missing"
+rg -n 'bertmelis/espMqttClient @ 1.7.3' examples/mqtt_terminal/platformio.ini >/dev/null || \
+  fail "pinned espMqttClient dependency missing"
 rg -n -- '--fail' tools/ota_upload.sh >/dev/null || fail "OTA upload script must use curl --fail"
 rg -n 'firmware=@' tools/ota_upload.sh >/dev/null || fail "OTA upload script firmware multipart field missing"
-if rg -n 'admin:[^$<{]' tools/ota_upload.sh README.md docs examples/minimal_web_ota; then
+if rg -n 'admin:[^$<{]' tools/ota_upload.sh README.md docs examples/mqtt_terminal; then
   fail "hard-coded OTA password found"
+fi
+if rg -n '(mqtts?://[^[:space:]]+:[^[:space:]@]+@|MQTT_PASSWORD\[\].*=\s*"[^"$<{]+")' src examples README.md docs; then
+  fail "possible real MQTT credential found"
 fi
 
 echo "[static] ok"

@@ -157,7 +157,11 @@ http://<device-ip>/ota
 
 上传页面显示百分比、已上传大小和结果。OTA 上传期间 Watchdog 会暂停，结束后恢复。`GET /ota` 和 `POST /ota` 都使用同一组 Basic Auth。
 
-MQTT 终端可启用 `ESP8266BASE_WEB_PROFILE_MINIMAL=1`；此时没有 `GET /ota` 页面，但 `POST /ota` 仍可用。使用 `tools/ota_upload.sh <device-url> <firmware.bin> [username]` 上传，密码通过 `OTA_PASSWORD` 或隐藏式提示输入。业务需要在 OTA 前停命令、断开 MQTT/TLS 时，注册 `Esp8266BaseOTA::setLifecycleCallbacks()`；完整示例见 `examples/minimal_web_ota`。
+MQTT 智能终端启用 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1`；此时没有 `GET /ota` 页面，但 `POST /ota` 仍可用。使用 `tools/ota_upload.sh <device-url> <firmware.bin> [username]` 上传，密码通过 `OTA_PASSWORD` 或隐藏式提示输入。完整示例见 `examples/mqtt_terminal`。
+
+业务在 `Esp8266Base::begin()` 前提供 `Esp8266BaseMQTTConfig`、长期有效的 `BearSSL::X509List` trust anchor 和普通函数指针回调。基础模块只负责 TLS MQTT 连接与生命周期，不包含 Topic 规则或 JSON 协议。每次连接成功都会调用 connected callback，业务应在其中重新订阅。配置缺 host、port、clientId、keepalive 或 trust anchor 时，`begin()` 明确返回失败并保持 `unconfigured`。
+
+OTA 的业务 prepare callback 只负责执行器空闲、安全停机等业务判断。prepare 拒绝时 MQTT 不受影响；通过后基础库自动停止新消息并断开 MQTT/TLS。上传失败会恢复 Watchdog 和 MQTT 重连许可，成功则保持业务通信关闭并重启。
 
 ---
 

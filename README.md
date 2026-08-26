@@ -69,6 +69,7 @@ void loop() {
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
 | OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、业务安全生命周期回调 |
+| MQTT | `Esp8266BaseMQTT` | 可选 TLS MQTT 传输、门控、退避、OTA 协调和诊断 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
 | Sleep | `Esp8266BaseSleep` | modem/deep sleep 封装、唤醒原因 |
@@ -103,6 +104,7 @@ Esp8266Base/
 │   ├── Esp8266BaseWiFi.h / .cpp    # WiFi
 │   ├── Esp8266BaseWeb.h / .cpp     # Web 管理控制台
 │   ├── Esp8266BaseOTA.h / .cpp     # OTA 固件更新
+│   ├── Esp8266BaseMQTT.h / .cpp    # 可选 TLS MQTT 生命周期
 │   ├── Esp8266BaseNTP.h / .cpp     # NTP 网络对时
 │   ├── Esp8266BaseMDNS.h / .cpp    # mDNS hostname.local
 │   ├── Esp8266BaseSleep.h / .cpp   # 深度睡眠 / Modem sleep
@@ -111,7 +113,7 @@ Esp8266Base/
 │   ├── basic_wifi/                 # WiFi STA/AP 配网示例
 │   ├── wifi_config_ota/            # Web 配网 + OTA 示例
 │   ├── custom_web/                 # 自定义 Web 页面示例
-│   ├── minimal_web_ota/             # 最小 Web 模式 + OTA 生命周期示例
+│   ├── mqtt_terminal/               # MQTT_TERMINAL 通用连接和回调示例
 │   ├── sleep_watchdog/             # Sleep + Watchdog 示例
 │   └── full_demo/                  # 全模块演示（参考实现）
 ├── tools/
@@ -163,7 +165,10 @@ build_flags =
 | `ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
-| `ESP8266BASE_WEB_PROFILE_MINIMAL` | `0` | `1` 时只注册 WiFi/Auth、Health、OTA POST 和应用路由 |
+| `ESP8266BASE_PROFILE_MQTT_TERMINAL` | `0` | 正式 MQTT 智能终端模式；要求 Web/OTA/NTP/WDT/MQTT 全部启用 |
+| `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译 `Esp8266BaseMQTT` 可选模块；要求 NTP |
+| `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 首次退避间隔 |
+| `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 指数退避上限 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
@@ -194,9 +199,13 @@ Hostname 策略：默认 hostname 来自 `ESP8266BASE_DEFAULT_HOSTNAME`；设备
 
 OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
 
-MQTT 智能终端可设置 `ESP8266BASE_WEB_PROFILE_MINIMAL=1`，并把应用路由容量设为 `ESP8266BASE_WEB_MAX_APP_PAGES=1`、`ESP8266BASE_WEB_MAX_APP_APIS=3`。该模式不注册 `/`、`/esp8266base`、`/system`、`/logs`、hostname、reboot 和 `GET /ota`；`POST /ota` 仍由 `Esp8266BaseOTA` 注册，可直接使用 `tools/ota_upload.sh` 上传。默认值 `0` 保持完整模式。
+正式智能终端设置 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1`。它保留 `GET /` 极小入口、WiFi/Auth、Health、`POST /ota` 与显式容量的应用路由；不编译完整首页、Logs、System、hostname、reboot、导航或 `GET /ota`。AP 配网时 `/` 返回 `303 /wifi`，STA 时返回 `303 /health`。应用页/API 容量设为 `0` 时不保留对应路由数组。
 
-业务项目可通过 `Esp8266BaseOTA::setLifecycleCallbacks()` 在首个有效固件块通过头检查后、`Update.begin()` 前执行安全检查和释放 MQTT/TLS 资源；失败回调用于幂等恢复通信许可。基础库不依赖 MQTT，也不改变 TLS、MQTT 或业务报文缓冲。
+MQTT 连接配置必须在 `Esp8266Base::begin()` 前通过 `Esp8266BaseMQTT::configure()` 提供。host、clientId、用户名/密码和 LWT topic 会复制到固定缓冲；`BearSSL::X509List` trust anchor 与可选 LWT payload 由业务长期持有。配置可来自业务的私有构建配置或 `Esp8266BaseConfig`，库不新增 MQTT 持久化 key，也不接受不安全 TLS。不要把真实 broker 凭据写入仓库。
+
+MQTT 使用 `bertmelis/espMqttClient 1.7.3` 同步 TLS 客户端。PlatformIO 构建需加入该依赖、`ESP32Async/ESPAsyncTCP 2.0.0`（上游 1.7.3 的显式 ESP8266 依赖）和 `lib_ldf_mode = deep+`，见 `examples/mqtt_terminal`。库不定义 `EMC_RX_BUFFER_SIZE`/`EMC_TX_BUFFER_SIZE`，并把 BearSSL 缓冲保持为 `4096/1024`。第三方会为 MQTT 出站队列、callback 包装、证书解析和 TLS 会话使用动态内存；基础库自身不调用 `new`/`malloc`。ESP8266 底层 DNS/TCP/TLS connect 单次尝试仍可能阻塞到网络超时，这是同步安全客户端的已知边界，外围状态机和退避不会忙循环。
+
+OTA 仍只使用 `Esp8266BaseOTA`。业务 prepare callback 先检查执行器是否安全；通过后基础库自动停止 MQTT 消息分发并断开 MQTT/TLS，再调用 `Update.begin()`。任何失败恢复 Watchdog 与 MQTT 重连许可；成功保持 MQTT 关闭、flush 配置/日志并重启。业务不再需要自行释放基础 MQTT 模块，但仍负责执行器安全检查。
 
 日志与回显策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段；`/wifi` GET 表单也会回显已保存密码，页面默认隐藏，可手动显示。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
 
@@ -220,7 +229,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 tools/test_all.sh
 ```
 
-默认测试不烧录、不访问串口、不要求 ESP12F 在线。它会执行格式检查、静态一致性检查、轻量逻辑检查，并编译根项目和 6 个示例的 `esp12f` 环境，其中 `minimal_web_ota` 独立覆盖最小 Web 模式。需要额外验证 `nodemcuv2` 编译时运行；当前 `--all-envs` 会编译根项目 `nodemcuv2` 和除 `full_demo`、`minimal_web_ota` 外的示例 `nodemcuv2` 环境：
+默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、静态和逻辑检查，并编译根项目及全部示例的 `esp12f` 环境；`mqtt_terminal` 独立覆盖正式模式。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
 
 ```bash
 tools/test_all.sh --all-envs
@@ -235,7 +244,7 @@ tools/test_all.sh --all-envs
 - ESP32 / ESP32-S3 / ESP32-C3
 - HAL 抽象、事件总线、通用 Scheduler
 - 复杂 JSON API、异步 Web（ESPAsyncWebServer）、HTTPS
-- `std::function`、STL 容器
+- 基础库公共 API/自有状态中的 `std::function`、STL 容器（可选 `espMqttClient` 内部实现除外）
 - 多用户权限、WebSocket
 
 ---

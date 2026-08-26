@@ -22,7 +22,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 
 ## 二、内置路由
 
-默认完整模式（`ESP8266BASE_WEB_PROFILE_MINIMAL=0`）注册下表路由：
+默认完整模式（`ESP8266BASE_PROFILE_MQTT_TERMINAL=0`）注册下表路由：
 
 | 路由 | 方法 | 认证 | 说明 |
 |---|---|---|---|
@@ -43,14 +43,14 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
 | `/health` | GET | 无 | JSON 健康信息 |
 
-最小模式（`ESP8266BASE_WEB_PROFILE_MINIMAL=1`）只注册 `GET/POST /wifi`、`GET/POST /auth`、`GET /health`、启用 OTA 时的 `POST /ota`，以及业务项目注册的页面/API。它不注册 `/`、`/esp8266base`、`/logs`、`/system`、hostname 路由、`/reboot` 和 `GET /ota`，也不输出完整系统导航。`POST /ota` 由 OTA 模块独立注册，不依赖 `GET /ota` 页面。
+`MQTT_TERMINAL`（`ESP8266BASE_PROFILE_MQTT_TERMINAL=1`）只注册 `GET /`、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`POST /ota` 和显式容量的业务页面/API。`GET /` 是极小引导：AP_CONFIG 时 `303 /wifi`，STA 连接或重连时 `303 /health`，不会恢复完整首页。它不注册 `/esp8266base`、`/logs`、`/system`、hostname、`/reboot` 和 `GET /ota`，也不输出完整系统导航。
 
-应用路由容量仍由现有宏控制；MQTT 智能终端建议设置为：
+不需要本地业务页面/API 时把容量设为 0，对应数组也不会保留：
 
 ```ini
--DESP8266BASE_WEB_PROFILE_MINIMAL=1
--DESP8266BASE_WEB_MAX_APP_PAGES=1
--DESP8266BASE_WEB_MAX_APP_APIS=3
+-DESP8266BASE_PROFILE_MQTT_TERMINAL=1
+-DESP8266BASE_WEB_MAX_APP_PAGES=0
+-DESP8266BASE_WEB_MAX_APP_APIS=0
 ```
 
 管理页面和危险操作都需要 Basic Auth；未知路径也会先要求 Basic Auth，认证通过后才返回 404。`/api/system/hostname` 是 JSON API，未认证时返回 JSON 401，不触发浏览器 Basic Auth 弹窗；调用方需要显式提供 `Authorization` header。`/health` 用于轻量状态探测，不要求认证。
@@ -227,9 +227,10 @@ http://<device-ip>/ota
 - 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。
 - OTA 上传期间暂停 Watchdog，上传完成后恢复。
 - 服务端首个数据块也会做同一类 ESP8266 固件头快速校验，作为 curl 或绕过页面上传时的兜底；它用于拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，校验通过后才调用 `Update.begin(ESP.getFreeSketchSpace())` 并写入 Flash。
-- 头检查通过后、`Update.begin()` 前调用可选 prepare callback；业务可检查执行器安全状态、拒绝新命令、断开 MQTT 并释放 TLS。基础库不依赖 MQTT。
-- 每个失败、拒绝或中止的上传请求最多调用一次可选 failure callback；包括认证失败和头检查失败。业务恢复逻辑必须幂等。Watchdog 会先恢复，再调用业务 failure callback。
-- 基础库在 `Update.end(true)` 前检查配置和文件日志 flush；失败会中止 Update、返回 500，并恢复 Watchdog/业务通信，不留下待启动镜像。成功后可选 success callback 只用于最终安全关闭，随后返回 2xx 并重启。
+- 头检查通过后先调用可选业务 prepare callback，仅用于执行器安全/空闲检查；拒绝时 MQTT 不受影响。
+- prepare 通过后，启用 MQTT 模块时基础库自动拒绝新消息、正常断开 MQTT/TLS（无法及时完成才强制释放），然后才调用 `Update.begin()`。
+- 每个失败、拒绝或中止的上传请求最多调用一次可选 failure callback；Watchdog 和 MQTT 重连许可会先恢复，再调用业务 failure callback。
+- 基础库在 `Update.end(true)` 前检查配置和文件日志 flush；失败会中止 Update、返回 500 并恢复通信许可。成功时 MQTT 保持关闭，可选 success callback 只用于最终业务安全关闭，随后返回 2xx 并重启。
 - 成功后 flush 响应并重启。
 - 当前不计算 SHA256；OTA 依赖页面预检、服务端头部兜底校验，以及 `Update.write()` / `Update.end(true)` 的写入与镜像校验结果决定是否接受固件。头部快速校验不是完整签名机制，不承诺识别所有同平台非 app 镜像。
 

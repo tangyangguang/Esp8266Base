@@ -99,6 +99,8 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | `eb_boot_count` | uint32 string | 重启计数，库自动维护；上电、外部复位、软件重启和 WDT 恢复会递增，deep sleep 唤醒不递增；达到 4,294,967,295 后饱和 | immediate |
 | `eb_filelog_mode` | int32 | 文件日志运行模式，保存 OFF/ERROR/WARN/INFO 对应整数值 | immediate |
 
+MQTT broker、port、clientId、username、password 和 trust anchor 不属于库保留 key。`Esp8266BaseMQTT::configure()` 只接受运行时连接配置并复制短字段；业务可自行从私有构建配置或 Config 读取，但必须自行定义业务 key、控制凭据生命周期，且不得把真实值提交到仓库。PEM trust anchor 通常超过单个 Config string 的 96B 上限，应作为业务固件的 PROGMEM 公开证书资产或其他受控来源，由长期有效的 `BearSSL::X509List` 持有。
+
 ---
 
 ## 六、Flash 写入安全规则

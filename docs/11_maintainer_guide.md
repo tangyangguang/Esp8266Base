@@ -27,6 +27,7 @@ Esp8266Base
   ├─ Web → OTA
   ├─ NTP
   ├─ mDNS
+  ├─ MQTT（WiFi/NTP 门控；OTA 只单向调用其暂停/恢复接口）
   ├─ Sleep
   └─ Watchdog
 ```
@@ -46,6 +47,8 @@ Esp8266Base
 - 单个静态缓冲不超过 512B。
 - Web handler 临时缓冲优先 <= 64B。
 - 新增模块或新增常驻状态必须更新 `docs/04_memory_budget.md`。
+- MQTT 基础 API 只用固定函数指针；`espMqttClient` 内部的 `std::function`、出站队列和 BearSSL 动态内存属于明确记录的第三方边界。
+- 不定义缩小 `EMC_RX_BUFFER_SIZE`/`EMC_TX_BUFFER_SIZE`；BearSSL 显式缓冲保持 4096/1024。
 
 ---
 
@@ -107,7 +110,7 @@ Config 正式配置写入必须使用安全策略：
 tools/test_all.sh
 ```
 
-`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、静态一致性检查、轻量逻辑检查、根项目 `esp12f` 编译和全部示例 `esp12f` 编译，包括完整 Web 与 `minimal_web_ota` 最小 Web 两种模式。需要额外验证非发布板型时运行 `tools/test_all.sh --all-envs`。
+`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、静态/逻辑检查、根项目和全部示例 `esp12f` 编译，包括完整模式与 `mqtt_terminal`。`--all-envs` 还验证可用的 `nodemcuv2` 环境。
 
 硬件：
 
@@ -117,6 +120,8 @@ tools/test_all.sh
 - Web 首页可访问。
 - OTA 页面可上传。
 - NTP 输出 `time_synchronized` 和 `time_mapping`。
+- MQTT_TERMINAL 在无凭据 AP 下 `/` 跳转 `/wifi`，STA 下跳转 `/health`。
+- 真机记录 MQTT 未连接、TLS 尝试、已连接和断开后的 free heap/max block；验证路由器断网恢复和长时间运行。
 - `/logs` 显示 4 段文件状态。
 - System 页面可切换 FileLog 模式；System 页面可通过 `/logs/clear` 清空日志。
 - GPIO0 长按清配置有效。

@@ -38,18 +38,20 @@
 
 ### 新增
 
-- 新增 `ESP8266BASE_WEB_PROFILE_MINIMAL`：只保留 WiFi/Auth、Health、OTA POST 和固定容量应用路由，适合 MQTT 智能终端。
-- `Esp8266BaseOTA` 新增 prepare/failure/success 固定函数指针回调，业务可在 `Update.begin()` 前完成执行器安全检查并释放 MQTT/TLS，在失败后幂等恢复通信。
-- 新增 `examples/minimal_web_ota` 独立构建覆盖和 `tools/ota_upload.sh` 命令行上传脚本。
+- 新增正式公共模式 `ESP8266BASE_PROFILE_MQTT_TERMINAL`，统一轻量 HTTP 运维面、TLS MQTT 与 OTA 生命周期。
+- 新增可选 `Esp8266BaseMQTT`：基于 `bertmelis/espMqttClient 1.7.3`，提供 WiFi/NTP 门控、有界指数退避、QoS 0/1/2 publish/subscribe、LWT、keepalive、连接/断线/分块消息函数指针回调和只读诊断。
+- 新增 `examples/mqtt_terminal` 和 `tools/ota_upload.sh`；示例使用 `.invalid` host、占位 clientId 和公开 trust anchor，不含真实凭据。
 
 ### 修复
 
 - OTA 在 `Update.end(true)` 前检查 Config 和 FileLog flush 结果；失败时中止 Update、返回明确错误并恢复 Watchdog/业务失败回调，不留下待启动镜像。
+- MQTT_TERMINAL 的 `GET /` 在 AP_CONFIG 下 `303 /wifi`、STA 下 `303 /health`，修复无凭据首次访问根路径无法直接进入配网的问题。
 
 ### 行为变化 / 使用建议
 
-- 默认完整 Web 模式不变。最小模式不提供 `GET /ota` 页面，但保留相同 Basic Auth 的 `POST /ota`。
-- OTA failure callback 每个失败请求最多调用一次，并可能由未认证或无效固件请求触发；业务恢复逻辑必须幂等。
+- 默认完整 Web 模式不变。MQTT_TERMINAL 不提供完整首页或 `GET /ota`，但保留相同 Basic Auth 的 `POST /ota`；业务路由容量为 0 时不保留数组。
+- OTA prepare 拒绝不影响 MQTT；通过后基础库自动暂停 MQTT/TLS。失败先恢复 Watchdog 与 MQTT 重连许可，成功保持通信关闭并重启。
+- MQTT/TLS 通信缓冲未缩小：MQTT 收发使用上游默认值，BearSSL 保持 4096/1024。ESP8266 同步 TLS connect 单次尝试可能阻塞到网络超时，真机堆、故障恢复和长时间运行仍需验收。
 
 ## 2026-05-14
 

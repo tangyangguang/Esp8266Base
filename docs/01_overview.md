@@ -42,6 +42,7 @@ Esp8266Base/
 │   ├── basic_wifi/                # WiFi STA/AP 配网示例
 │   ├── wifi_config_ota/           # Web 配网 + OTA 示例
 │   ├── custom_web/                # 自定义 Web 页面示例
+│   ├── mqtt_terminal/             # 正式 MQTT_TERMINAL 示例
 │   ├── sleep_watchdog/            # Sleep + Watchdog 示例
 │   └── full_demo/                 # 全模块演示（参考实现）
 ├── src/
@@ -51,6 +52,7 @@ Esp8266Base/
 │   ├── Esp8266BaseWiFi.h / .cpp   # WiFi
 │   ├── Esp8266BaseWeb.h / .cpp    # Web 管理控制台
 │   ├── Esp8266BaseOTA.h / .cpp    # OTA 固件更新
+│   ├── Esp8266BaseMQTT.h / .cpp   # TLS MQTT 生命周期
 │   ├── Esp8266BaseNTP.h / .cpp    # NTP 网络对时
 │   ├── Esp8266BaseMDNS.h / .cpp   # mDNS hostname.local
 │   ├── Esp8266BaseSleep.h / .cpp  # 深度睡眠 / Modem sleep
@@ -83,6 +85,7 @@ Esp8266Base/
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
 | OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、业务安全生命周期回调 |
+| MQTT | `Esp8266BaseMQTT` | WiFi/NTP 门控、TLS MQTT、退避、QoS/LWT/诊断与 OTA 协调 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
 | Sleep | `Esp8266BaseSleep` | modem/deep sleep 封装、唤醒原因 |
@@ -134,7 +137,8 @@ build_flags =
 | `ESP8266BASE_LOG_LEVEL` | `1` | 0=D, 1=I, 2=W, 3=E, 4=关闭 |
 | `ESP8266BASE_DEFAULT_HOSTNAME` | `"esp8266base"` | 编译期默认 hostname，合法 `eb_hostname` 优先 |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
-| `ESP8266BASE_WEB_PROFILE_MINIMAL` | `0` | `1` 时只保留 WiFi/Auth、Health、OTA POST 和应用路由 |
+| `ESP8266BASE_PROFILE_MQTT_TERMINAL` | `0` | 正式 MQTT 智能终端模式；要求 Web/OTA/NTP/WDT/MQTT |
+| `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译可选 TLS MQTT 模块 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |

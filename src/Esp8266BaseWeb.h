@@ -6,8 +6,8 @@
 // ----------------------------------------------------------------------------
 // Esp8266BaseWeb — 极简管理 Web
 //
-// 完整模式提供全部管理路由；ESP8266BASE_WEB_PROFILE_MINIMAL=1 时只注册
-// GET/POST /wifi、GET/POST /auth、GET /health、POST /ota（由 OTA 模块注册）
+// 完整模式提供全部管理路由；ESP8266BASE_PROFILE_MQTT_TERMINAL=1 时只注册
+// GET / 根引导、GET/POST /wifi、GET/POST /auth、GET /health、POST /ota
 // 和应用扩展路由。
 // /system 是维护入口页面；/reboot 只保留 POST 重启动作
 // 应用扩展：最多 4 页面 + 6 API（静态数组，不动态分配）
@@ -103,27 +103,35 @@ private:
     };
 
     static ESP8266WebServer _server;                            // ~272B
+#if ESP8266BASE_WEB_MAX_APP_PAGES > 0
     static AppRoute         _pages[ESP8266BASE_WEB_MAX_APP_PAGES]; // 4×52=208B
+#endif
+#if ESP8266BASE_WEB_MAX_APP_APIS > 0
     static AppRoute         _apis [ESP8266BASE_WEB_MAX_APP_APIS];  // 6×52=312B
+#endif
+#if ESP8266BASE_WEB_MAX_APP_PAGES > 0
     static uint8_t          _pageCount;                         // 1B
+#endif
+#if ESP8266BASE_WEB_MAX_APP_APIS > 0
     static uint8_t          _apiCount;                          // 1B
+#endif
     static bool             _running;                           // 1B
     static char             _authUser[24];                      // 24B
     static char             _authPass[24];                      // 24B
     static char             _deviceName[24];                    // 24B
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static char             _homePath[24];                      // 24B
 #endif
     static char             _hostname[33];                      // 33B
     static char             _fwName[24];                        // 24B
     static char             _fwVersion[16];                     // 16B
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static uint32_t         _bootCount;                         // 4B
     static char             _titleBuf[80];                      // "hostname (fw ver)" 80B
 #endif
     static char             _activeUri[32];                     // 当前请求 URI，用于慢请求日志
     static char             _activeMethod[5];                   // GET/POST
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static char             _builtinLabels[3][16];              // Status/Logs/System
     static Esp8266BaseWebHomeMode      _homeMode;
     static Esp8266BaseWebSystemNavMode _systemNavMode;
@@ -147,10 +155,10 @@ private:
     static void _handleWiFiPost();
     static void _handleAuthGet();
     static void _handleAuthPost();
-#if ESP8266BASE_USE_OTA && !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if ESP8266BASE_USE_OTA && !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static void _handleOtaGet();   // OTA GET 由此处理，POST 由 Esp8266BaseOTA 注册
 #endif
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static void _handleRoot();
     static void _handleSystemHome();
     static void _handleLogsGet();
@@ -161,10 +169,12 @@ private:
     static void _handleHostnameApiPost();
     static void _handleSystemGet();
     static void _handleRebootPost();
+#else
+    static void _handleTerminalRoot();
 #endif
     static void _handleHealth();
     static void _handleNotFound();
-#if !ESP8266BASE_WEB_PROFILE_MINIMAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static const char* _builtinLabel(Esp8266BaseWebBuiltinLabel label);
     static const char* _brandTitle();
     static const char* _brandHref();

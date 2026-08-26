@@ -41,8 +41,9 @@
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
 | Esp8266BaseWiFi | <= 384B | 状态/计时器(18B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb | <= 1.20KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + auth/device/home/hostname/firmware/title/labels/active request 状态；页面临时缓冲在栈上 |
-| Esp8266BaseWeb（最小模式 1+3 路由） | <= 768B | ESP8266WebServer + AppRoute 1×52+3×52=208B + auth/device/hostname/firmware/active request 状态；不保留完整导航状态 |
+| Esp8266BaseWeb（MQTT_TERMINAL 0+0 路由） | <= 640B | ESP8266WebServer + auth/device/hostname/firmware/active request；应用数组和完整导航状态均排除 |
 | Esp8266BaseOTA | <= 160B | 上传状态/计时 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
+| Esp8266BaseMQTT | <= 2.5KB | `espMqttClientSecure` 静态对象约 1,932B + 固定配置/状态/回调约 450B；不含动态 TLS/证书/LWT payload/出站队列 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
@@ -65,14 +66,23 @@
 
 | 示例 | 启用模块 | RAM | Flash |
 |------|----------|-----|-------|
-| `basic_wifi` | Web/OTA/NTP/mDNS/Sleep/WDT 全关 | 33,952B | 315,015B |
-| `sleep_watchdog` | Sleep + WDT | 33,864B | 316,223B |
-| `custom_web` | Web + mDNS + WDT | 40,612B | 395,740B |
-| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 44,164B | 421,392B |
-| `full_demo` | Web + OTA + NTP + mDNS + Sleep + WDT | 45,812B | 429,248B |
-| `minimal_web_ota` | 最小 Web(1+3) + OTA + NTP + mDNS + WDT | 41,056B | 405,532B |
+| `basic_wifi` | 基础裁剪，`ESP8266BASE_USE_MQTT=0`，无 MQTT 对象 | 33,972B | 315,051B |
+| `sleep_watchdog` | Sleep + WDT | 33,884B | 316,259B |
+| `custom_web` | Web + mDNS + WDT | 40,720B | 396,104B |
+| `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 44,260B | 421,768B |
+| `full_demo` | 完整 Web + OTA + NTP + mDNS + Sleep + WDT，MQTT 排除 | 45,908B | 429,608B |
+| `mqtt_terminal` | MQTT_TERMINAL 0+0 应用路由，含 MQTT 静态对象；构建期/尚未建连 | 44,400B | 502,397B |
 
-本轮改造前，同一工具链下 `full_demo` 为 45,324B RAM / 428,224B Flash，`wifi_config_ota` 为 43,672B RAM / 420,364B Flash。改造后完整模式分别增加 488B / 1,024B 和 492B / 1,028B；最小模式相对改造后的 `full_demo` 减少 4,756B RAM / 23,716B Flash。未修改 TLS、MQTT 或业务报文缓冲。
+这些数值来自 PlatformIO 链接结果，只能证明静态 RAM/Flash 趋势。`MQTT_TERMINAL` 强制启用 MQTT，因此不存在“该模式但不含 MQTT 对象”的正式构建组合；无对象基线由 `basic_wifi` 给出。未连接、连接尝试、TLS 已连接和断开后的 free heap/max block 只能在真机测量，不能由 44,400B 静态 RAM 推算。
+
+本轮没有定义 `EMC_RX_BUFFER_SIZE` 或 `EMC_TX_BUFFER_SIZE`，MQTT 收发保持 `espMqttClient 1.7.3` 上游默认值；BearSSL 显式保持 4096B RX / 1024B TX。第三方会为证书解析、TLS 会话、callback 包装与出站 MQTT packet 动态分配，峰值和碎片必须真机记录。
+
+| MQTT_TERMINAL 真机场景 | Free heap | Max block | 状态 |
+|---|---:|---:|---|
+| 启动后、MQTT 尚未连接 | 待验证 | 待验证 | 本轮未烧录 |
+| DNS/TCP/TLS 连接尝试 | 待验证 | 待验证 | 本轮未连接真实 broker |
+| MQTT/TLS 已连接 | 待验证 | 待验证 | 本轮未连接真实 broker |
+| 断开并释放 TLS 后 | 待验证 | 待验证 | 本轮未连接真实 broker |
 
 Arduino SDK 内部开销（不可控，参考值）：
 

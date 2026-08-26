@@ -5,7 +5,7 @@
 // Esp8266BaseOTA — Web OTA 固件更新
 //
 // 依赖 Esp8266BaseWeb 已通过 begin() 启动
-// 注册 POST /ota 路由；完整 Web 模式可配合 GET 页面，最小模式可独立使用
+// 注册 POST /ota 路由；完整 Web 模式可配合 GET 页面，MQTT_TERMINAL 由脚本上传
 // 上传期间在 Watchdog 启用时自动 pause/resume，每块后调用 yield()
 // /ota 页面和上传 POST 都使用 Esp8266BaseWeb 的 Basic Auth
 //
@@ -22,7 +22,8 @@ enum class Esp8266BaseOTAFailure : uint8_t {
     UPLOAD_ABORTED,
     NO_FIRMWARE_DATA,
     CONFIG_FLUSH_FAILED,
-    FILELOG_FLUSH_FAILED
+    FILELOG_FLUSH_FAILED,
+    MQTT_PAUSE_FAILED
 };
 
 // prepare 可把拒绝原因写入 reason（含结尾 \0 的容量为 reasonLen）。

@@ -28,7 +28,7 @@ examples=(
   basic_wifi
   custom_web
   full_demo
-  minimal_web_ota
+  mqtt_terminal
   sleep_watchdog
   wifi_config_ota
 )

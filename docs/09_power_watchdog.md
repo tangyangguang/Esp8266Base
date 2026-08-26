@@ -103,7 +103,7 @@ boot_after_watchdog_reset reset_count=4 source=rtc persist=success
 
 ## 六、pause / resume
 
-OTA 上传期间库会自动 pause/resume Watchdog。认证拒绝、固件头拒绝、prepare 拒绝、Update 失败和上传中止路径都会恢复 Watchdog；恢复发生在业务 failure callback 之前。业务项目如有明确长阻塞操作，也可以：
+OTA 上传期间库会自动 pause/resume Watchdog。认证拒绝、固件头拒绝、prepare 拒绝、MQTT/TLS 暂停失败、Update 失败和上传中止路径都会恢复 Watchdog；启用 MQTT 时恢复顺序为 Watchdog → MQTT 重连许可 → 业务 failure callback。OTA 成功保持 MQTT 关闭并重启。业务项目如有明确长阻塞操作，也可以：
 
 ```cpp
 Esp8266BaseWatchdog::pause();
