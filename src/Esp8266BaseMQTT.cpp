@@ -170,6 +170,7 @@ void Esp8266BaseMQTT::setCallbacks(Esp8266BaseMQTTConnectedCallback connected,
 
 bool Esp8266BaseMQTT::begin() {
     _begun = true;
+    _retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
     if (!_configured) {
         _state = Esp8266BaseMQTTState::UNCONFIGURED;
         ESP8266BASE_LOG_E("MQTT", "mqtt_start_failed reason=missing_required_config action=configure_before_base_begin");
@@ -299,6 +300,16 @@ bool Esp8266BaseMQTT::requestReconnect() {
     return true;
 }
 
+bool Esp8266BaseMQTT::markConnectionReady() {
+    if (!_configured || !_begun || _otaPaused || _reconnectRequested ||
+        !mqttClient.connected()) {
+        return false;
+    }
+    _retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
+    ESP8266BASE_LOG_I("MQTT", "application_connection_ready retry_backoff=initial");
+    return true;
+}
+
 bool Esp8266BaseMQTT::connected() { return !_otaPaused && mqttClient.connected(); }
 bool Esp8266BaseMQTT::isConfigured() { return _configured; }
 Esp8266BaseMQTTState Esp8266BaseMQTT::state() { return _state; }
@@ -405,7 +416,6 @@ void Esp8266BaseMQTT::_onConnect(bool sessionPresent) {
         return;
     }
     _state = Esp8266BaseMQTTState::CONNECTED;
-    _retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
     _lastReason = Esp8266BaseMQTTDisconnectReason::NONE;
     ESP8266BASE_LOG_I("MQTT", "connected session_present=%s attempt=%lu free_heap=%u max_block=%u action=application_resubscribe",
                       sessionPresent ? "yes" : "no", (unsigned long)_attemptCount,

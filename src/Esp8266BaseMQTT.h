@@ -105,6 +105,9 @@ public:
     // 非阻塞请求释放当前传输；下一轮 handle() 执行断开，随后沿用既有退避重连。
     // 未配置、未 begin 或 OTA 暂停时返回 false；重复请求幂等返回 true。
     static bool requestReconnect();
+    // 业务完成订阅/初始握手后确认本连接稳定，并把后续普通断线退避恢复为初始值。
+    // 仅当前已连接、未暂停且没有待处理重连请求时成功。
+    static bool markConnectionReady();
 
     static bool connected();
     static bool isConfigured();

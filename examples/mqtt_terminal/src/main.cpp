@@ -54,7 +54,13 @@ static void onMqttSubscribeAck(uint16_t packetId, const uint8_t* returnCodes, si
                           returnCodes != nullptr && length == 1 && returnCodes[0] == 1U;
     ESP8266BASE_LOG_I("App ", "mqtt_suback packet_id=%u accepted=%s count=%u",
                       (unsigned)packetId, accepted ? "yes" : "no", (unsigned)length);
-    if (!accepted) Esp8266BaseMQTT::requestReconnect();
+    if (accepted) {
+        if (!Esp8266BaseMQTT::markConnectionReady()) {
+            Esp8266BaseMQTT::requestReconnect();
+        }
+    } else {
+        Esp8266BaseMQTT::requestReconnect();
+    }
 }
 
 static void onMqttPublishAck(uint16_t packetId) {

@@ -196,7 +196,7 @@ struct AppRoute {
 
 依赖方向固定为 `Esp8266Base → Esp8266BaseMQTT` 与 `Esp8266BaseOTA → Esp8266BaseMQTT`。MQTT 模块不调用 OTA、Web 或业务代码；业务只注册 connected/disconnected/message/SUBACK/publish acknowledgement/client error 普通函数指针。connected callback 每次成功连接都会触发，重新订阅由业务完成。
 
-业务握手失败可通过 `requestReconnect()` 设置一个延迟处理标志。`handle()` 在下一轮、WiFi/NTP 门控通过后释放传输；断线回调继续走同一 `_scheduleRetry()`，因此不增加第二套计时器、同步等待或忙循环。
+业务握手失败通过 `requestReconnect()` 设置延迟处理标志，握手成功通过 `markConnectionReady()` 确认稳定。CONNACK 不重置 `_retryDelay`，连续握手失败由断线回调沿同一 `_scheduleRetry()` 推进到 60s；ready 确认才恢复初始 2s。强制断开的异步 callback 若已进入 `BACKOFF`，`handle()` 不会重复 schedule，因此单次失败只推进一次退避。
 
 MQTT 状态为 `UNCONFIGURED → WAITING_WIFI → WAITING_TIME → BACKOFF/CONNECTING → CONNECTED`。断线按 2s、4s、8s、16s、32s、60s 有界指数退避；WiFi 或 NTP 不就绪时回到门控状态。底层同步 BearSSL connect 在 ESP8266 上可能阻塞到单次网络超时，但外围不会忙循环。
 

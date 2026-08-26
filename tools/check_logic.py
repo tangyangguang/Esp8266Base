@@ -457,8 +457,9 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     require_token(mqtt_cpp, "if (_connectedCallback) _connectedCallback(sessionPresent);",
                   "business resubscribe callback on every connect")
     require_token(mqtt_h, "static bool requestReconnect();", "deferred reconnect public API")
+    require_token(mqtt_h, "static bool markConnectionReady();", "application ready public API")
     request_start = mqtt_cpp.index("bool Esp8266BaseMQTT::requestReconnect()")
-    request_end = mqtt_cpp.index("bool Esp8266BaseMQTT::connected()", request_start)
+    request_end = mqtt_cpp.index("bool Esp8266BaseMQTT::markConnectionReady()", request_start)
     request_body = mqtt_cpp[request_start:request_end]
     require_token(request_body, "_reconnectRequested = true;", "deferred reconnect request flag")
     if "mqttClient.disconnect" in request_body or "mqttClient.connect" in request_body:
@@ -471,6 +472,31 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     for token in ["_reconnectRequested = false;", "mqttClient.disconnect(true);",
                   "_scheduleRetry();", "return;"]:
         require_token(reconnect_body, token, f"deferred reconnect handling {token}")
+    require_token(reconnect_body,
+                  "mqttClient.disconnected() && _state != Esp8266BaseMQTTState::BACKOFF",
+                  "async disconnect callback double-schedule guard")
+    ready_start = mqtt_cpp.index("bool Esp8266BaseMQTT::markConnectionReady()")
+    ready_end = mqtt_cpp.index("bool Esp8266BaseMQTT::connected()", ready_start)
+    ready_body = mqtt_cpp[ready_start:ready_end]
+    for token in ["_configured", "_begun", "_otaPaused", "_reconnectRequested",
+                  "mqttClient.connected()", "_retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;"]:
+        require_token(ready_body, token, f"application ready boundary {token}")
+    on_connect_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onConnect")
+    on_connect_end = mqtt_cpp.index("void Esp8266BaseMQTT::_onDisconnect", on_connect_start)
+    on_connect_body = mqtt_cpp[on_connect_start:on_connect_end]
+    if "_retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS" in on_connect_body:
+        fail("CONNACK must not reset application handshake backoff")
+    handshake_delay = 2000
+    handshake_schedule = []
+    for _ in range(7):
+        handshake_schedule.append(handshake_delay)
+        # CONNACK intentionally preserves the current value.
+        handshake_delay = min(handshake_delay * 2, 60000)
+    if handshake_schedule != [2000, 4000, 8000, 16000, 32000, 60000, 60000]:
+        fail("application handshake failures must retain bounded exponential backoff")
+    handshake_delay = 2000  # markConnectionReady contract
+    if handshake_delay != 2000:
+        fail("application readiness must restore initial ordinary-disconnect backoff")
     disconnect_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onDisconnect")
     disconnect_end = mqtt_cpp.index("void Esp8266BaseMQTT::_onMessage", disconnect_start)
     require_token(mqtt_cpp[disconnect_start:disconnect_end], "_reconnectRequested = false;",
@@ -489,6 +515,8 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     require_token(terminal_example, "Esp8266BaseMQTT::setCallbacks", "generic MQTT callback example")
     require_token(terminal_example, "Esp8266BaseMQTT::requestReconnect()",
                   "application readiness reconnect example")
+    require_token(terminal_example, "Esp8266BaseMQTT::markConnectionReady()",
+                  "application readiness success example")
     for callback in ["onMqttSubscribeAck", "onMqttPublishAck", "onMqttClientError"]:
         require_token(terminal_example, callback, f"MQTT example callback {callback}")
     require_token(mqtt_cpp, "class DiagnosticSecureClient", "private diagnostic secure client")

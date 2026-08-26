@@ -167,7 +167,7 @@ log_timestamp_mode=absolute_datetime
 
 SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定 `uint8_t` code 数组；publish acknowledgement 回调在 QoS1 PUBACK 或 QoS2 PUBCOMP 后触发。`OUT_OF_MEMORY`、`MAX_RETRIES`、`MALFORMED_PARAMETER` 等 client error 会映射为基础库枚举、记录日志并交给业务。自动源码检查只验证绑定、顺序、映射和退避策略，不等于真实 broker ACL、SUBACK/PUBACK 或 TLS 握手验证。
 
-如果业务要求订阅确认后才算 ready，可在 SUBACK 不匹配、拒绝或其他应用握手失败时调用 `requestReconnect()`。请求在下一轮 `handle()` 执行断开并复用既有退避，不会在回调栈内同步断开或立即重连。
+如果业务要求订阅确认后才算 ready，应在 SUBACK 不匹配、拒绝或其他应用握手失败时调用 `requestReconnect()`，成功完成订阅和初始证据后调用 `markConnectionReady()`。CONNACK 不重置退避；连续握手失败保持 2s→60s 有界指数退避。ready 后退避恢复初始值，之后普通断线从 2s 开始。异步 disconnect callback 与 `handle()` fallback 通过 `BACKOFF` 状态避免重复 schedule。
 
 使用 `espMqttClient 1.7.3` 的同步安全客户端。MQTT 收发缓冲保持上游默认值，BearSSL 显式为 4096/1024；未降低证书校验。该客户端的大部分 MQTT 状态分步推进，但 ESP8266 底层 DNS/TCP/TLS connect 单次尝试可能阻塞到网络超时，无法宣称严格零阻塞；外围有界退避可避免忙循环。
 

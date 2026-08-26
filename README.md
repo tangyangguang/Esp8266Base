@@ -207,7 +207,7 @@ MQTT 使用 `bertmelis/espMqttClient 1.7.3` 同步 TLS 客户端。PlatformIO �
 
 连接回调之外还可注册 SUBACK、publish acknowledgement 和 client error 回调。SUBACK return code `0x80` 表示 broker 拒绝订阅；publish acknowledgement 对 QoS1 对应 PUBACK、对 QoS2 对应 PUBCOMP。TLS 失败会在 BearSSL transport 释放前保存 code/detail，`lastTlsErrorCode()`、`lastTlsErrorText()` 和断线日志可用于排障；`/health` 只输出错误码。每次新连接前会清除旧 TLS 错误。
 
-业务在订阅 readiness、初始证据排队等应用握手失败时可调用 `Esp8266BaseMQTT::requestReconnect()`。该 API 只设置固定布尔请求，下一轮 `handle()` 才释放当前传输，并沿用原有有界退避重连；不会暴露第三方客户端类型、同步等待或形成忙循环。未配置、尚未 `begin()` 或 OTA 暂停时返回 `false`。
+业务在订阅 readiness、初始证据排队等应用握手失败时调用 `Esp8266BaseMQTT::requestReconnect()`，完成握手后调用 `markConnectionReady()`。CONNACK 本身不重置退避，因此连续应用握手失败会沿用 2s、4s、8s、16s、32s、60s 上限；只有 readiness 成功才恢复 2s，使之后的普通断线从初始退避开始。两个 API 都不暴露第三方类型、同步等待或形成忙循环。
 
 OTA 仍只使用 `Esp8266BaseOTA`。业务 prepare callback 先检查执行器是否安全；通过后基础库自动停止 MQTT 消息分发并断开 MQTT/TLS，再调用 `Update.begin()`。任何失败恢复 Watchdog 与 MQTT 重连许可；成功保持 MQTT 关闭、flush 配置/日志并重启。业务不再需要自行释放基础 MQTT 模块，但仍负责执行器安全检查。
 
