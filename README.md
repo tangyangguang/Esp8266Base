@@ -207,6 +207,8 @@ MQTT 使用 `bertmelis/espMqttClient 1.7.3` 同步 TLS 客户端。PlatformIO �
 
 连接回调之外还可注册 SUBACK、publish acknowledgement 和 client error 回调。SUBACK return code `0x80` 表示 broker 拒绝订阅；publish acknowledgement 对 QoS1 对应 PUBACK、对 QoS2 对应 PUBCOMP。TLS 失败会在 BearSSL transport 释放前保存 code/detail，`lastTlsErrorCode()`、`lastTlsErrorText()` 和断线日志可用于排障；`/health` 只输出错误码。每次新连接前会清除旧 TLS 错误。
 
+业务在订阅 readiness、初始证据排队等应用握手失败时可调用 `Esp8266BaseMQTT::requestReconnect()`。该 API 只设置固定布尔请求，下一轮 `handle()` 才释放当前传输，并沿用原有有界退避重连；不会暴露第三方客户端类型、同步等待或形成忙循环。未配置、尚未 `begin()` 或 OTA 暂停时返回 `false`。
+
 OTA 仍只使用 `Esp8266BaseOTA`。业务 prepare callback 先检查执行器是否安全；通过后基础库自动停止 MQTT 消息分发并断开 MQTT/TLS，再调用 `Update.begin()`。任何失败恢复 Watchdog 与 MQTT 重连许可；成功保持 MQTT 关闭、flush 配置/日志并重启。业务不再需要自行释放基础 MQTT 模块，但仍负责执行器安全检查。
 
 日志与回显策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段；`/wifi` GET 表单也会回显已保存密码，页面默认隐藏，可手动显示。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。

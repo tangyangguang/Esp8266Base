@@ -33,12 +33,15 @@ MrY=
 -----END CERTIFICATE-----)CERT";
 
 static BearSSL::X509List mqttTrustAnchor(MQTT_ROOT_CA);
+static uint16_t pendingSubscribePacketId = 0;
 
 static void onMqttConnected(bool sessionPresent) {
     ESP8266BASE_LOG_I("App ", "mqtt_connected session_present=%s action=subscribe",
                       sessionPresent ? "yes" : "no");
-    if (!Esp8266BaseMQTT::subscribe(MQTT_SUBSCRIBE_TOPIC, 1)) {
+    pendingSubscribePacketId = Esp8266BaseMQTT::subscribe(MQTT_SUBSCRIBE_TOPIC, 1);
+    if (pendingSubscribePacketId == 0) {
         ESP8266BASE_LOG_E("App ", "mqtt_subscribe_failed");
+        Esp8266BaseMQTT::requestReconnect();
     }
 }
 
@@ -47,12 +50,11 @@ static void onMqttDisconnected(Esp8266BaseMQTTDisconnectReason reason) {
 }
 
 static void onMqttSubscribeAck(uint16_t packetId, const uint8_t* returnCodes, size_t length) {
-    bool accepted = length > 0;
-    for (size_t i = 0; i < length; i++) {
-        if (returnCodes[i] == 0x80U) accepted = false;
-    }
+    const bool accepted = packetId == pendingSubscribePacketId &&
+                          returnCodes != nullptr && length == 1 && returnCodes[0] == 1U;
     ESP8266BASE_LOG_I("App ", "mqtt_suback packet_id=%u accepted=%s count=%u",
                       (unsigned)packetId, accepted ? "yes" : "no", (unsigned)length);
+    if (!accepted) Esp8266BaseMQTT::requestReconnect();
 }
 
 static void onMqttPublishAck(uint16_t packetId) {

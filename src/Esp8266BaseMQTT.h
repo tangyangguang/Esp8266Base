@@ -102,6 +102,9 @@ public:
     static uint16_t publish(const char* topic, uint8_t qos, bool retain,
                             const char* payload);
     static uint16_t subscribe(const char* topic, uint8_t qos);
+    // 非阻塞请求释放当前传输；下一轮 handle() 执行断开，随后沿用既有退避重连。
+    // 未配置、未 begin 或 OTA 暂停时返回 false；重复请求幂等返回 true。
+    static bool requestReconnect();
 
     static bool connected();
     static bool isConfigured();
@@ -124,6 +127,7 @@ private:
     static bool _configured;
     static bool _begun;
     static bool _otaPaused;
+    static bool _reconnectRequested;
     static Esp8266BaseMQTTState _state;
     static Esp8266BaseMQTTDisconnectReason _lastReason;
     static uint32_t _attemptCount;

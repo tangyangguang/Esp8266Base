@@ -59,6 +59,7 @@ static Esp8266BaseMQTTInternal::DiagnosticSecureClient mqttClient;
 bool Esp8266BaseMQTT::_configured = false;
 bool Esp8266BaseMQTT::_begun = false;
 bool Esp8266BaseMQTT::_otaPaused = false;
+bool Esp8266BaseMQTT::_reconnectRequested = false;
 Esp8266BaseMQTTState Esp8266BaseMQTT::_state = Esp8266BaseMQTTState::UNCONFIGURED;
 Esp8266BaseMQTTDisconnectReason Esp8266BaseMQTT::_lastReason = Esp8266BaseMQTTDisconnectReason::NONE;
 uint32_t Esp8266BaseMQTT::_attemptCount = 0;
@@ -225,6 +226,21 @@ void Esp8266BaseMQTT::handle() {
         return;
     }
 
+    if (_reconnectRequested) {
+        _reconnectRequested = false;
+        ESP8266BASE_LOG_W("MQTT", "application_reconnect_begin action=disconnect_then_backoff");
+        if (!mqttClient.disconnected()) {
+            mqttClient.disconnect(true);
+            mqttClient.loop();
+            if (mqttClient.disconnected() && _state != Esp8266BaseMQTTState::BACKOFF) {
+                _scheduleRetry();
+            }
+        } else {
+            _scheduleRetry();
+        }
+        return;
+    }
+
     mqttClient.loop();
     if (mqttClient.connected()) {
         _state = Esp8266BaseMQTTState::CONNECTED;
@@ -274,6 +290,15 @@ uint16_t Esp8266BaseMQTT::subscribe(const char* topic, uint8_t qos) {
     return mqttClient.subscribe(topic, qos);
 }
 
+bool Esp8266BaseMQTT::requestReconnect() {
+    if (!_configured || !_begun || _otaPaused) return false;
+    if (!_reconnectRequested) {
+        _reconnectRequested = true;
+        ESP8266BASE_LOG_W("MQTT", "application_reconnect_requested deferred=yes");
+    }
+    return true;
+}
+
 bool Esp8266BaseMQTT::connected() { return !_otaPaused && mqttClient.connected(); }
 bool Esp8266BaseMQTT::isConfigured() { return _configured; }
 Esp8266BaseMQTTState Esp8266BaseMQTT::state() { return _state; }
@@ -313,6 +338,7 @@ const char* Esp8266BaseMQTT::lastDisconnectReasonName() {
 
 bool Esp8266BaseMQTT::pauseForOTA() {
     if (!_configured || !_begun) return true;
+    _reconnectRequested = false;
     _otaPaused = true;
     _state = Esp8266BaseMQTTState::PAUSED_OTA;
     if (mqttClient.connected()) {
@@ -388,6 +414,7 @@ void Esp8266BaseMQTT::_onConnect(bool sessionPresent) {
 }
 
 void Esp8266BaseMQTT::_onDisconnect(uint8_t reason) {
+    _reconnectRequested = false;
     _lastReason = mapReason((espMqttClientTypes::DisconnectReason)reason);
     if (_lastReason == Esp8266BaseMQTTDisconnectReason::TCP_DISCONNECTED &&
         mqttClient.lastTlsErrorCode() != 0) {

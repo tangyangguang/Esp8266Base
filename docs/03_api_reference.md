@@ -558,9 +558,12 @@ static uint16_t publish(const char* topic, uint8_t qos, bool retain,
 static uint16_t publish(const char* topic, uint8_t qos, bool retain,
                         const char* payload);
 static uint16_t subscribe(const char* topic, uint8_t qos);
+static bool requestReconnect();
 ```
 
 支持 QoS 0/1/2；未连接、OTA 暂停、空参数或非法 QoS 返回 0。LWT 通过 `Esp8266BaseMQTTConfig::willTopic/willPayload/willQos/willRetain` 配置。connected callback 每次成功连接都会调用，业务必须在其中重新订阅；subscribeAck 提供 packetId 和固定 `uint8_t` return codes，`0x80` 表示拒绝；publishAck 对 QoS1 为 PUBACK、QoS2 为 PUBCOMP；clientError 使用 `Esp8266BaseMQTTClientError` 稳定枚举。message callback 保留上游分块参数 `len/index/total`。
+
+`requestReconnect()` 用于业务握手失败后的受控重试。成功只表示请求已排队；下一轮 `handle()` 才强制释放当前传输，之后使用现有指数退避重新连接。重复请求幂等；未配置、未开始或 OTA 暂停时返回 `false`。它不会调用业务协议、等待网络或暴露 `espMqttClient` 类型。
 
 ```cpp
 static bool connected();

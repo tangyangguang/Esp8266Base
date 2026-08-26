@@ -456,6 +456,25 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         fail("MQTT retry due policy is not uint32 wrap-safe")
     require_token(mqtt_cpp, "if (_connectedCallback) _connectedCallback(sessionPresent);",
                   "business resubscribe callback on every connect")
+    require_token(mqtt_h, "static bool requestReconnect();", "deferred reconnect public API")
+    request_start = mqtt_cpp.index("bool Esp8266BaseMQTT::requestReconnect()")
+    request_end = mqtt_cpp.index("bool Esp8266BaseMQTT::connected()", request_start)
+    request_body = mqtt_cpp[request_start:request_end]
+    require_token(request_body, "_reconnectRequested = true;", "deferred reconnect request flag")
+    if "mqttClient.disconnect" in request_body or "mqttClient.connect" in request_body:
+        fail("requestReconnect must not change transport synchronously")
+    reconnect_branch = mqtt_handle.index("if (_reconnectRequested)")
+    ordinary_loop = mqtt_handle.index("\n    mqttClient.loop();", reconnect_branch)
+    if not ntp_gate < reconnect_branch < ordinary_loop:
+        fail("deferred reconnect must run after network gates and before ordinary MQTT work")
+    reconnect_body = mqtt_handle[reconnect_branch:ordinary_loop]
+    for token in ["_reconnectRequested = false;", "mqttClient.disconnect(true);",
+                  "_scheduleRetry();", "return;"]:
+        require_token(reconnect_body, token, f"deferred reconnect handling {token}")
+    disconnect_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onDisconnect")
+    disconnect_end = mqtt_cpp.index("void Esp8266BaseMQTT::_onMessage", disconnect_start)
+    require_token(mqtt_cpp[disconnect_start:disconnect_end], "_reconnectRequested = false;",
+                  "completed transport release clears deferred request")
     require_token(mqtt_cpp, "missing_required_config", "missing MQTT config failure")
     require_token(mqtt_cpp, "config.password == nullptr || config.password[0] == '\\0' ||",
                   "password requires username")
@@ -468,6 +487,8 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
                 "onSubscribe", "onPublish", "setClientErrorCallback"]:
         require_token(mqtt_cpp, api, f"MQTT transport API {api}")
     require_token(terminal_example, "Esp8266BaseMQTT::setCallbacks", "generic MQTT callback example")
+    require_token(terminal_example, "Esp8266BaseMQTT::requestReconnect()",
+                  "application readiness reconnect example")
     for callback in ["onMqttSubscribeAck", "onMqttPublishAck", "onMqttClientError"]:
         require_token(terminal_example, callback, f"MQTT example callback {callback}")
     require_token(mqtt_cpp, "class DiagnosticSecureClient", "private diagnostic secure client")
