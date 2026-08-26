@@ -119,7 +119,9 @@ Esp8266Base/
 ├── tools/
 │   ├── test_all.sh                 # 必要自动化测试入口
 │   ├── check_static.sh             # 静态一致性检查
-│   └── check_logic.py              # 轻量逻辑检查
+│   ├── check_logic.py              # 轻量逻辑检查
+│   ├── ota_upload.sh               # 保留错误正文的命令行 OTA 上传
+│   └── test_ota_upload.sh          # curl 新旧版本与失败语义回归
 └── partitions/
     └── esp8266-4mb-2mfs.ld         # 4MB Flash 分区脚本（2MB固件+2MB LittleFS）
 ```
@@ -233,7 +235,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 tools/test_all.sh
 ```
 
-默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、源码契约/顺序检查、纯退避策略检查，并编译根项目及全部示例的 `esp12f` 环境；`mqtt_terminal` 独立覆盖正式模式。它不动态验证 DNS/TLS、实际 MQTT 状态迁移、SUBACK/PUBACK 或 OTA。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
+默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、源码契约/顺序检查、纯退避策略和 OTA 上传脚本的 curl 兼容/失败语义回归，并编译根项目及全部示例的 `esp12f` 环境；`mqtt_terminal` 独立覆盖正式模式。它不动态验证 DNS/TLS、实际 MQTT 状态迁移、SUBACK/PUBACK 或设备端 OTA。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
 
 ```bash
 tools/test_all.sh --all-envs

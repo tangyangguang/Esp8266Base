@@ -44,6 +44,7 @@
 
 ### 修复
 
+- 修复 `tools/ota_upload.sh` 同时传入互斥的 curl `--fail` / `--fail-with-body` 导致上传无法启动；新版 curl 使用 `--fail-with-body`，旧版由脚本判定非 2xx，均保留设备错误正文并失败退出。
 - OTA 在 `Update.end(true)` 前检查 Config 和 FileLog flush 结果；失败时中止 Update、返回明确错误并恢复 Watchdog/业务失败回调，不留下待启动镜像。
 - MQTT_TERMINAL 的 `GET /` 在 AP_CONFIG 下 `303 /wifi`、STA 下 `303 /health`，修复无凭据首次访问根路径无法直接进入配网的问题。
 - TLS transport 释放前保存 BearSSL code/detail，新增 SUBACK、publish acknowledgement、client error 回调与拒绝日志；新连接会清理陈旧 TLS 错误。
@@ -53,6 +54,7 @@
 
 - 默认完整 Web 模式不变。MQTT_TERMINAL 不提供完整首页或 `GET /ota`，但保留相同 Basic Auth 的 `POST /ota`；业务路由容量为 0 时不保留数组。
 - OTA prepare 拒绝不影响 MQTT；通过后基础库自动暂停 MQTT/TLS。失败先恢复 Watchdog 与 MQTT 重连许可，成功保持通信关闭并重启。
+- MQTT 的 `ota_pause` 日志在 TLS 释放判定后输出原始 `heap` / `max` 字节值，用于验收 `Update.begin()` 前的关键资源窗口，不新增常驻状态。
 - MQTT/TLS 通信缓冲未缩小：MQTT 收发使用上游默认值，BearSSL 保持 4096/1024。ESP8266 同步 TLS connect 单次尝试可能阻塞到网络超时，真机堆、故障恢复和长时间运行仍需验收。
 
 ## 2026-05-14

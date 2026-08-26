@@ -224,7 +224,7 @@ http://<device-ip>/ota
 - `ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面、System 页面 OTA 入口或上传 POST 路由，避免上传表单可见但 POST `/ota` 返回 404。
 - 上传页面先用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验；校验失败时不发起上传，直接提示 `Invalid firmware: not an ESP8266 app image`。
 - 上传页面使用 XMLHttpRequest 显示百分比和字节数；进度条表示浏览器上传进度，不代表服务端已经接受固件。
-- 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。
+- 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；启用 MQTT 时，紧接 TLS 释放判定后的 `ota_pause` 还会精确输出原始字节值 `heap` 和 `max`，作为 `Update.begin()` 前关键窗口的验收指标。进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。
 - OTA 上传期间暂停 Watchdog，上传完成后恢复。
 - 服务端首个数据块也会做同一类 ESP8266 固件头快速校验，作为 curl 或绕过页面上传时的兜底；它用于拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，校验通过后才调用 `Update.begin(ESP.getFreeSketchSpace())` 并写入 Flash。
 - 头检查通过后先调用可选业务 prepare callback，仅用于执行器安全/空闲检查；拒绝时 MQTT 不受影响。
@@ -256,7 +256,7 @@ Esp8266BaseOTA::setLifecycleCallbacks(prepareOta, recoverOta, finishOta);
 tools/ota_upload.sh http://192.168.1.50 .pio/build/esp12f/firmware.bin admin
 ```
 
-脚本使用 `curl --fail` 和 multipart 字段 `firmware`，输出固件大小、HTTP 状态和设备响应；非 2xx 保留 curl 的失败退出码。不要把真实密码写入仓库、shell 历史或示例命令。
+脚本使用 multipart 字段 `firmware`，输出固件大小、HTTP 状态和设备响应。curl 支持 `--fail-with-body` 时只使用该选项；旧 curl 不支持时由脚本根据 HTTP 状态显式返回退出码 22，因此两种路径都保留非 2xx 响应正文并失败退出。不要把真实密码写入仓库、shell 历史或示例命令。
 
 ---
 

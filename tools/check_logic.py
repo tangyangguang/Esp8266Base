@@ -457,6 +457,8 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         fail("MQTT retry due policy is not uint32 wrap-safe")
     require_token(mqtt_cpp, "if (_connectedCallback) _connectedCallback(sessionPresent);",
                   "business resubscribe callback on every connect")
+    require_token(mqtt_cpp, "ota_pause result=%s heap=%u max=%u",
+                  "OTA post-TLS-release heap diagnostic")
     require_token(mqtt_h, "static bool requestReconnect();", "deferred reconnect public API")
     require_token(mqtt_h, "static bool markConnectionReady();", "application ready public API")
     request_start = mqtt_cpp.index("bool Esp8266BaseMQTT::requestReconnect()")
@@ -596,7 +598,10 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     if "lastTlsErrorText" in web_cpp[health_start:health_end]:
         fail("health endpoint must not expose long TLS error text")
 
-    require_token(upload_script, "curl --fail", "curl fail behavior")
+    require_token(upload_script, "--fail-with-body", "curl body-preserving fail support")
+    require_token(upload_script, "exit 22", "legacy curl explicit HTTP failure")
+    if "--fail --fail-with-body" in upload_script or "--fail-with-body --fail" in upload_script:
+        fail("OTA upload script must not combine mutually exclusive curl fail options")
     require_token(upload_script, 'firmware=@${firmware}', "curl firmware field")
     require_token(upload_script, "Firmware size:", "OTA script firmware size output")
     require_token(upload_script, "HTTP result:", "OTA script HTTP result output")

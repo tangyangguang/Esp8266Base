@@ -624,7 +624,7 @@ static void setLifecycleCallbacks(Esp8266BaseOTAPrepareCallback prepare,
 2. POST /ota 在上传开始时强制验证 Basic Auth；未认证请求返回 `401 Unauthorized`
 3. 页面提交前：内置 OTA 页用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验，失败时不发起上传并提示 `Invalid firmware: not an ESP8266 app image`
 4. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，日志输出 `upload_started`
-5. 首个数据块：服务端做固件头检查，业务 prepare 通过后暂停 MQTT/TLS，再调用 `Update.begin(ESP.getFreeSketchSpace())`
+5. 首个数据块：服务端做固件头检查，业务 prepare 通过后暂停 MQTT/TLS；`ota_pause` 在 TLS 释放判定后精确输出 `heap` 和最大连续块 `max` 的原始字节值，随后调用 `Update.begin(ESP.getFreeSketchSpace())`
 6. 上传期间：分块写入固件，每块后 `yield()`，按 25% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
 7. 上传完成：先检查 Config/FileLog flush，再调用 `Update.end(true)`；输出 `upload_finished`，启用 Watchdog 时 `resume()`，执行 success callback、输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
 8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息

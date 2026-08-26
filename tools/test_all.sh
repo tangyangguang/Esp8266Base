@@ -21,6 +21,7 @@ run() {
 run git diff --check
 run bash tools/check_static.sh
 run python3 tools/check_logic.py
+run bash tools/test_ota_upload.sh
 
 run pio run -e esp12f -j1
 

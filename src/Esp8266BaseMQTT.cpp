@@ -368,7 +368,8 @@ bool Esp8266BaseMQTT::pauseForOTA() {
         }
     }
     bool released = mqttClient.disconnected();
-    ESP8266BASE_LOG_I("MQTT", "ota_pause result=%s messages_allowed=no", released ? "ready" : "failed");
+    ESP8266BASE_LOG_I("MQTT", "ota_pause result=%s heap=%u max=%u", released ? "ready" : "failed",
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
     return released;
 }
 

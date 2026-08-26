@@ -28,8 +28,13 @@ echo "Firmware: $firmware"
 echo "Firmware size: ${firmware_size} bytes"
 echo "Target: ${device_url}/ota"
 
+curl_args=(--silent --show-error)
+if curl --help all 2>/dev/null | grep -q -- '--fail-with-body'; then
+  curl_args=(--fail-with-body "${curl_args[@]}")
+fi
+
 set +e
-http_code="$(curl --fail --fail-with-body --silent --show-error \
+http_code="$(curl "${curl_args[@]}" \
   --user "${ota_user}:${OTA_PASSWORD}" \
   --form "firmware=@${firmware};type=application/octet-stream" \
   --output "$response_file" \
@@ -49,6 +54,11 @@ fi
 if [[ $curl_status -ne 0 ]]; then
   echo "OTA upload failed (curl exit ${curl_status})." >&2
   exit "$curl_status"
+fi
+
+if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+  echo "OTA upload failed (HTTP ${http_code:-000})." >&2
+  exit 22
 fi
 
 echo "OTA upload accepted."
