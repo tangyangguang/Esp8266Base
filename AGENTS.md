@@ -64,11 +64,11 @@ macOS 上 `pio device monitor` 可能有 termios 问题；串口监视优先用 
 - 配置存储使用 LittleFS `/cfg_<key>`；库保留 key 以 `docs/05_config_storage.md` 为准，必须使用 `eb_` 前缀，业务项目不得复用。
 - 配置写入必须写前比较；高频计数使用 deferred；正常重启、deep sleep、OTA 成功前 flush 配置和文件日志；WDT 超时异常路径只写 RTC 标记，不写 LittleFS。
 - LittleFS 挂载失败默认不格式化，只有 `ESP8266BASE_CFG_FORMAT_ON_FAIL=1` 才允许。
-- WiFi 无凭证进入 AP；有凭证连接失败时保持 STA 持续重连，不自动进 AP。
+- WiFi 无凭证进入 AP；有凭证连接失败时保持 STA 持续重连，不自动进 AP。这是面向家庭设备的自恢复设计：常见故障是路由器或上游 WiFi 暂时不可用，持续重试可在路由器恢复后自动回连；自动切到 AP 会退出正常 STA 恢复路径。除非用户明确改变产品策略，否则不得把“不自动进 AP”作为缺陷反复提出，也不得增加超时转 AP 或 AP/STA 并行兜底；重新配网必须由清除凭证或恢复出厂等显式操作触发。
 - Web 表单必须防重复提交；危险操作必须二次确认；POST 成功后用 303 重定向。
 - OTA 使用 `Update.begin(ESP.getFreeSketchSpace())`，不要使用 ESP32 的 `UPDATE_SIZE_UNKNOWN`。
 - deep sleep 后 Web 不响应是正常行为；唤醒依赖 GPIO16→RST 或外部复位。
-- WiFi 密码、Web Auth 密码和配置审计值明文日志是当前设计，不按 bug 处理；但不要把含敏感值的日志提交、公开或外发。
+- WiFi 密码、Web Auth 密码和配置审计值明文日志是当前个人本机/家庭项目为方便现场调试明确接受的设计取舍，不按 bug 处理；在复用本库的同边界业务项目评审中不要重复列为安全问题。仍不得把含敏感值的日志提交、公开或外发；只有部署边界变为生产、共享设备、不可信局域网或用户明确要求改变安全策略时，才重新评估脱敏与传输保护。
 
 ## 8. 文档、分区与发布
 

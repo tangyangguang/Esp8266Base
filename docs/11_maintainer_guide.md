@@ -77,7 +77,7 @@ Config 正式配置写入必须使用安全策略：
 
 ## 六、日志与审计规则
 
-- WiFi 密码、Web Auth 密码明文日志是设计要求，不按 bug 处理。
+- WiFi 密码、Web Auth 密码明文日志是当前个人本机/家庭项目明确接受的调试设计，不按 bug 处理；相同部署边界的下游项目评审不重复报此问题，只有部署边界改变时才重新评估。
 - 配置审计不脱敏，直接输出 key/value。
 - FileLog 只支持 OFF/ERROR/WARN/INFO；ERROR 模式只写 ERROR，WARN 模式写 WARN/ERROR，INFO 模式写 INFO/WARN/ERROR。
 - NTP 同步后必须输出实际时间和 boot time 映射。

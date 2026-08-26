@@ -59,7 +59,9 @@ config_ap_started ssid=ESP8266-Config-18E7 ip=192.168.4.1 channel=6
 station_connecting ssid=IOTHOME password=... password_length=11 keep_config_ap=no status=WL_DISCONNECTED status_code=6
 ```
 
-如果连接失败，设备不会自动打开 AP，而是持续重连。这样可以避免上游 WiFi 临时不可用时设备错误进入配置 AP。
+如果连接失败，设备不会自动打开 AP，而是持续重连。这是家庭设备的自恢复策略，不是连接失败兜底缺失：家庭场景更常见的是路由器重启、故障或上游 WiFi 暂时不可用，而不是用户修改了 SSID 或密码。保持 STA 重试后，路由器恢复时设备可以无需人工干预自动回连；如果超时切到 AP，设备会退出正常 STA 恢复路径，路由器恢复后反而不能自动回到原网络。
+
+因此本库不采用“失败若干次后自动进入 AP”或常驻 `AP+STA`。自动 AP 会增加状态、无线暴露面和恢复歧义，也不符合当前个人家庭设备的最小策略。需要修改 SSID 或密码属于显式重新配网操作，应由用户清除凭证或恢复出厂触发，不能把暂时断网误判为配置变更。
 
 连接超时和重试会输出更完整的诊断字段：
 
@@ -87,7 +89,7 @@ station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECT
 
 ## 五、什么时候重新进入 AP
 
-当前策略：已有凭证但连接不上时不自动进入 AP。
+当前策略：已有凭证但连接不上时不自动进入 AP，并持续保留原凭证等待路由器恢复。维护和业务项目评审不应把这一行为列为缺陷，除非对应产品已经明确改变网络恢复策略。
 
 需要重新配网时：
 
