@@ -105,6 +105,8 @@ rg -n 'ESP8266BASE_PROFILE_MQTT_TERMINAL=1' examples/mqtt_terminal/platformio.in
   fail "MQTT_TERMINAL example build flag missing"
 rg -n 'bertmelis/espMqttClient @ 1.7.3' examples/mqtt_terminal/platformio.ini >/dev/null || \
   fail "pinned espMqttClient dependency missing"
+rg -n 'EMC_MIN_FREE_MEMORY=4096' examples/mqtt_terminal/platformio.ini >/dev/null || \
+  fail "MQTT_TERMINAL ESP8266 outbox reserve missing"
 rg -n -- '--fail' tools/ota_upload.sh >/dev/null || fail "OTA upload script must use curl --fail"
 rg -n 'firmware=@' tools/ota_upload.sh >/dev/null || fail "OTA upload script firmware multipart field missing"
 if rg -n 'admin:[^$<{]' tools/ota_upload.sh README.md docs examples/mqtt_terminal; then

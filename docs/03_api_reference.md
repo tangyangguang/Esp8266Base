@@ -581,7 +581,7 @@ static const char* lastTlsErrorText();
 
 只读诊断不返回 broker、clientId、用户名、密码或证书。TLS code/detail 在 BearSSL transport 释放前捕获；text 指向内部 96B 固定缓冲，并在下一轮连接前清空，不得长期保存。`/health` 只提供 TLS code。状态包括 `UNCONFIGURED/WAITING_WIFI/WAITING_TIME/BACKOFF/CONNECTING/CONNECTED/PAUSED_OTA`。
 
-基础库 API 和状态只保存固定函数指针；传给 `espMqttClient 1.7.3` 后，上游内部 callback 包装、出站队列、证书解析和 TLS 会话仍可能使用动态堆。MQTT 收发缓冲保持上游默认值，BearSSL 缓冲为 4096/1024。
+基础库 API 和状态只保存固定函数指针；传给 `espMqttClient 1.7.3` 后，上游内部 callback 包装、出站队列、证书解析和 TLS 会话仍可能使用动态堆。正式 `MQTT_TERMINAL` 构建必须定义 `EMC_MIN_FREE_MEMORY=4096`，否则上游 Arduino 默认 16KB 最大连续堆块门槛可能在 TLS 已连接时拒绝创建 SUBSCRIBE/PUBLISH 包。MQTT 收发缓冲保持上游默认值，BearSSL 缓冲为 4096/1024。
 
 ---
 

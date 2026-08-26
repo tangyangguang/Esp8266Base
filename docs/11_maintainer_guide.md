@@ -48,6 +48,7 @@ Esp8266Base
 - Web handler 临时缓冲优先 <= 64B。
 - 新增模块或新增常驻状态必须更新 `docs/04_memory_budget.md`。
 - MQTT 基础 API 只用固定函数指针；`espMqttClient` 内部的 `std::function`、出站队列和 BearSSL 动态内存属于明确记录的第三方边界。
+- 正式 `MQTT_TERMINAL` 构建固定 `EMC_MIN_FREE_MEMORY=4096`；这是上游出站包的最大连续堆块门槛，不是静态内存预留。
 - 不定义缩小 `EMC_RX_BUFFER_SIZE`/`EMC_TX_BUFFER_SIZE`；BearSSL 显式缓冲保持 4096/1024。
 
 ---

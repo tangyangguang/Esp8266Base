@@ -395,6 +395,7 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
                       f"MQTT_TERMINAL requires {dependency}")
     require_token(terminal_ini, "-DESP8266BASE_PROFILE_MQTT_TERMINAL=1", "MQTT_TERMINAL build")
     require_token(terminal_ini, "bertmelis/espMqttClient @ 1.7.3", "pinned MQTT client")
+    require_token(terminal_ini, "-DEMC_MIN_FREE_MEMORY=4096", "ESP8266 MQTT outbox reserve")
     require_token(terminal_ini, "-DESP8266BASE_WEB_MAX_APP_PAGES=0", "zero page capacity")
     require_token(terminal_ini, "-DESP8266BASE_WEB_MAX_APP_APIS=0", "zero API capacity")
     require_token(web_h, "#if ESP8266BASE_WEB_MAX_APP_PAGES > 0", "page array compile exclusion")
