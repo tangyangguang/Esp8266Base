@@ -163,7 +163,7 @@ MQTT 智能终端启用 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1`；此时没有 `GE
 
 MQTT 正常下线由业务调用 `Esp8266BaseMQTT::beginShutdown(topic, payload)`，基础库固定发布 retained QoS1，确认该 packetId 的 PUBACK 后才正常发送 DISCONNECT；结果通过 `shutdownResult()`/`shutdownSucceeded()` 查询。成功或失败都保持暂停且不自动重连，只有明确需要恢复时调用 `resumeAfterShutdown()`。基础库不理解业务 Topic 或 JSON。
 
-MQTT_TERMINAL 的 OTA prepare callback 除执行器安全停机外，还必须构造最终 availability 并调用同一个 `beginShutdown()`；返回 true 后 OTA 才有界等待匹配 PUBACK 和正常断开。失败会恢复 Watchdog 和 MQTT 重连许可，成功则保持业务通信关闭并重启。完整代码见 `examples/mqtt_terminal`。
+MQTT_TERMINAL 的 OTA prepare callback 先完成执行器安全停机；存在活动 MQTT 会话时还要构造最终 availability 并调用 `beginShutdown()`。MQTT 未配置、未 begin 或 transport 已完全断开时可直接暂停并继续 OTA，但结果保持 `NOT_CONNECTED` 或原失败结果，不会伪装为 shutdown 成功；连接中或 transport 尚未释放仍会拒绝。完整代码见 `examples/mqtt_terminal`。
 
 ---
 

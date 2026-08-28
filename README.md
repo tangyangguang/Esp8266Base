@@ -221,7 +221,7 @@ MQTT 使用 `bertmelis/espMqttClient 1.7.3` 同步 TLS 客户端。PlatformIO �
 
 正常关闭 MQTT 时，业务调用 `beginShutdown(topic, payload)` 提供最终消息。基础库固定以 retained QoS1 入队，立即停止新的 publish/subscribe/message 分发，只在收到该 packetId 的 PUBACK 后调用 `disconnect(false)`；正常断开后状态保持 `PAUSED`，不会让 LWT 覆盖最终消息，也不会自动重连。返回 `true` 只表示入队成功，最终结果必须读取 `shutdownResult()`/`shutdownSucceeded()`；入队失败、连接丢失、PUBACK 超时或正常断开超时都有明确失败结果并保持暂停，只有业务显式调用 `resumeAfterShutdown()` 才恢复连接许可。基础库不解析 Topic 或 payload，也不保存业务载荷。
 
-OTA 仍只使用 `Esp8266BaseOTA`。MQTT_TERMINAL 的业务 prepare callback 先完成执行器安全停机、构造最终 availability，再调用同一个 `beginShutdown()`；prepare 返回 true 后 OTA 有界推进该状态机，只有匹配 PUBACK 且 MQTT/TLS 正常释放才调用 `Update.begin()`。失败路径先恢复 Watchdog 和 MQTT 重连许可，再调用业务 failure callback；成功保持 `PAUSED`、flush 配置/日志并重启。该受控阶段每段默认最多等待 5 秒，绝不 force close；真实业务接法见 `examples/mqtt_terminal`。
+OTA 仍只使用 `Esp8266BaseOTA`。MQTT_TERMINAL 的业务 prepare callback 先完成执行器安全停机；有活动 MQTT 会话时构造最终 availability 并调用同一个 `beginShutdown()`，OTA 有界等待匹配 PUBACK 和正常断开后才调用 `Update.begin()`。MQTT 未配置、未 begin 或 transport 已完全断开时可直接进入 `PAUSED` 并继续 OTA，`shutdownResult()` 保持 `NOT_CONNECTED` 或原失败结果，绝不伪装 `SUCCESS`；CONNECTED、CONNECTING 或尚未释放的 transport 没有完成受控下线时仍拒绝。失败路径先恢复 Watchdog 和 MQTT 重连许可，再调用业务 failure callback；成功保持暂停、flush 配置/日志并重启。真实业务接法见 `examples/mqtt_terminal`。
 
 日志与回显策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段；`/wifi` GET 表单也会回显已保存密码，页面默认隐藏，可手动显示。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
 

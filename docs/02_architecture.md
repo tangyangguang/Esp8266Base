@@ -208,7 +208,7 @@ struct AppRoute {
 
 受控下线是 `CONNECTED → SHUTDOWN_WAIT_ACK → SHUTDOWN_DISCONNECTING → PAUSED` 的单向状态机。`beginShutdown(topic, payload)` 只创建 retained QoS1 出站包，不保存或解析业务内容；进入后立即禁止新的 publish/subscribe/message/reconnect/readiness。只有 `_onPublishAck()` 收到该最终消息 packetId 才调用 `disconnect(false)`，不匹配 PUBACK 仍转发给业务但不推进状态。正常 `USER_OK` 断线才得到 `SUCCESS`；入队失败、连接丢失、PUBACK 超时或正常断开超时均保留可诊断失败结果和暂停门禁，绝不 force close。PUBACK 超时或最终包异步发送错误会清空上游 outbox，避免恢复后失败的 shutdown 迟到；业务恢复后重发当前状态。业务显式 `resumeAfterShutdown()` 才重新允许连接。
 
-OTA 顺序为：业务 prepare 完成执行器安全停机并调用 `beginShutdown()` → `Esp8266BaseMQTT::pauseForOTA()` 有界推进同一状态机 → 匹配 PUBACK → 正常 MQTT DISCONNECT/TLS 释放 → `Update.begin()`。PUBACK 和正常断开各自最多等待配置超时；失败路径先恢复 Watchdog，再显式恢复 MQTT 连接许可，最后调用业务 failure callback；成功路径保持 `PAUSED`，flush 配置/日志后重启。没有事件总线，也不让 MQTT 依赖执行器状态或理解 availability JSON。
+OTA 顺序为：业务 prepare 完成执行器安全停机；若存在活动会话则调用 `beginShutdown()` → `pauseForOTA()` 有界等待匹配 PUBACK 和正常 MQTT DISCONNECT/TLS 释放 → `Update.begin()`。MQTT 未配置、未 begin 或底层已完全 disconnected 时，`pauseForOTA()` 直接进入 `PAUSED` 并允许 OTA，同时保留 `NOT_CONNECTED` 或原失败结果；这只表示无活动传输，不表示 shutdown 消息成功。CONNECTED、CONNECTING 或 transport 尚未释放且未完成受控下线时拒绝。失败路径先恢复 Watchdog 和 MQTT 连接许可，成功路径保持暂停并重启。
 
 ---
 

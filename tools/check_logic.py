@@ -598,6 +598,24 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     resume_body = mqtt_cpp[resume_start:resume_end]
     require_token(resume_body, "_shutdownActive = false;", "explicit shutdown recovery")
     require_token(resume_body, "reconnect=yes", "explicit reconnect recovery diagnostic")
+    require_token(resume_body, "_state = Esp8266BaseMQTTState::UNCONFIGURED;",
+                  "unconfigured OTA failure recovery state")
+    ota_pause_start = mqtt_cpp.index("bool Esp8266BaseMQTT::pauseForOTA()")
+    ota_pause_end = mqtt_cpp.index("void Esp8266BaseMQTT::resumeAfterOTAFailure", ota_pause_start)
+    ota_pause_body = mqtt_cpp[ota_pause_start:ota_pause_end]
+    for token in ["!_configured || !_begun", "mqttClient.disconnected()",
+                  "Esp8266BaseMQTTShutdownResult::NOT_CONNECTED",
+                  "_shutdownActive = true;", "_state = Esp8266BaseMQTTState::PAUSED;"]:
+        require_token(ota_pause_body, token, f"OTA inactive-transport pause {token}")
+    if "shutdownSucceeded()" in ota_pause_body:
+        fail("OTA readiness must not require or forge shutdown SUCCESS when no transport is active")
+    inactive_gate = ota_pause_body.index("if (!mqttClient.disconnected())")
+    missing_shutdown_failure = ota_pause_body.index("return false;", inactive_gate)
+    enter_inactive_pause = ota_pause_body.index("_shutdownActive = true;", missing_shutdown_failure)
+    transport_ready = ota_pause_body.index("bool ready = mqttClient.disconnected();",
+                                           enter_inactive_pause)
+    if not inactive_gate < missing_shutdown_failure < enter_inactive_pause < transport_ready:
+        fail("OTA pause must reject active/busy transport and accept only fully disconnected transport")
     for blocked_api in ["uint16_t Esp8266BaseMQTT::publish", "uint16_t Esp8266BaseMQTT::subscribe",
                         "bool Esp8266BaseMQTT::requestReconnect", "bool Esp8266BaseMQTT::markConnectionReady"]:
         start = mqtt_cpp.index(blocked_api)
@@ -628,6 +646,43 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     for actual, expected in vectors:
         if actual != expected:
             fail(f"controlled shutdown vector mismatch: {actual} != {expected}")
+
+    # OTA readiness is separate from final-message success. An absent/released transport
+    # may proceed with an honest non-success result; active or connecting transports may not.
+    def ota_pause_vector(configured: bool, begun: bool, transport: str,
+                         shutdown_started: bool, shutdown_terminal: bool,
+                         shutdown_result: str) -> tuple[bool, str]:
+        if not configured or not begun:
+            return (True, "not_connected")
+        if not shutdown_started:
+            if transport != "disconnected":
+                return (False, shutdown_result)
+            return (True, "not_connected")
+        if not shutdown_terminal:
+            return (False, shutdown_result)
+        return (transport == "disconnected", shutdown_result)
+
+    ota_vectors = [
+        (ota_pause_vector(False, False, "disconnected", False, False, "none"),
+         (True, "not_connected")),
+        (ota_pause_vector(True, False, "disconnected", False, False, "none"),
+         (True, "not_connected")),
+        (ota_pause_vector(True, True, "disconnected", False, False, "none"),
+         (True, "not_connected")),
+        (ota_pause_vector(True, True, "connected", False, False, "none"),
+         (False, "none")),
+        (ota_pause_vector(True, True, "connecting", False, False, "none"),
+         (False, "none")),
+        (ota_pause_vector(True, True, "connected", True, True, "publish_failed"),
+         (False, "publish_failed")),
+        (ota_pause_vector(True, True, "disconnected", True, True, "success"),
+         (True, "success")),
+        (ota_pause_vector(True, True, "disconnected", True, True, "connection_lost"),
+         (True, "connection_lost")),
+    ]
+    for actual, expected in ota_vectors:
+        if actual != expected:
+            fail(f"OTA pause vector mismatch: {actual} != {expected}")
     require_token(mqtt_cpp, "missing_required_config", "missing MQTT config failure")
     require_token(mqtt_cpp, "config.password == nullptr || config.password[0] == '\\0' ||",
                   "password requires username")

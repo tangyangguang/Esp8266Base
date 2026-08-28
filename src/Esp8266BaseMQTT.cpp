@@ -500,23 +500,46 @@ void Esp8266BaseMQTT::resumeAfterShutdown() {
     _shutdownPacketId = 0;
     _retryAt = millis();
     _retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
-    _state = Esp8266BaseWiFi::isConnected() ? Esp8266BaseMQTTState::WAITING_TIME
-                                             : Esp8266BaseMQTTState::WAITING_WIFI;
+    if (!_configured || !_begun) {
+        _state = Esp8266BaseMQTTState::UNCONFIGURED;
+    } else {
+        _state = Esp8266BaseWiFi::isConnected() ? Esp8266BaseMQTTState::WAITING_TIME
+                                                 : Esp8266BaseMQTTState::WAITING_WIFI;
+    }
     ESP8266BASE_LOG_I("MQTT", "shutdown_resume result=%u reconnect=yes",
                       (unsigned)_shutdownResult);
 }
 
 bool Esp8266BaseMQTT::pauseForOTA() {
-    if (!_configured || !_begun) return true;
+    if (!_configured || !_begun) {
+        _reconnectRequested = false;
+        _shutdownActive = true;
+        _shutdownPacketId = 0;
+        _shutdownResult = Esp8266BaseMQTTShutdownResult::NOT_CONNECTED;
+        _state = Esp8266BaseMQTTState::PAUSED;
+    }
     if (!_shutdownActive) {
-        ESP8266BASE_LOG_E("MQTT", "ota_pause result=not_started");
-        return false;
+        // 没有活动传输时无需伪造一次 shutdown 成功；仍进入暂停，阻止 OTA
+        // 写入期间发起新连接。CONNECTED、CONNECTING 和尚未释放的 transport
+        // 都不能走这条路径。
+        if (!mqttClient.disconnected()) {
+            ESP8266BASE_LOG_E("MQTT", "ota_pause ready=no result=not_started transport=%s",
+                              mqttClient.connected() ? "connected" : "busy");
+            return false;
+        }
+        _reconnectRequested = false;
+        _shutdownActive = true;
+        _shutdownPacketId = 0;
+        _shutdownResult = Esp8266BaseMQTTShutdownResult::NOT_CONNECTED;
+        _state = Esp8266BaseMQTTState::PAUSED;
     }
     while (_state != Esp8266BaseMQTTState::PAUSED) {
         _handleShutdown();
         yield();
     }
-    bool ready = shutdownSucceeded() && mqttClient.disconnected();
+    // OTA readiness 只证明当前没有 MQTT/TLS 传输。SUCCESS 仍只表示最终消息
+    // 已获匹配 PUBACK 且完成正常 DISCONNECT，二者不能混为一谈。
+    bool ready = mqttClient.disconnected();
     ESP8266BASE_LOG_I("MQTT", "ota_pause ready=%s result=%u heap=%u max=%u",
                       ready ? "yes" : "no", (unsigned)_shutdownResult,
                       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());

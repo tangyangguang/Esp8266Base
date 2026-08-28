@@ -227,8 +227,8 @@ http://<device-ip>/ota
 - 日志输出 `upload_started`、`upload_progress`、`upload_finished`、`upload_success` / `upload_failed` / `upload_aborted`，包含上传字节数、`elapsed`、`average_speed`、free heap 等诊断字段；启用 MQTT 时，紧接 TLS 释放判定后的 `ota_pause` 还会精确输出原始字节值 `heap` 和 `max`，作为 `Update.begin()` 前关键窗口的验收指标。进度百分比基于 multipart request length 近似，完成日志以真实固件字节数为准。
 - OTA 上传期间暂停 Watchdog，上传完成后恢复。
 - 服务端首个数据块也会做同一类 ESP8266 固件头快速校验，作为 curl 或绕过页面上传时的兜底；它用于拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，校验通过后才调用 `Update.begin(ESP.getFreeSketchSpace())` 并写入 Flash。
-- 头检查通过后先调用可选业务 prepare callback；MQTT_TERMINAL 业务必须在其中完成执行器安全停机、构造最终 availability，并调用 `Esp8266BaseMQTT::beginShutdown()`。prepare 拒绝时 OTA 不开始写入。
-- prepare 通过后，基础库有界等待该 retained QoS1 最终消息的匹配 PUBACK，再正常断开 MQTT/TLS；成功后才调用 `Update.begin()`。失败不 force close、不伪造成功，并在 OTA failure callback 前恢复 MQTT 连接许可。
+- 头检查通过后先调用可选业务 prepare callback；MQTT_TERMINAL 业务必须完成执行器安全停机，有活动会话时还要构造最终 availability 并调用 `beginShutdown()`。prepare 拒绝时 OTA 不开始写入。
+- prepare 通过后，活动会话必须有界完成 retained QoS1/PUBACK 和正常断开。MQTT 未配置、未 begin 或 transport 已完全断开时直接暂停并继续，但 shutdown 结果不伪装为成功；连接中或 transport 尚未释放则拒绝。
 - 每个失败、拒绝或中止的上传请求最多调用一次可选 failure callback；Watchdog 和 MQTT 重连许可会先恢复，再调用业务 failure callback。
 - 基础库在 `Update.end(true)` 前检查配置和文件日志 flush；失败会中止 Update、返回 500 并恢复通信许可。成功时 MQTT 保持关闭，可选 success callback 只用于最终业务安全关闭，随后返回 2xx 并重启。
 - 成功后 flush 响应并重启。

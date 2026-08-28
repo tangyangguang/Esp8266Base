@@ -40,11 +40,12 @@
 
 - `/wifi` 保存 SSID 和密码时不再删除合法的首尾空格。
 - `/wifi` 和 `/auth` 的内置表单新增每次启动随机请求令牌，无效 POST 返回 `403` 且不修改配置。
+- OTA 在 MQTT 未配置、未 begin 或 transport 已完全断开时可直接暂停并继续，修复业务关闭 MQTT 或 Broker 不可达时被错误拒绝；活动或尚未释放的连接仍须完成受控下线。
 
 ### 新增
 
 - MQTT 新增通用受控正常下线：业务提供不透明 topic/payload，基础库发布 retained QoS1，精确匹配 PUBACK 后才正常 DISCONNECT，并保持暂停直到显式恢复。
-- OTA 复用同一受控下线状态机；入队失败、连接丢失、PUBACK 超时和正常断开超时均拒绝开始固件写入，不使用 force close。
+- OTA 复用同一受控下线状态机；活动 transport 的入队失败、PUBACK 超时和正常断开超时均拒绝开始固件写入，不使用 force close。
 
 ## 2026-08-26
 

@@ -163,8 +163,9 @@ public:
     // 指向内部固定缓冲；下一次连接尝试会清空，调用方不得保存或修改。
     static const char* lastTlsErrorText();
 
-    // 由 OTA 编排调用。业务 prepare callback 必须先 beginShutdown()；这里有界推进
-    // 同一关闭状态机，只有匹配 PUBACK 且正常断开后才返回 true。
+    // 由 OTA 编排调用。有活动会话时业务 prepare 必须先 beginShutdown()；无活动
+    // transport 时直接暂停并返回 true，但 shutdownResult 不会伪装成 SUCCESS。
+    // CONNECTED/CONNECTING 或 transport 尚未释放且未启动受控下线时返回 false。
     static bool pauseForOTA();
     static void resumeAfterOTAFailure();
     static void keepPausedAfterOTASuccess();

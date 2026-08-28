@@ -585,7 +585,7 @@ static void resumeAfterShutdown();
 
 `Esp8266BaseMQTTShutdownResult` 包含 `NONE/IN_PROGRESS/SUCCESS/NOT_CONNECTED/INVALID_ARGUMENT/PUBLISH_FAILED/CONNECTION_LOST/PUBACK_TIMEOUT/DISCONNECT_FAILED/DISCONNECT_TIMEOUT`。等待 PUBACK 与等待正常断开分别使用 `timeoutMs`，默认均为 5000ms，使用 wrap-safe `millis()` 比较。任何失败都不会伪装为成功，也不会调用 `disconnect(true)`；状态保持暂停，防止失败后自动重连或 LWT 覆盖业务最终消息。PUBACK 超时或最终包的异步发送错误会清空上游 outbox（上游没有按 packetId 删除 API），防止显式恢复后这条失败的 shutdown 迟到；因此同队列中尚未确认的其他消息也会被丢弃，业务恢复后应按当前状态重新发布。业务确认可以恢复后显式调用 `resumeAfterShutdown()`；恢复不会清除最后结果，下一次 `beginShutdown()` 会覆盖它。`shutdownPaused()` 表示受控下线门禁生效；只有 `shutdownSucceeded()` 才证明匹配 PUBACK 和正常 DISCONNECT 都已完成。
 
-OTA 场景中，业务 prepare callback 必须先完成执行器安全停机并调用 `beginShutdown()`；随后 `Esp8266BaseOTA` 有界推进同一状态机。下线不成功则 OTA 返回 `MQTT_PAUSE_FAILED`，并在 failure callback 前恢复 Watchdog 与 MQTT 连接许可；成功才进入 `Update.begin()`。参考 `examples/mqtt_terminal`。
+OTA 场景中，业务 prepare callback 必须先完成执行器安全停机；存在活动 MQTT 会话时还必须调用 `beginShutdown()`。`pauseForOTA()` 对已完全 disconnected、未配置或未 begin 的 MQTT 直接进入暂停并允许 OTA，但保留 `NOT_CONNECTED` 或既有失败结果，不能用 `shutdownSucceeded()` 描述这条无会话路径。CONNECTED、CONNECTING 或尚未释放的 transport 若没有完成受控下线则返回 false，OTA 报 `MQTT_PAUSE_FAILED`。参考 `examples/mqtt_terminal`。
 
 ```cpp
 static bool connected();

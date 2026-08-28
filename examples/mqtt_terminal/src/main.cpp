@@ -86,17 +86,15 @@ static void onMqttMessage(uint8_t qos, bool dup, bool retain, uint16_t packetId,
 }
 
 static bool onOtaPrepare(char* reason, size_t reasonLen) {
+    (void)reason;
+    (void)reasonLen;
     // 真实业务可在这里先让执行器进入安全状态，再构造自己的 availability payload。
     // 基础库不解析 topic 或 payload，只确认这条 retained QoS1 消息的 PUBACK。
-    if (Esp8266BaseMQTT::beginShutdown(MQTT_AVAILABILITY_TOPIC,
-                                       MQTT_SHUTDOWN_PAYLOAD)) {
-        return true;
-    }
-    if (reason && reasonLen > 0) {
-        strncpy(reason, "MQTT controlled shutdown failed", reasonLen - 1);
-        reason[reasonLen - 1] = '\0';
-    }
-    return false;
+    // prepare 只报告业务安全准备是否完成；MQTT 是否已安全暂停由随后调用的
+    // pauseForOTA() 判定。这样 Broker 不可达且 transport 已断开时仍可 OTA，
+    // 但活动会话若未完成最终消息闭环仍会被基础库拒绝。
+    Esp8266BaseMQTT::beginShutdown(MQTT_AVAILABILITY_TOPIC, MQTT_SHUTDOWN_PAYLOAD);
+    return true;
 }
 
 static void onOtaFailure(Esp8266BaseOTAFailure failure) {
