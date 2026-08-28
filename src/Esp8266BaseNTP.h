@@ -58,6 +58,7 @@ private:
     static bool     _manualWaiting; // 1B：正在等待库内 UDP NTP 响应
 
     static bool _pollManual(uint32_t now);
+    static bool _isDue(uint32_t now, uint32_t due);
     static void _sendManual(uint32_t now);
     static void _finishSync(time_t t);
 

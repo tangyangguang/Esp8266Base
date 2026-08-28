@@ -96,6 +96,7 @@ private:
     static void _startAP();
     static void _handleConnected();
     static void _scheduleRetry();
+    static bool _isDue(uint32_t now, uint32_t due);
     static void _updateIP();
     static const char* _statusName(uint8_t status);
 };

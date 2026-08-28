@@ -39,6 +39,11 @@ def retry_interval(attempt: int, fast_count: int, fast_ms: int, slow_ms: int) ->
     return fast_ms if attempt <= fast_count else slow_ms
 
 
+def millis_due(now: int, deadline: int) -> bool:
+    delta = (now - deadline) & 0xFFFFFFFF
+    return delta < 0x80000000
+
+
 def log_segment_path(base: str, index: int) -> str:
     return base if index == 0 else f"{base}.{index}"
 
@@ -164,6 +169,11 @@ def test_wifi_retry_rules() -> None:
         fail("stuck restart must not replace the full connect timeout")
     if "stuck_disconnected=%lus" not in wifi_cpp:
         fail("wifi_retry_policy must include stuck_disconnected")
+    require_token(wifi_cpp, "_isDue(now, _retryAt)", "wrap-safe WiFi retry deadline")
+    require_token(wifi_cpp, "static_cast<int32_t>(now - due) >= 0",
+                  "WiFi retry signed delta comparison")
+    if millis_due(0xFFFFFFF0, 0x00000010) or not millis_due(0x00000020, 0x00000010):
+        fail("WiFi retry deadline must remain correct across millis wrap")
     require_token(wifi_cpp, "reason=ssid_too_long", "WiFi SSID length validation")
     require_token(wifi_cpp, "reason=password_too_long", "WiFi password length validation")
     require_token(wifi_cpp, "max=32", "WiFi SSID length limit log")
@@ -190,6 +200,11 @@ def test_ntp_manual_packet_validation() -> None:
     require_token(ntp_cpp, "mode != 4", "NTP manual server mode validation")
     require_token(ntp_cpp, "stratum == 0 || stratum > 15", "NTP manual stratum validation")
     require_token(ntp_cpp, "manual_ntp_packet_rejected", "NTP invalid manual packet log")
+    require_token(ntp_cpp, "!_isDue(now, _nextManualMs)", "wrap-safe NTP manual retry deadline")
+    require_token(ntp_cpp, "static_cast<int32_t>(now - due) >= 0",
+                  "NTP retry signed delta comparison")
+    if millis_due(0xFFFFFFF0, 0x00000010) or not millis_due(0x00000020, 0x00000010):
+        fail("NTP manual retry deadline must remain correct across millis wrap")
     require_token(networking, "主动 UDP NTP 只接受当前等待服务器", "NTP manual validation doc")
     require_token(api, "校验响应来源 IP、端口、mode、stratum", "API NTP validation doc")
 
@@ -432,9 +447,10 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     wifi_gate = mqtt_handle.index("!Esp8266BaseWiFi::isConnected()")
     ntp_gate = mqtt_handle.index("!Esp8266BaseNTP::isSynced()")
     client_loop = mqtt_handle.index("mqttClient.loop()")
+    connect_gate = mqtt_handle.index("if (!_connectAttemptsEnabled)")
     connect_call = mqtt_handle.index("mqttClient.connect()")
-    if not (wifi_gate < ntp_gate < client_loop < connect_call):
-        fail("MQTT handle must gate client loop/connect on WiFi then NTP")
+    if not (wifi_gate < ntp_gate < client_loop < connect_gate < connect_call):
+        fail("MQTT handle must gate client loop/new connects on WiFi, NTP and business permission")
 
     for state in ["UNCONFIGURED", "WAITING_WIFI", "WAITING_TIME", "BACKOFF",
                   "CONNECTING", "CONNECTED", "PAUSED_OTA"]:
@@ -461,6 +477,16 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
                   "OTA post-TLS-release heap diagnostic")
     require_token(mqtt_h, "static bool requestReconnect();", "deferred reconnect public API")
     require_token(mqtt_h, "static bool markConnectionReady();", "application ready public API")
+    require_token(mqtt_h, "static void setConnectAttemptsEnabled(bool enabled);",
+                  "new connection gate public API")
+    require_token(mqtt_h, "static bool connectAttemptsEnabled();",
+                  "new connection gate query API")
+    setter_start = mqtt_cpp.index("void Esp8266BaseMQTT::setConnectAttemptsEnabled")
+    setter_end = mqtt_cpp.index("bool Esp8266BaseMQTT::connectAttemptsEnabled", setter_start)
+    setter_body = mqtt_cpp[setter_start:setter_end]
+    require_token(setter_body, "_connectAttemptsEnabled = enabled;", "new connection gate state")
+    if "mqttClient.disconnect(" in setter_body or "mqttClient.connect()" in setter_body:
+        fail("setConnectAttemptsEnabled must not synchronously change transport")
     request_start = mqtt_cpp.index("bool Esp8266BaseMQTT::requestReconnect()")
     request_end = mqtt_cpp.index("bool Esp8266BaseMQTT::markConnectionReady()", request_start)
     request_body = mqtt_cpp[request_start:request_end]

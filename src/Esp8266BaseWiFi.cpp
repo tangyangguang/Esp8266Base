@@ -71,7 +71,7 @@ void Esp8266BaseWiFi::handle() {
             uint32_t now = millis();
 
             if (_connectStart == 0) {
-                if (now >= _retryAt) {
+                if (_isDue(now, _retryAt)) {
                     _startSTA(_staSSID, _staPass);
                 }
                 break;
@@ -322,6 +322,10 @@ void Esp8266BaseWiFi::_scheduleRetry() {
     _connectStart = 0;
     _retryAt      = millis() + interval;
     _stuckRestarted = false;
+}
+
+bool Esp8266BaseWiFi::_isDue(uint32_t now, uint32_t due) {
+    return static_cast<int32_t>(now - due) >= 0;
 }
 
 void Esp8266BaseWiFi::_updateIP() {

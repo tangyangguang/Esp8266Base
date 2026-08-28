@@ -186,7 +186,7 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
 }
 
 void Esp8266BaseNTP::_sendManual(uint32_t now) {
-    if (_manualWaiting || now < _nextManualMs) return;
+    if (_manualWaiting || !_isDue(now, _nextManualMs)) return;
 
     char server[24];
     strncpy_P(server, (PGM_P)pgm_read_ptr(&NTP_SERVERS[_manualServer]), sizeof(server) - 1);
@@ -225,6 +225,10 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
         _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
         _nextManualMs = now + 5000UL;
     }
+}
+
+bool Esp8266BaseNTP::_isDue(uint32_t now, uint32_t due) {
+    return static_cast<int32_t>(now - due) >= 0;
 }
 
 void Esp8266BaseNTP::_finishSync(time_t t) {

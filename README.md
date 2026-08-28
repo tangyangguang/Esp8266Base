@@ -211,6 +211,8 @@ MQTT 使用 `bertmelis/espMqttClient 1.7.3` 同步 TLS 客户端。PlatformIO �
 
 业务在订阅 readiness、初始证据排队等应用握手失败时调用 `Esp8266BaseMQTT::requestReconnect()`，完成握手后调用 `markConnectionReady()`。CONNACK 本身不重置退避，因此连续应用握手失败会沿用 2s、4s、8s、16s、32s、60s 上限；只有 readiness 成功才恢复 2s，使之后的普通断线从初始退避开始。两个 API 都不暴露第三方类型、同步等待或形成忙循环。
 
+执行器需要保护本地截止时，可在运行期间调用 `Esp8266BaseMQTT::setConnectAttemptsEnabled(false)`。该门禁只阻止后续 DNS/TCP/TLS 新建连接，不拆除已经建立的 MQTT 会话，也不停止既有会话的 `loop()` 和收发；运行结束后业务必须重新启用。它不改变 Topic、消息、QoS、认证或重连退避契约。
+
 OTA 仍只使用 `Esp8266BaseOTA`。业务 prepare callback 先检查执行器是否安全；通过后基础库自动停止 MQTT 消息分发并断开 MQTT/TLS，再调用 `Update.begin()`。任何失败恢复 Watchdog 与 MQTT 重连许可；成功保持 MQTT 关闭、flush 配置/日志并重启。业务不再需要自行释放基础 MQTT 模块，但仍负责执行器安全检查。
 
 日志与回显策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段；`/wifi` GET 表单也会回显已保存密码，页面默认隐藏，可手动显示。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。

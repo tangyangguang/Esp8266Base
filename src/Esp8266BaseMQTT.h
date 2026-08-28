@@ -108,6 +108,10 @@ public:
     // 业务完成订阅/初始握手后确认本连接稳定，并把后续普通断线退避恢复为初始值。
     // 仅当前已连接、未暂停且没有待处理重连请求时成功。
     static bool markConnectionReady();
+    // 只控制后续 DNS/TCP/TLS 连接尝试。false 不拆除当前连接，也不停止当前
+    // MQTT loop；适合执行器运行期间避免同步建连阻塞本地截止逻辑。
+    static void setConnectAttemptsEnabled(bool enabled);
+    static bool connectAttemptsEnabled();
 
     static bool connected();
     static bool isConfigured();
@@ -131,6 +135,7 @@ private:
     static bool _begun;
     static bool _otaPaused;
     static bool _reconnectRequested;
+    static bool _connectAttemptsEnabled;
     static Esp8266BaseMQTTState _state;
     static Esp8266BaseMQTTDisconnectReason _lastReason;
     static uint32_t _attemptCount;

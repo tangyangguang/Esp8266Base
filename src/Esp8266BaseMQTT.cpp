@@ -60,6 +60,7 @@ bool Esp8266BaseMQTT::_configured = false;
 bool Esp8266BaseMQTT::_begun = false;
 bool Esp8266BaseMQTT::_otaPaused = false;
 bool Esp8266BaseMQTT::_reconnectRequested = false;
+bool Esp8266BaseMQTT::_connectAttemptsEnabled = true;
 Esp8266BaseMQTTState Esp8266BaseMQTT::_state = Esp8266BaseMQTTState::UNCONFIGURED;
 Esp8266BaseMQTTDisconnectReason Esp8266BaseMQTT::_lastReason = Esp8266BaseMQTTDisconnectReason::NONE;
 uint32_t Esp8266BaseMQTT::_attemptCount = 0;
@@ -251,6 +252,10 @@ void Esp8266BaseMQTT::handle() {
         _state = Esp8266BaseMQTTState::CONNECTING;
         return;
     }
+    if (!_connectAttemptsEnabled) {
+        _state = Esp8266BaseMQTTState::BACKOFF;
+        return;
+    }
 
     uint32_t now = millis();
     if (!_isDue(now, _retryAt)) {
@@ -308,6 +313,17 @@ bool Esp8266BaseMQTT::markConnectionReady() {
     _retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
     ESP8266BASE_LOG_I("MQTT", "application_connection_ready retry_backoff=initial");
     return true;
+}
+
+void Esp8266BaseMQTT::setConnectAttemptsEnabled(bool enabled) {
+    if (_connectAttemptsEnabled == enabled) return;
+    _connectAttemptsEnabled = enabled;
+    ESP8266BASE_LOG_I("MQTT", "connect_attempts_enabled=%s existing_connection=%s",
+                      enabled ? "yes" : "no", mqttClient.connected() ? "kept" : "none");
+}
+
+bool Esp8266BaseMQTT::connectAttemptsEnabled() {
+    return _connectAttemptsEnabled;
 }
 
 bool Esp8266BaseMQTT::connected() { return !_otaPaused && mqttClient.connected(); }
