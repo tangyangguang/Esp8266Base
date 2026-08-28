@@ -57,6 +57,7 @@ char                     Esp8266BaseWeb::_titleBuf[80] = "ESP8266";
 #endif
 char                     Esp8266BaseWeb::_activeUri[32] = "";
 char                     Esp8266BaseWeb::_activeMethod[5] = "";
+uint32_t                 Esp8266BaseWeb::_formToken = 0;
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 char                     Esp8266BaseWeb::_builtinLabels[3][16] = {
     "Status", "Logs", "System"
@@ -132,9 +133,11 @@ static const char WEB_FOOT_POST[]  PROGMEM = "</span></footer></body></html>";
 static const char WEB_WIFI_FORM_PRE[] PROGMEM =
     "<h2>WiFi Settings</h2>"
     "<form method=post onsubmit=\""
-    "var s=this.ssid.value.trim();"
-    "if(!s){alert('SSID cannot be empty');return false;}"
-    "return once(this);\">"
+    "var s=this.ssid.value;"
+    "if(!s.length){alert('SSID cannot be empty');return false;}"
+    "return once(this);\">";
+
+static const char WEB_WIFI_FORM_SSID[] PROGMEM =
     "SSID<input type=text name=ssid maxlength=32 autocomplete=off required value=\"";
 
 static const char WEB_WIFI_FORM_MID[] PROGMEM =
@@ -180,7 +183,7 @@ static const char WEB_OTA_FORM[] PROGMEM =
     "</script>";
 #endif
 
-static const char WEB_AUTH_FORM[] PROGMEM =
+static const char WEB_AUTH_FORM_PRE[] PROGMEM =
     "<h2>Auth Password</h2>"
     "<form method=post onsubmit=\""
     "var c=this.current.value,n=this.newpass.value,r=this.confirm.value;"
@@ -188,7 +191,9 @@ static const char WEB_AUTH_FORM[] PROGMEM =
     "if(!n){alert('New password cannot be empty');return false;}"
     "if(n.length>23){alert('New password is too long');return false;}"
     "if(n!=r){alert('Passwords do not match');return false;}"
-    "return once(this);\">"
+    "return once(this);\">";
+
+static const char WEB_AUTH_FORM_FIELDS[] PROGMEM =
     "Current password<input type=password name=current maxlength=23 autocomplete=current-password required>"
     "New password<input type=password name=newpass maxlength=23 autocomplete=new-password required>"
     "Confirm new password<input type=password name=confirm maxlength=23 autocomplete=new-password required>"
@@ -510,12 +515,32 @@ void Esp8266BaseWeb::_sendAppLinks() {
 #endif
 }
 
+void Esp8266BaseWeb::_sendFormToken() {
+    char field[64];
+    snprintf(field, sizeof(field),
+             "<input type=hidden name=csrf value='%lu'>",
+             static_cast<unsigned long>(_formToken));
+    sendChunk(field);
+}
+
+bool Esp8266BaseWeb::_verifyFormToken() {
+    const String raw = _server.arg("csrf");
+    char* end = nullptr;
+    const unsigned long value = strtoul(raw.c_str(), &end, 10);
+    if (raw.length() > 0 && end && *end == '\0' && value == _formToken) return true;
+    ESP8266BASE_LOG_W("Web ", "form_rejected reason=invalid_csrf_token");
+    _server.send(403, "text/plain", "invalid form token");
+    return false;
+}
+
 // ----------------------------------------------------------------------------
 // 公开 API
 // ----------------------------------------------------------------------------
 bool Esp8266BaseWeb::begin() {
     if (_running) return true;
 
+    _formToken = ESP.random();
+    if (_formToken == 0) _formToken = 1;
     _loadPersistedAuth();
 
     // 注册内置路由（静态成员函数指针，无捕获，无 std::function 对象驻留堆）
@@ -1139,6 +1164,8 @@ void Esp8266BaseWeb::_handleWiFiGet() {
     Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid, sizeof(ssid), "");
     Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_PASS, pass, sizeof(pass), "");
     sendContent_P(WEB_WIFI_FORM_PRE);
+    _sendFormToken();
+    sendContent_P(WEB_WIFI_FORM_SSID);
     _sendAttrEscaped(ssid);
     sendContent_P(WEB_WIFI_FORM_MID);
     _sendAttrEscaped(pass);
@@ -1149,11 +1176,10 @@ void Esp8266BaseWeb::_handleWiFiGet() {
 void Esp8266BaseWeb::_handleWiFiPost() {
     if (!checkAuth()) return;
     _markRequest();
+    if (!_verifyFormToken()) return;
 
     String ssidArg = _server.arg("ssid");
     String passArg = _server.arg("pass");
-    ssidArg.trim();
-    passArg.trim();
 
     if (ssidArg.length() == 0) {
         _redirect("/wifi?error=missing_ssid");
@@ -1204,13 +1230,16 @@ void Esp8266BaseWeb::_handleAuthGet() {
             sendChunk("<p class=err>Password was not saved.</p>");
         }
     }
-    sendContent_P(WEB_AUTH_FORM);
+    sendContent_P(WEB_AUTH_FORM_PRE);
+    _sendFormToken();
+    sendContent_P(WEB_AUTH_FORM_FIELDS);
     sendFooter();
 }
 
 void Esp8266BaseWeb::_handleAuthPost() {
     if (!checkAuth()) return;
     _markRequest();
+    if (!_verifyFormToken()) return;
 
     const String currentArg = _server.arg("current");
     const String newArg = _server.arg("newpass");

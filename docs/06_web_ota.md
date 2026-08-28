@@ -144,7 +144,7 @@ function once(f) {
 }
 ```
 
-内置表单会使用 `once(this)`，危险操作还会加 `confirm()`。POST 成功后使用 `303 See Other` 跳回 GET 页面，避免浏览器刷新重复提交。
+内置表单会使用 `once(this)`，危险操作还会加 `confirm()`。`/wifi` 和 `/auth` 的 GET 表单另带每次启动随机令牌，POST 在 Basic Auth 后校验该令牌，失败返回 `403`且不修改配置。POST 成功后使用 `303 See Other` 跳回 GET 页面，避免浏览器刷新重复提交。
 
 ---
 

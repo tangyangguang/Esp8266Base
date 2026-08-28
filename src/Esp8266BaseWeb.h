@@ -131,6 +131,7 @@ private:
 #endif
     static char             _activeUri[32];                     // 当前请求 URI，用于慢请求日志
     static char             _activeMethod[5];                   // GET/POST
+    static uint32_t         _formToken;                         // 内置维护表单每次启动令牌
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static char             _builtinLabels[3][16];              // Status/Logs/System
     static Esp8266BaseWebHomeMode      _homeMode;
@@ -182,6 +183,8 @@ private:
 #endif
     static void _sendLink(const char* path, const char* title, const char* cls = nullptr);
     static void _sendAppLinks();
+    static void _sendFormToken();
+    static bool _verifyFormToken();
     static void _loadPersistedAuth();
     static void _formatDuration(uint32_t seconds, char* out, size_t len);
     static void _formatFooterUptime(uint32_t seconds, char* out, size_t len);

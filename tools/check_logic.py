@@ -340,6 +340,9 @@ def test_web_auth_contract() -> None:
         (web_cpp, "_handleAuthPost"),
         (web_cpp, "ESP8266BASE_CFG_KEY_WEB_PASS"),
         (web_cpp, "web_password_updated"),
+        (web_cpp, "_formToken"),
+        (web_cpp, "name=csrf"),
+        (web_cpp, "_verifyFormToken()"),
         (api, "setDefaultAuth"),
         (api, "`/auth`"),
         (web_doc, "认证配置分三层"),
@@ -348,6 +351,13 @@ def test_web_auth_contract() -> None:
     for text, token in required:
         if token not in text:
             fail(f"missing Web Auth contract token: {token}")
+    if "ssidArg.trim()" in web_cpp or "passArg.trim()" in web_cpp:
+        fail("WiFi credentials must preserve leading and trailing spaces")
+    for handler in ["_handleWiFiPost", "_handleAuthPost"]:
+        start = web_cpp.index(f"void Esp8266BaseWeb::{handler}()")
+        end = web_cpp.index("\n}", start)
+        require_token(web_cpp[start:end], "if (!_verifyFormToken()) return;",
+                      f"{handler} CSRF check")
 
 
 def test_watchdog_and_ota_failure_contract() -> None:

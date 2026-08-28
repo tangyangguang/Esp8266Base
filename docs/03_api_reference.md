@@ -491,9 +491,9 @@ static bool isRunning();
 | `/` | GET | 首页；可按 `setHomeMode()` 进入业务首页 |
 | `/esp8266base` | GET | 基础库系统首页；融合模式下保留为系统入口 |
 | `/wifi` | GET | WiFi 设置表单 |
-| `/wifi` | POST | 保存凭证并重连；成功或失败后 `303` 跳回 GET 页面，避免刷新重复提交 |
+| `/wifi` | POST | 校验 Basic Auth 和每次启动表单令牌，按原值保存凭证并重连；成功或失败后 `303` 跳回 GET 页面 |
 | `/auth` | GET | 修改 Web Basic Auth 密码页面（需要 Basic Auth） |
-| `/auth` | POST | 校验当前密码并保存 `eb_web_pass`，成功后 `303` 回 `/auth?saved=1` |
+| `/auth` | POST | 校验 Basic Auth、每次启动表单令牌和当前密码，保存 `eb_web_pass`，成功后 `303` 回 `/auth?saved=1` |
 | `/ota` | GET | OTA 上传页面（需要 Basic Auth，含上传进度；仅 `ESP8266BASE_USE_OTA=1` 时注册） |
 | `/ota` | POST | 接收固件（由 Esp8266BaseOTA 处理，强制 Basic Auth；仅 `ESP8266BASE_USE_OTA=1` 时注册） |
 | `/logs` | GET | 查看文件日志状态、模式、大小和内容（需要 Basic Auth） |
@@ -514,7 +514,7 @@ Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
 系统首页用 Connection、Runtime、Firmware、Time 四组展示状态。Connection 显示 `Hostname/WiFi/SSID/IP/RSSI(dBm)/STA MAC`；Runtime 显示 `Free heap/Max block/Restart count`，其中 `Restart count` 来自 `eb_boot_count`，deep sleep 唤醒不递增；启用 Watchdog 时显示 `WDT resets`，值为 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数，启用 Sleep 时显示 `Wake reason` 英文状态和简短中文说明；Time 显示 `Uptime/NTP/Now/Boot time`；Firmware 显示 `Firmware/Version/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap/Max block` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`FOOTER_COMPACT` 在窄屏下会把入口按钮和状态信息分成两行并左对齐，避免状态行换行后靠右。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
 
-`/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
+`/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。WiFi 凭证保留合法的首尾空格。`/wifi` 和 `/auth` 的 GET 表单携带每次启动随机令牌，POST 必须同时通过 Basic Auth 与令牌校验。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 `addPage()` / `addApi()` 必须在 `Esp8266Base::begin()` 后调用；过早调用会返回 `false` 并输出 WARN 日志。
 
 ### 使用示例

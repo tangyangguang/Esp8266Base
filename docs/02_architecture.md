@@ -141,9 +141,9 @@ ESP8266WebServer（端口 80）
   │     GET  /
   │     GET  /esp8266base
   │     GET  /wifi
-  │     POST /wifi
+  │     POST /wifi       ──► Basic Auth + 每次启动表单令牌，保留 SSID/密码首尾空格
   │     GET  /auth
-  │     POST /auth       ──► 校验当前密码并保存 eb_web_pass
+  │     POST /auth       ──► Basic Auth + 每次启动表单令牌，校验当前密码并保存 eb_web_pass
   │     GET  /ota
   │     POST /ota        ──► Esp8266BaseOTA 处理（强制 Basic Auth）
   │     GET  /logs

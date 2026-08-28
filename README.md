@@ -196,9 +196,9 @@ build_flags =
 
 根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为默认构建入口；各示例目录提供独立的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
 
-WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。需要重新进入 AP 配网时，先清除 WiFi 凭证再重启。
+WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。需要重新进入 AP 配网时，先清除 WiFi 凭证再重启。SSID 和密码按表单原值保存，包含合法的首尾空格，不做隐式裁剪。
 
-Web Auth 策略：认证用户名来自 `ESP8266BASE_WEB_AUTH_USER` 或 `Esp8266BaseWeb::setDefaultAuth()`；认证密码按 `ESP8266BASE_WEB_AUTH_PASS` → `setDefaultAuth()` → 设备已保存的 `eb_web_pass` 顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用。内置 `/auth` 页面可修改密码，保存后立即使用新密码，`clearAll()` 后恢复默认密码。
+Web Auth 策略：认证用户名来自 `ESP8266BASE_WEB_AUTH_USER` 或 `Esp8266BaseWeb::setDefaultAuth()`；认证密码按 `ESP8266BASE_WEB_AUTH_PASS` → `setDefaultAuth()` → 设备已保存的 `eb_web_pass` 顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用。内置 `/wifi` 和 `/auth` 表单带每次启动随机请求令牌；`/auth` 保存后立即使用新密码，`clearAll()` 后恢复默认密码。
 
 Hostname 策略：默认 hostname 来自 `ESP8266BASE_DEFAULT_HOSTNAME`；设备已保存的 `eb_hostname` 优先级最高。hostname 必须为 1-32 位小写字母、数字或短横线，不能以短横线开头或结尾，不允许 `.local`。System 页面和 `/api/system/hostname` 可保存新 hostname，重启后对 mDNS、Web 标题和设备发现生效；`clearAll()` 后恢复编译期默认值。
 
