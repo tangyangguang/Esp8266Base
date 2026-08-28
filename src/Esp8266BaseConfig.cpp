@@ -1,4 +1,7 @@
+#include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_CONFIG
 #include "Esp8266BaseConfig.h"
+#include "Esp8266BaseFilesystem.h"
 #include "Esp8266BaseLog.h"
 #include <LittleFS.h>
 
@@ -22,25 +25,9 @@ bool Esp8266BaseConfig::begin() {
     }
     _lastDeferredFlushMs = millis();
 
-    if (!LittleFS.begin()) {
-        ESP8266BASE_LOG_W("Cfg ", "littlefs_mount_failed retrying");
-        delay(50);
-        if (!LittleFS.begin()) {
-#if ESP8266BASE_CFG_FORMAT_ON_FAIL
-            ESP8266BASE_LOG_W("Cfg ", "littlefs_mount_failed formatting_enabled=yes");
-            LittleFS.format();
-            if (!LittleFS.begin()) {
-                ESP8266BASE_LOG_E("Cfg ", "littlefs_mount_failed_after_format");
-                _ready = false;
-                return false;
-            }
-            ESP8266BASE_LOG_I("Cfg ", "littlefs_formatted result=success");
-#else
-            ESP8266BASE_LOG_E("Cfg ", "littlefs_mount_failed formatting_enabled=no config_disabled=yes");
-            _ready = false;
-            return false;
-#endif
-        }
+    if (!Esp8266BaseFilesystem::isReady()) {
+        _ready = false;
+        return false;
     }
 
     _ready = true;
@@ -497,3 +484,5 @@ bool Esp8266BaseConfig::isConfigAuditEnabled() {
 bool Esp8266BaseConfig::isConfigReadAuditEnabled() {
     return _readAuditEnabled;
 }
+
+#endif

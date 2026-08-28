@@ -1,5 +1,7 @@
 #include "Esp8266BaseWiFi.h"
+#if ESP8266BASE_USE_WIFI_CONFIG
 #include "Esp8266BaseConfig.h"
+#endif
 #include "Esp8266BaseLog.h"
 #include <ESP8266WiFi.h>
 
@@ -43,10 +45,14 @@ bool Esp8266BaseWiFi::begin() {
                       (unsigned long)(ESP8266BASE_WIFI_RETRY_SLOW / 1000UL));
 
     // 读取凭证并缓存，后续重连直接使用缓存，避免重复读 Flash
+#if ESP8266BASE_USE_WIFI_CONFIG
     Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_SSID, _staSSID, sizeof(_staSSID), "");
+#endif
 
     if (strlen(_staSSID) > 0) {
+#if ESP8266BASE_USE_WIFI_CONFIG
         Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_PASS, _staPass, sizeof(_staPass), "");
+#endif
         // Intentionally log the WiFi password in plaintext for field debugging.
         // This project treats plaintext WiFi credential logs as an observability feature.
         ESP8266BASE_LOG_I("WiFi", "loaded_saved_wifi_credentials ssid=%s password=%s password_length=%u",
@@ -176,8 +182,13 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
         return false;
     }
 
+#if ESP8266BASE_USE_WIFI_CONFIG
     bool ssidSaved = Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid);
     bool passSaved = Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_PASS, safePass);
+#else
+    bool ssidSaved = true;
+    bool passSaved = true;
+#endif
     // Intentionally log the WiFi password in plaintext for field debugging.
     ESP8266BASE_LOG_I("WiFi", "saving_wifi_credentials ssid=%s password=%s password_length=%u ssid_saved=%s password_saved=%s",
                       ssid, safePass, (unsigned)passLen,
@@ -207,8 +218,12 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
 // clearCredentials
 // ----------------------------------------------------------------------------
 bool Esp8266BaseWiFi::clearCredentials() {
+#if ESP8266BASE_USE_WIFI_CONFIG
     Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_SSID, "");
     Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WIFI_PASS, "");
+#endif
+    _staSSID[0] = '\0';
+    _staPass[0] = '\0';
     ESP8266BASE_LOG_I("WiFi", "saved_wifi_credentials_cleared");
     return true;
 }

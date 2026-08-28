@@ -70,14 +70,15 @@ Esp8266Base（主入口）
 ```text
 1. Esp8266BaseLog::begin()          — 最先，保证后续日志可输出
 2. Esp8266BaseSleep::begin()        — 读取唤醒原因（须在 Config 前）
-3. Esp8266BaseConfig::begin()       — 挂载 LittleFS；默认不自动格式化
-4. Esp8266BaseFileLog::begin()      — 读取 eb_filelog_mode，注册内部日志 sink
-5. Esp8266BaseWiFi::begin()         — 读取凭证并缓存，启动状态机（非阻塞）
-6. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
-7. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）
-8. Esp8266BaseOTA::begin()          — `ESP8266BASE_USE_OTA=1` 时（要求 Web，注册 POST /ota）
-9. Esp8266BaseMQTT::begin()         — `ESP8266BASE_USE_MQTT=1` 时校验配置并绑定回调，不立即建连
-10. Esp8266Base::logDiagnostics()   — 输出启动诊断日志
+3. Esp8266BaseFilesystem::begin()   — `USE_FILESYSTEM=1` 时仅挂载 LittleFS；默认不自动格式化
+4. Esp8266BaseConfig::begin()       — `USE_CONFIG=1` 时初始化 KV/deferred 状态
+5. Esp8266BaseFileLog::begin()      — `USE_FILELOG=1` 时读取模式并注册日志 sink
+6. Esp8266BaseWiFi::begin()         — 读取凭证并缓存，启动状态机（非阻塞）
+7. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
+8. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）
+9. Esp8266BaseOTA::begin()          — `ESP8266BASE_USE_OTA=1` 时（要求 Web，注册 POST /ota）
+10. Esp8266BaseMQTT::begin()        — `ESP8266BASE_USE_MQTT=1` 时准备固定区与 TLS，不立即建连
+11. Esp8266Base::logDiagnostics()   — 输出启动诊断日志
 ```
 
 > NTP 和 mDNS 不在 `begin()` 中初始化，而是在 `handle()` 检测到 WiFi 连接时自动触发。
@@ -103,7 +104,7 @@ Esp8266Base（主入口）
    Esp8266BaseWatchdog::feed()      — 本轮完成后喂狗
 ```
 
-库自有状态机不得忙等或长阻塞。Web 固定先于 MQTT 推进，使已经到达的本地请求不会先等待本轮 DNS/TCP/TLS 建连。`espMqttClient` 的 MQTT 状态机分步推进，但 ESP8266 同步安全传输的 connect 单次尝试仍可能阻塞到网络超时；有界退避保证失败后不会立即重试。
+库自有状态机不得忙等。Web 固定先于 MQTT 推进，使已经到达的本地请求不会先等待本轮 DNS/TCP/TLS 建连。MQTT 收发按每轮固定字节预算推进；ESP8266 同步安全传输的 connect 单次尝试仍可能阻塞到连接超时，业务可在执行器运行期间关闭新建连接门禁，有界退避保证失败后不会立即重试。
 
 ---
 
@@ -200,13 +201,13 @@ struct AppRoute {
 
 普通 MQTT 状态为 `UNCONFIGURED → WAITING_WIFI → WAITING_TIME → BACKOFF/CONNECTING → CONNECTED`。断线按 2s、4s、8s、16s、32s、60s 有界指数退避；WiFi 或 NTP 不就绪时回到门控状态。底层同步 BearSSL connect 在 ESP8266 上可能阻塞到单次网络超时，但外围不会忙循环。
 
-断线完成后，`cleanSession=true` 会先删除上一个会话仍在上游出站队列中的 QoS 包，再通知业务并安排下一次连接；旧连接周期证据不能进入新会话。`cleanSession=false` 不执行该删除，继续采用持久会话的重传语义。
+断线完成后，`cleanSession=true` 会清空两个固定出站槽，再通知业务并安排下一次连接；旧连接周期证据不能进入新会话。`cleanSession=false` 仅保留未确认 QoS1 PUBLISH，重置为未发送并置 DUP；SUBSCRIBE 与 QoS0 不跨连接。
 
 业务可用 `setConnectAttemptsEnabled(false)` 暂停后续 DNS/TCP/TLS 新建连接，以保护执行器的本地单调截止。门禁不拆除已建立会话，已连接客户端仍执行 `loop()`；恢复为 `true` 后沿既有退避时间继续。该接口只调整传输调度，不改变 MQTT 协议契约。
 
-实现文件内的 `Esp8266BaseMQTTInternal::DiagnosticSecureClient` 只继承 `espMqttClientSecure` 的 protected transport/state，在进入 `disconnectingTcp1`、transport 尚未 stop 时捕获 BearSSL 最后错误。第三方类型和 protected 实现不进入公共头；每次新连接前清空旧错误。SUBACK/PUBACK/PUBCOMP 和 client error 也只在实现文件适配为基础库稳定类型。
+MQTT 传输直接使用 `BearSSL::WiFiClientSecure` 实现所需的 MQTT 3.1.1 子集：CONNECT/CONNACK、SUBSCRIBE/SUBACK、QoS0/1 PUBLISH/PUBACK、PING 和 DISCONNECT。两个固定出站槽按 `CRITICAL → EVIDENCE → STATE`、同优先级 FIFO 选择，但任何时刻只有一个 QoS1 包在途；因此业务顺序提交 runtime、overview 时，overview 必须等待 runtime 的匹配 PUBACK。入站 topic 固定 128B，payload 以 256B 窗口分块，单包上限 768B。容量耗尽或越界立即返回明确错误，不分配 heap。
 
-受控下线是 `CONNECTED → SHUTDOWN_WAIT_ACK → SHUTDOWN_DISCONNECTING → PAUSED` 的单向状态机。`beginShutdown(topic, payload)` 只创建 retained QoS1 出站包，不保存或解析业务内容；进入后立即禁止新的 publish/subscribe/message/reconnect/readiness。只有 `_onPublishAck()` 收到该最终消息 packetId 才调用 `disconnect(false)`，不匹配 PUBACK 仍转发给业务但不推进状态。正常 `USER_OK` 断线才得到 `SUCCESS`；入队失败、连接丢失、PUBACK 超时或正常断开超时均保留可诊断失败结果和暂停门禁，绝不 force close。PUBACK 超时或最终包异步发送错误会清空上游 outbox，避免恢复后失败的 shutdown 迟到；业务恢复后重发当前状态。业务显式 `resumeAfterShutdown()` 才重新允许连接。
+受控下线是 `CONNECTED → SHUTDOWN_WAIT_ACK → SHUTDOWN_DISCONNECTING → PAUSED` 的单向状态机。`beginShutdown(topic, payload)` 把 retained QoS1 最终消息复制到固定槽；进入后立即禁止新的 publish/subscribe/message/reconnect/readiness。只有固定槽精确匹配最终 packetId 的 PUBACK 才发送正常 MQTT DISCONNECT，随后 flush socket、释放 TLS 并得到 `SUCCESS`；不匹配 PUBACK 不推进。入队失败、连接丢失或 PUBACK 超时保留明确结果和暂停门禁，绝不主动用异常 close 冒充正常成功。业务显式 `resumeAfterShutdown()` 才重新允许连接。
 
 OTA 顺序为：业务 prepare 完成执行器安全停机；若存在活动会话则调用 `beginShutdown()` → `pauseForOTA()` 有界等待匹配 PUBACK 和正常 MQTT DISCONNECT/TLS 释放 → `Update.begin()`。MQTT 未配置、未 begin 或底层已完全 disconnected 时，`pauseForOTA()` 直接进入 `PAUSED` 并允许 OTA，同时保留 `NOT_CONNECTED` 或原失败结果；这只表示无活动传输，不表示 shutdown 消息成功。CONNECTED、CONNECTING 或 transport 尚未释放且未完成受控下线时拒绝。失败路径先恢复 Watchdog 和 MQTT 连接许可，成功路径保持暂停并重启。
 

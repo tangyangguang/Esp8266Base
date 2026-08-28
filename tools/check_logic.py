@@ -399,7 +399,7 @@ def test_watchdog_and_ota_failure_contract() -> None:
                   "OTA write failure immediate closeout")
 
 
-def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
+def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     options_h = read("src/Esp8266BaseOptions.h")
     base_cpp = read("src/Esp8266Base.cpp")
     mqtt_h = read("src/Esp8266BaseMQTT.h")
@@ -791,6 +791,135 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         require_token(config_cpp, token, f"Config recovery invariant {token}")
 
 
+def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:
+    options_h = read("src/Esp8266BaseOptions.h")
+    base_cpp = read("src/Esp8266Base.cpp")
+    mqtt_h = read("src/Esp8266BaseMQTT.h")
+    mqtt_cpp = read("src/Esp8266BaseMQTT.cpp")
+    fixed_h = read("src/Esp8266BaseMQTTFixed.h")
+    web_cpp = read("src/Esp8266BaseWeb.cpp")
+    ota_cpp = read("src/Esp8266BaseOTA.cpp")
+    terminal_ini = read("examples/mqtt_terminal/platformio.ini")
+
+    for token in ["ESP8266BASE_USE_FILESYSTEM", "ESP8266BASE_USE_CONFIG",
+                  "ESP8266BASE_USE_WIFI_CONFIG", "ESP8266BASE_USE_WEB_AUTH_CONFIG",
+                  "ESP8266BASE_USE_FILELOG"]:
+        require_token(options_h, token, f"storage feature switch {token}")
+    require_token(terminal_ini, "[env:esp12f-no-fs]", "no-filesystem terminal build")
+    for token in ["-DESP8266BASE_USE_FILESYSTEM=0", "-DESP8266BASE_USE_CONFIG=0",
+                  "-DESP8266BASE_USE_FILELOG=0"]:
+        require_token(terminal_ini, token, f"no-filesystem build flag {token}")
+
+    require_token(fixed_h, "#define ESP8266BASE_MQTT_TX_SLOTS 2", "two fixed TX slots")
+    require_token(fixed_h, "#define ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES 512",
+                  "bounded outbound payload")
+    require_token(fixed_h, "#define ESP8266BASE_MQTT_RX_CHUNK_BYTES 256",
+                  "streaming receive chunk")
+    for token in ["CAPACITY_EXHAUSTED", "PACKET_TOO_LARGE", "PROTOCOL_ERROR"]:
+        require_token(mqtt_h, token, f"explicit MQTT error {token}")
+    require_token(mqtt_cpp, "implementation=fixed_sync_tls", "fixed MQTT implementation")
+    require_token(mqtt_cpp, "heap_outbox=no heap_packet_buffer=no",
+                  "steady-state allocation diagnostic")
+    require_token(mqtt_cpp, "client.setBufferSizes(4096, 1024)", "TLS buffer baseline")
+    if "espMqttClient" in mqtt_cpp or "EMC_MIN_FREE_MEMORY" in terminal_ini:
+        fail("dynamic espMqttClient path must not remain")
+
+    handle = mqtt_cpp[mqtt_cpp.index("void Esp8266BaseMQTT::handle()"):
+                      mqtt_cpp.index("bool Esp8266BaseMQTT::_connectTransport()")]
+    gates = [handle.index("!Esp8266BaseWiFi::isConnected()"),
+             handle.index("!Esp8266BaseNTP::isSynced()"),
+             handle.index("if (_reconnectRequested)"),
+             handle.index("!_connectAttemptsEnabled"),
+             handle.index("_connectTransport()")]
+    if gates != sorted(gates):
+        fail("MQTT connect must remain behind WiFi, NTP, reconnect, and actuator gates")
+
+    base_handle = base_cpp[base_cpp.index("void Esp8266Base::handle()"):
+                           base_cpp.index("void Esp8266Base::logDiagnostics()")]
+    if base_handle.index("Esp8266BaseWeb::handle()") > base_handle.index("Esp8266BaseMQTT::handle()"):
+        fail("Web must run before synchronous TLS connection work")
+
+    for token in ["outbox.nextToSend()", "outbox.markSent(packet)",
+                  "outbox.acknowledge(PacketKind::PUBLISH, packetId)",
+                  "outbox.acknowledge(PacketKind::SUBSCRIBE, id)"]:
+        require_token(mqtt_cpp, token, f"fixed ACK lifecycle {token}")
+    require_token(fixed_h, "if (_inFlight >= 0) return nullptr;",
+                  "only one QoS packet in flight")
+    require_token(fixed_h, "packet.packetId != packetId", "matching ACK requirement")
+    require_token(fixed_h, "packet.dup = true;", "persistent-session resend DUP")
+    require_token(mqtt_cpp, "outbox.prepareReconnect(_cleanSession)",
+                  "clean-session queue release")
+
+    begin_shutdown = mqtt_cpp[mqtt_cpp.index("bool Esp8266BaseMQTT::beginShutdown("):
+                              mqtt_cpp.index("Esp8266BaseMQTTShutdownResult Esp8266BaseMQTT::shutdownResult")]
+    for token in ["enqueuePublish(id, topic, 1, true", "_shutdownPacketId = id",
+                  "_shutdownDeadline = millis() + timeoutMs"]:
+        require_token(begin_shutdown, token, f"controlled shutdown {token}")
+    ack_body = mqtt_cpp[mqtt_cpp.index("void Esp8266BaseMQTT::_onPublishAck"):
+                        mqtt_cpp.index("void Esp8266BaseMQTT::_onClientError")]
+    if ack_body.index("outbox.acknowledge") > ack_body.index("packetId == _shutdownPacketId"):
+        fail("shutdown may advance only after matching fixed-outbox PUBACK")
+    require_token(mqtt_cpp, "const uint8_t packet[] = {0xe0, 0};", "normal MQTT DISCONNECT")
+    require_token(mqtt_cpp, "Esp8266BaseMQTTShutdownResult::PUBACK_TIMEOUT",
+                  "bounded shutdown PUBACK timeout")
+
+    terminal_begin = web_cpp[web_cpp.index("bool Esp8266BaseWeb::begin()"):
+                             web_cpp.index("void Esp8266BaseWeb::handle()")]
+    require_token(terminal_begin, "_server.onNotFound(_handleTerminalDispatch)",
+                  "single terminal base dispatcher")
+    dispatch_start = web_cpp.index("void Esp8266BaseWeb::_handleTerminalDispatch")
+    dispatch = web_cpp[dispatch_start:web_cpp.index("#endif", dispatch_start)]
+    for route in ['uri == "/"', 'uri == "/wifi"', 'uri == "/auth"', 'uri == "/health"']:
+        require_token(dispatch, route, f"terminal fixed route {route}")
+    require_token(ota_cpp, 'server().on("/ota", HTTP_POST', "multipart OTA route")
+    require_token(ota_cpp, "Esp8266BaseMQTT::pauseForOTA()", "OTA transport release gate")
+    require_token(ota_cpp, "Esp8266BaseMQTT::resumeAfterOTAFailure()", "OTA failure recovery")
+    require_token(ota_cpp, "Esp8266BaseMQTT::keepPausedAfterOTASuccess()", "OTA success pause")
+
+    # 对受控下线/OTA 的外部可观察转换做纯逻辑向量测试。传输细节由上面的
+    # 源码契约和 C++ 固定队列测试覆盖；这里验证错误不能伪装成成功。
+    def shutdown(enqueued: bool, expected_id: int, acks: list[int],
+                 timed_out: bool, transport_lost: bool, disconnect_written: bool) -> str:
+        if not enqueued:
+            return "publish_failed"
+        if transport_lost:
+            return "connection_lost"
+        if expected_id not in acks:
+            return "puback_timeout" if timed_out else "in_progress"
+        return "success" if disconnect_written else "disconnect_failed"
+
+    vectors = [
+        ((True, 41, [41], False, False, True), "success"),
+        ((True, 41, [40], False, False, True), "in_progress"),
+        ((True, 41, [], True, False, True), "puback_timeout"),
+        ((True, 41, [], False, True, True), "connection_lost"),
+        ((True, 41, [41], False, False, False), "disconnect_failed"),
+        ((False, 0, [], False, False, False), "publish_failed"),
+    ]
+    for args, expected in vectors:
+        if shutdown(*args) != expected:
+            fail(f"fixed shutdown vector mismatch: {args}")
+
+    def ota_pause(configured: bool, begun: bool, transport_open: bool,
+                  shutdown_active: bool, shutdown_result: str) -> tuple[bool, str]:
+        if not configured or not begun or not transport_open:
+            return (True, "not_connected")
+        if not shutdown_active:
+            return (False, shutdown_result)
+        return (shutdown_result == "success", shutdown_result)
+
+    ota_vectors = [
+        ((False, False, False, False, "none"), (True, "not_connected")),
+        ((True, True, False, False, "none"), (True, "not_connected")),
+        ((True, True, True, False, "none"), (False, "none")),
+        ((True, True, True, True, "success"), (True, "success")),
+        ((True, True, True, True, "puback_timeout"), (False, "puback_timeout")),
+    ]
+    for args, expected in ota_vectors:
+        if ota_pause(*args) != expected:
+            fail(f"fixed OTA vector mismatch: {args}")
+
+
 def test_public_default_tables() -> None:
     readme = read("README.md")
     api = read("docs/03_api_reference.md")
@@ -1027,7 +1156,7 @@ def main() -> None:
     test_boot_session_log_contract()
     test_web_auth_contract()
     test_watchdog_and_ota_failure_contract()
-    test_mqtt_terminal_and_ota_lifecycle_contract()
+    test_fixed_mqtt_terminal_and_ota_lifecycle_contract()
     test_public_default_tables()
     test_web_home_contract()
     print("[logic] ok")

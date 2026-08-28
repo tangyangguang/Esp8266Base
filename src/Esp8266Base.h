@@ -4,9 +4,16 @@
 
 // Phase 1 核心模块（已实现）
 #include "Esp8266BaseLog.h"
+#if ESP8266BASE_USE_FILESYSTEM
+#include "Esp8266BaseFilesystem.h"
+#endif
+#if ESP8266BASE_USE_FILELOG
 #include "Esp8266BaseFileLog.h"
+#endif
 #include "Esp8266BaseUtil.h"
+#if ESP8266BASE_USE_CONFIG
 #include "Esp8266BaseConfig.h"
+#endif
 #include "Esp8266BaseWiFi.h"
 #if ESP8266BASE_USE_MQTT
 #include "Esp8266BaseMQTT.h"

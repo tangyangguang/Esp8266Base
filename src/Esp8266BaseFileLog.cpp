@@ -1,3 +1,5 @@
+#include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_FILELOG
 #include "Esp8266BaseFileLog.h"
 #include "Esp8266BaseConfig.h"
 #include <LittleFS.h>
@@ -408,3 +410,5 @@ bool Esp8266BaseFileLog::segmentPath(uint8_t index, char* out, size_t len) {
         : snprintf(out, len, "%s.%u", g_path, (unsigned)index);
     return n > 0 && (size_t)n < len;
 }
+
+#endif

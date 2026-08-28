@@ -1,7 +1,9 @@
 #include "Esp8266BaseOptions.h"
 #if ESP8266BASE_USE_WATCHDOG
 #include "Esp8266BaseWatchdog.h"
+#if ESP8266BASE_USE_CONFIG
 #include "Esp8266BaseConfig.h"
+#endif
 #include "Esp8266BaseLog.h"
 #include <user_interface.h>
 
@@ -60,7 +62,11 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     _timeoutMs = timeoutMs;
 
     // 读取累计重启记录；WDT 超时路径只写 RTC 标记，Flash 在本次正常启动后补写。
+#if ESP8266BASE_USE_CONFIG
     _resetCount  = (uint32_t)Esp8266BaseConfig::getInt(ESP8266BASE_CFG_KEY_WDT_COUNT);
+#else
+    _resetCount = 0;
+#endif
     WatchdogRtcState rtcState;
     bool rtcPending = _readWdtRtcState(rtcState);
 
@@ -71,7 +77,11 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
         } else if (_resetCount < 0xFFFFFFFFUL) {
             _resetCount++;
         }
+#if ESP8266BASE_USE_CONFIG
         bool countOk = Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT, (int)_resetCount);
+#else
+        bool countOk = true;
+#endif
         bool clearOk = false;
         if (countOk) {
             clearOk = _clearWdtRtcState();
@@ -158,7 +168,9 @@ uint32_t Esp8266BaseWatchdog::resetCount() {
 void Esp8266BaseWatchdog::clearResetCount() {
     _resetCount = 0;
     _clearWdtRtcState();
+#if ESP8266BASE_USE_CONFIG
     Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT, 0);
+#endif
     ESP8266BASE_LOG_I("WDT ", "watchdog_reset_count_cleared");
 }
 #endif

@@ -3,9 +3,13 @@
 #include "Esp8266BaseOTA.h"
 #include "Esp8266BaseWeb.h"
 #include "Esp8266BaseWatchdog.h"
+#if ESP8266BASE_USE_CONFIG
 #include "Esp8266BaseConfig.h"
+#endif
 #include "Esp8266BaseLog.h"
+#if ESP8266BASE_USE_FILELOG
 #include "Esp8266BaseFileLog.h"
+#endif
 #include "Esp8266BaseUtil.h"
 #if ESP8266BASE_USE_MQTT
 #include "Esp8266BaseMQTT.h"
@@ -401,6 +405,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             _resumeWatchdog();
             return;
         }
+#if ESP8266BASE_USE_CONFIG
         if (!Esp8266BaseConfig::flush()) {
             ESP8266BASE_LOG_E("OTA ", "pre_reboot_config_flush_failed pending=%u action=abort_update",
                               (unsigned)Esp8266BaseConfig::pendingCount());
@@ -408,12 +413,15 @@ void Esp8266BaseOTA::_handleUploadChunk() {
                         Esp8266BaseOTAFailure::CONFIG_FLUSH_FAILED);
             return;
         }
+#endif
+#if ESP8266BASE_USE_FILELOG
         if (!Esp8266BaseFileLog::flush()) {
             ESP8266BASE_LOG_E("OTA ", "pre_reboot_filelog_flush_failed action=abort_update");
             _failUpload(500, "Log flush failed; update aborted", true,
                         Esp8266BaseOTAFailure::FILELOG_FLUSH_FAILED);
             return;
         }
+#endif
         if (Update.end(true)) {
             _updateStarted = false;
             char uploadedBuf[16];

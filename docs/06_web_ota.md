@@ -43,7 +43,9 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
 | `/health` | GET | 无 | JSON 健康信息 |
 
-`MQTT_TERMINAL`（`ESP8266BASE_PROFILE_MQTT_TERMINAL=1`）只注册 `GET /`、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`POST /ota` 和显式容量的业务页面/API。`GET /` 是极小引导：AP_CONFIG 时 `303 /wifi`，STA 连接或重连时 `303 ESP8266BASE_TERMINAL_HOME_PATH`（默认 `/health`），不会恢复完整首页。它不注册 `/esp8266base`、`/logs`、`/system`、hostname、`/reboot` 和 `GET /ota`，也不输出完整系统导航。
+`MQTT_TERMINAL`（`ESP8266BASE_PROFILE_MQTT_TERMINAL=1`）用一个 URI/method dispatcher 承担 `GET /`、`GET/POST /wifi`、`GET/POST /auth` 和 `GET /health`，避免为每个基础 URI 保留独立动态路由节点；multipart `POST /ota` 因上传回调语义仍单独注册。业务固定页面/API 继续使用显式容量。`GET /` 在 AP_CONFIG 时 `303 /wifi`，STA 时 `303 ESP8266BASE_TERMINAL_HOME_PATH`。完整首页、Logs、System、hostname、reboot、动态导航和 `GET /ota` 都不进入 Terminal ELF。
+
+持久化分层：`ESP8266BASE_USE_FILESYSTEM` 只负责挂载；`ESP8266BASE_USE_CONFIG` 提供 KV/deferred 基础；`ESP8266BASE_USE_WIFI_CONFIG` 和 `ESP8266BASE_USE_WEB_AUTH_CONFIG` 分别控制两类凭据；`ESP8266BASE_USE_FILELOG` 提供文件日志。Terminal 默认保留配置与凭据、关闭 FileLog。Filesystem/Config 全关时 WiFi 与 Web Auth 仍可在本次启动中设置，但重启后恢复为空凭据和编译期默认认证；该组合只适合业务明确不需要持久化的固件。
 
 不需要本地业务页面/API 时把容量设为 0，对应数组也不会保留：
 

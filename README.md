@@ -12,10 +12,11 @@ ESP8266 专用轻量基础库。RAM 优先设计，仅支持 ESP8266 Arduino Cor
 
 | 场景 | 目标 free heap |
 |------|----------------|
-| 正常联网，Web 未活跃 | >= 24KB |
+| 普通 WiFi/Web 设备，Web 未活跃 | >= 24KB |
 | Web 管理页面打开 | >= 18KB |
 | OTA 上传过程中 | >= 12KB |
 | AP 配网模式 | >= 18KB |
+| MQTT/TLS Terminal，已连接稳态 | 不设未实测的固定值；同时记录 heap、max block 和栈低水位 |
 
 这些是硬件运行时目标，不能只用 PlatformIO 编译阶段的 RAM 用量替代；发布前仍以 `docs/04_memory_budget.md` 的规则和硬件验收为准。
 
@@ -168,6 +169,11 @@ build_flags =
 | `ESP8266BASE_FILELOG_BUFFER_SIZE` | `INFO 默认 512，否则 0` | INFO 文件日志低优先级缓存 |
 | `ESP8266BASE_FILELOG_FLUSH_INTERVAL_MS` | `2000` | 低优先级文件日志缓存刷盘间隔 |
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
+| `ESP8266BASE_USE_FILESYSTEM` | `1` | 挂载 LittleFS；关闭后 Config/FileLog 不得启用 |
+| `ESP8266BASE_USE_CONFIG` | 跟随 Filesystem | 编译通用 KV 配置；MQTT Terminal 默认保留最小配置但关闭 FileLog |
+| `ESP8266BASE_USE_WIFI_CONFIG` | 跟随 Config | 持久化 WiFi 凭据；关闭后仅本次启动有效 |
+| `ESP8266BASE_USE_WEB_AUTH_CONFIG` | 跟随 Config | 持久化 Web Auth 密码；关闭后使用运行时/编译期默认值 |
+| `ESP8266BASE_USE_FILELOG` | 普通模式跟随 Config；Terminal 为 `0` | 编译文件日志和相关页面 |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
 | `ESP8266BASE_PROFILE_MQTT_TERMINAL` | `0` | 正式 MQTT 智能终端模式；要求 Web/OTA/NTP/WDT/MQTT 全部启用 |
 | `ESP8266BASE_TERMINAL_HOME_PATH` | `"/health"` | MQTT_TERMINAL 的 STA 根路径跳转目标；AP 配网仍固定跳转 `/wifi` |
@@ -175,6 +181,11 @@ build_flags =
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 首次退避间隔 |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 指数退避上限 |
 | `ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS` | `5000` | 受控下线等待 PUBACK、正常断开的单阶段超时 |
+| `ESP8266BASE_MQTT_TX_SLOTS` | `2` | 固定出站槽位；仅一个 QoS1 包在途 |
+| `ESP8266BASE_MQTT_MAX_TOPIC_BYTES` | `128` | topic 最大字节数，不含结尾 `NUL` |
+| `ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES` | `512` | 出站 payload 最大字节数 |
+| `ESP8266BASE_MQTT_RX_CHUNK_BYTES` | `256` | 入站回调分块窗口 |
+| `ESP8266BASE_MQTT_MAX_INBOUND_PAYLOAD_BYTES` | `768` | 单个入站 PUBLISH payload 上限 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
@@ -209,17 +220,17 @@ OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Bas
 
 MQTT 连接配置必须在 `Esp8266Base::begin()` 前通过 `Esp8266BaseMQTT::configure()` 提供。host、clientId、用户名/密码和 LWT topic 会复制到固定缓冲；password 非空时 username 必须非空，LWT payload 非空时 willTopic 必须非空。`BearSSL::X509List` trust anchor 与可选 LWT payload 由业务长期持有并覆盖整个 MQTT 生命周期。配置可来自业务的私有构建配置或 `Esp8266BaseConfig`，库不新增 MQTT 持久化 key，也不接受不安全 TLS。不要把真实 broker 凭据写入仓库。
 
-MQTT 使用 `bertmelis/espMqttClient 1.7.3` 同步 TLS 客户端。PlatformIO 构建需加入该依赖、`ESP32Async/ESPAsyncTCP 2.0.0`（上游 1.7.3 的显式 ESP8266 依赖）、`lib_ldf_mode = deep+` 和 `-DEMC_MIN_FREE_MEMORY=4096`，见 `examples/mqtt_terminal`。该宏只把上游出站包入队所需的最大连续堆块门槛设为 4KB，避免 ESP8266 在 TLS 已连接、连续堆块低于上游 Arduino 默认 16KB 时拒绝 SUBSCRIBE/PUBLISH；它不预留内存，也不放宽真实分配失败。库不定义 `EMC_RX_BUFFER_SIZE`/`EMC_TX_BUFFER_SIZE`，并把 BearSSL 缓冲保持为 `4096/1024`。第三方会为 MQTT 出站队列、callback 包装、证书解析和 TLS 会话使用动态内存；基础库自身不调用 `new`/`malloc`。ESP8266 底层 DNS/TCP/TLS connect 单次尝试仍可能阻塞到网络超时，这是同步安全客户端的已知边界，外围状态机和退避不会忙循环。
+MQTT Terminal 使用库内裁剪的 MQTT 3.1.1 同步 TLS 传输，不依赖 `espMqttClient`、异步 TCP、STL 容器或 `std::function`。出站只有两个固定槽位，每槽 topic 128B、payload 512B；同一时刻只发送一个 QoS1 包，精确匹配 PUBACK 后才推进下一包。入站用 256B 固定窗口分块回调，单包 payload 上限 768B。超出容量或槽位耗尽会同步返回 0 并报告 `PACKET_TOO_LARGE` / `CAPACITY_EXHAUSTED`，不会增长 heap 或静默丢弃。BearSSL RX/TX 仍固定为 4096/1024，证书校验不降级。第三方动态堆边界只剩 ESP8266 Core 的 DNS/TCP、BearSSL 证书与 TLS 会话，以及 `ESP8266WebServer` 活跃请求；正常 MQTT packet/outbox 不再调用通用 heap。同步 DNS/TCP/TLS connect 单次尝试仍可能阻塞到网络超时，外围门禁和有界退避不会忙循环。
 
-`cleanSession=true` 时，传输断开完成后基础库会在业务断线回调之前丢弃上一个会话尚未确认的出站包；这样新连接不会重放旧连接周期的 QoS 消息，也会及时释放其队列内存。`cleanSession=false` 的持久会话仍保留上游重传语义。发生实际丢弃时日志记录 `session_queue_discarded` 和包数，不输出载荷。
+`cleanSession=true` 时，传输断开完成后基础库会在业务断线回调之前清空固定槽位；新连接不会重放旧连接周期的 QoS 消息。`cleanSession=false` 时仅保留未确认的 QoS1 PUBLISH，重连后置 DUP 重发；SUBSCRIBE 和 QoS0 不跨连接。发生清理时日志记录 `session_queue_discarded` 和包数，不输出载荷。
 
-连接回调之外还可注册 SUBACK、publish acknowledgement 和 client error 回调。SUBACK return code `0x80` 表示 broker 拒绝订阅；publish acknowledgement 对 QoS1 对应 PUBACK、对 QoS2 对应 PUBCOMP。TLS 失败会在 BearSSL transport 释放前保存 code/detail，`lastTlsErrorCode()`、`lastTlsErrorText()` 和断线日志可用于排障；`/health` 只输出错误码。每次新连接前会清除旧 TLS 错误。
+连接回调之外还可注册 SUBACK、PUBACK 和 client error 回调。SUBACK return code `0x80` 表示 broker 拒绝订阅；TLS 失败会在 BearSSL transport 释放前保存 code/detail，`lastTlsErrorCode()`、`lastTlsErrorText()` 和断线日志可用于排障；`/health` 只输出错误码。每次新连接前会清除旧 TLS 错误。
 
 业务在订阅 readiness、初始证据排队等应用握手失败时调用 `Esp8266BaseMQTT::requestReconnect()`，完成握手后调用 `markConnectionReady()`。CONNACK 本身不重置退避，因此连续应用握手失败会沿用 2s、4s、8s、16s、32s、60s 上限；只有 readiness 成功才恢复 2s，使之后的普通断线从初始退避开始。两个 API 都不暴露第三方类型、同步等待或形成忙循环。
 
 执行器需要保护本地截止时，可在运行期间调用 `Esp8266BaseMQTT::setConnectAttemptsEnabled(false)`。该门禁只阻止后续 DNS/TCP/TLS 新建连接，不拆除已经建立的 MQTT 会话，也不停止既有会话的 `loop()` 和收发；运行结束后业务必须重新启用。它不改变 Topic、消息、QoS、认证或重连退避契约。
 
-正常关闭 MQTT 时，业务调用 `beginShutdown(topic, payload)` 提供最终消息。基础库固定以 retained QoS1 入队，立即停止新的 publish/subscribe/message 分发，只在收到该 packetId 的 PUBACK 后调用 `disconnect(false)`；正常断开后状态保持 `PAUSED`，不会让 LWT 覆盖最终消息，也不会自动重连。返回 `true` 只表示入队成功，最终结果必须读取 `shutdownResult()`/`shutdownSucceeded()`；入队失败、连接丢失、PUBACK 超时或正常断开超时都有明确失败结果并保持暂停，只有业务显式调用 `resumeAfterShutdown()` 才恢复连接许可。基础库不解析 Topic 或 payload，也不保存业务载荷。
+正常关闭 MQTT 时，业务调用 `beginShutdown(topic, payload)` 提供最终消息。基础库复制到固定槽并以 retained QoS1 发送，立即停止新的 publish/subscribe/message 分发，只在收到该 packetId 的 PUBACK 后写入正常 MQTT DISCONNECT、flush 并释放 TLS；随后保持 `PAUSED`，不会自动重连。返回 `true` 只表示入队成功，最终结果必须读取 `shutdownResult()`/`shutdownSucceeded()`；入队失败、连接丢失、PUBACK 超时或 DISCONNECT 写失败都有明确结果并保持暂停，只有业务显式调用 `resumeAfterShutdown()` 才恢复连接许可。
 
 OTA 仍只使用 `Esp8266BaseOTA`。MQTT_TERMINAL 的业务 prepare callback 先完成执行器安全停机；有活动 MQTT 会话时构造最终 availability 并调用同一个 `beginShutdown()`，OTA 有界等待匹配 PUBACK 和正常断开后才调用 `Update.begin()`。MQTT 未配置、未 begin 或 transport 已完全断开时可直接进入 `PAUSED` 并继续 OTA，`shutdownResult()` 保持 `NOT_CONNECTED` 或原失败结果，绝不伪装 `SUCCESS`；CONNECTED、CONNECTING 或尚未释放的 transport 没有完成受控下线时仍拒绝。失败路径先恢复 Watchdog 和 MQTT 重连许可，再调用业务 failure callback；成功保持暂停、flush 配置/日志并重启。真实业务接法见 `examples/mqtt_terminal`。
 
@@ -260,7 +271,7 @@ tools/test_all.sh --all-envs
 - ESP32 / ESP32-S3 / ESP32-C3
 - HAL 抽象、事件总线、通用 Scheduler
 - 复杂 JSON API、异步 Web（ESPAsyncWebServer）、HTTPS
-- 基础库公共 API/自有状态中的 `std::function`、STL 容器（可选 `espMqttClient` 内部实现除外）
+- 基础库公共 API/自有状态中的 `std::function`、STL 容器或动态 MQTT outbox
 - 多用户权限、WebSocket
 
 ---

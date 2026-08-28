@@ -15,15 +15,12 @@ if rg -n '#\s*(if|ifdef|ifndef|elif)\b.*ESP32|platform\s*=\s*espressif32|board\s
   fail "ESP32 conditional/platform branch found"
 fi
 
-if rg -n '#include\s*[<"].*(PubSubClient|AsyncMqttClient)|setBufferSize\s*\(' src; then
+if rg -n '#include\s*[<"].*(PubSubClient|AsyncMqttClient|espMqttClient)|setBufferSize\s*\(' src; then
   fail "unapproved MQTT dependency or buffer resizing found in base library"
-fi
-if rg -n '#include\s*<espMqttClient\.h>' src | rg -v 'src/Esp8266BaseMQTT.cpp'; then
-  fail "espMqttClient include must stay inside optional MQTT module"
 fi
 rg -n 'setBufferSizes\(4096, 1024\)' src/Esp8266BaseMQTT.cpp >/dev/null || \
   fail "MQTT TLS buffers must keep the 4096/1024 baseline"
-rg -n 'namespace Esp8266BaseMQTTInternal' src/Esp8266BaseMQTT.cpp >/dev/null || \
+rg -n 'namespace Esp8266BaseMQTTInternal' src/Esp8266BaseMQTT.cpp src/Esp8266BaseMQTTFixed.h >/dev/null || \
   fail "project-private MQTT diagnostic namespace missing"
 rg -n 'getLastSSLError' src/Esp8266BaseMQTT.cpp >/dev/null || \
   fail "MQTT TLS last-error capture missing"
@@ -103,10 +100,11 @@ rg -n '#define ESP8266BASE_PROFILE_MQTT_TERMINAL 0' src/Esp8266BaseOptions.h >/d
   fail "MQTT_TERMINAL profile default must remain disabled"
 rg -n 'ESP8266BASE_PROFILE_MQTT_TERMINAL=1' examples/mqtt_terminal/platformio.ini >/dev/null || \
   fail "MQTT_TERMINAL example build flag missing"
-rg -n 'bertmelis/espMqttClient @ 1.7.3' examples/mqtt_terminal/platformio.ini >/dev/null || \
-  fail "pinned espMqttClient dependency missing"
-rg -n 'EMC_MIN_FREE_MEMORY=4096' examples/mqtt_terminal/platformio.ini >/dev/null || \
-  fail "MQTT_TERMINAL ESP8266 outbox reserve missing"
+if rg -n 'espMqttClient|ESPAsyncTCP|EMC_MIN_FREE_MEMORY' src examples/mqtt_terminal; then
+  fail "retired dynamic MQTT stack reference found"
+fi
+rg -n 'ESP8266BASE_MQTT_TX_SLOTS 2' src/Esp8266BaseMQTTFixed.h >/dev/null || \
+  fail "MQTT fixed outbox capacity missing"
 rg -n -- '--fail' tools/ota_upload.sh >/dev/null || fail "OTA upload script must use curl --fail"
 rg -n 'firmware=@' tools/ota_upload.sh >/dev/null || fail "OTA upload script firmware multipart field missing"
 if rg -n 'admin:[^$<{]' tools/ota_upload.sh README.md docs examples/mqtt_terminal; then

@@ -162,9 +162,11 @@ private:
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static void _handleRoot();
     static void _handleSystemHome();
+#if ESP8266BASE_USE_FILELOG
     static void _handleLogsGet();
     static void _handleLogsClearPost();
     static void _handleFileLogPost();
+#endif
     static void _handleHostnamePost();
     static void _handleHostnameApiGet();
     static void _handleHostnameApiPost();
@@ -172,6 +174,7 @@ private:
     static void _handleRebootPost();
 #else
     static void _handleTerminalRoot();
+    static void _handleTerminalDispatch();
 #endif
     static void _handleHealth();
     static void _handleNotFound();

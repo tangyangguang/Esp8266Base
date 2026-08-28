@@ -1,5 +1,6 @@
 #include "Esp8266Base.h"
 
+#if ESP8266BASE_USE_CONFIG
 static uint32_t _loadBootCount(const char* invalidAction) {
     if (!Esp8266BaseConfig::isReady()) return 0;
 
@@ -20,8 +21,12 @@ static uint32_t _loadBootCount(const char* invalidAction) {
 
     return count;
 }
+#endif
 
 static uint32_t _loadAndIncrementBootCount() {
+#if !ESP8266BASE_USE_CONFIG
+    return 0;
+#else
     if (!Esp8266BaseConfig::isReady()) return 0;
 
 #if ESP8266BASE_USE_SLEEP
@@ -46,6 +51,7 @@ static uint32_t _loadAndIncrementBootCount() {
     snprintf(next, sizeof(next), "%lu", (unsigned long)count);
     Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_BOOT_COUNT, next);
     return count;
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -100,6 +106,7 @@ void Esp8266Base::_resolveHostname() {
     strncpy(_hostname, selected, sizeof(_hostname) - 1);
     _hostname[sizeof(_hostname) - 1] = '\0';
 
+#if ESP8266BASE_USE_CONFIG
     if (Esp8266BaseConfig::isReady()) {
         char persisted[33] = "";
         bool found = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_HOSTNAME, persisted, sizeof(persisted), "");
@@ -116,6 +123,7 @@ void Esp8266Base::_resolveHostname() {
     } else {
         ESP8266BASE_LOG_W("Base", "hostname_config_unavailable action=use_default host=%s", _hostname);
     }
+#endif
 
     ESP8266BASE_LOG_I("Base", "hostname_resolved host=%s source=%s", _hostname, source);
 }
@@ -134,15 +142,21 @@ bool Esp8266Base::begin() {
     Esp8266BaseSleep::begin();
 #endif
 
-    // 3. Config — 挂载 LittleFS，加载配置
+    // 3. 可选持久化层：挂载与 Config/FileLog 分离。
+#if ESP8266BASE_USE_FILESYSTEM
+    if (!Esp8266BaseFilesystem::begin()) ok = false;
+#endif
+#if ESP8266BASE_USE_CONFIG
     if (!Esp8266BaseConfig::begin()) {
         ok = false;  // 继续运行，但配置读写不可用
     }
+#endif
 
-    // 4. FileLog — Config ready 后加载 eb_filelog_mode，确保 boot session 可写文件
+#if ESP8266BASE_USE_FILELOG
     if (!Esp8266BaseFileLog::begin()) {
         ok = false;
     }
+#endif
 
     _resolveHostname();
 
@@ -200,8 +214,12 @@ bool Esp8266Base::begin() {
 // ----------------------------------------------------------------------------
 void Esp8266Base::handle() {
     // 1. Config deferred 刷新
+#if ESP8266BASE_USE_CONFIG
     Esp8266BaseConfig::handle();
+#endif
+#if ESP8266BASE_USE_FILELOG
     Esp8266BaseFileLog::handle();
+#endif
 
     // 2. WiFi 状态机
     Esp8266BaseWiFi::handle();
@@ -306,14 +324,23 @@ void Esp8266Base::logDiagnostics() {
     ESP8266BASE_LOG_I("SLEP", "sleep_module=disabled");
 #endif
 
+#if ESP8266BASE_USE_CONFIG
     ESP8266BASE_LOG_I("Cfg ", "config_ready=%s pending_writes=%d/%d",
                       Esp8266BaseConfig::isReady() ? "yes" : "no",
                       (int)Esp8266BaseConfig::pendingCount(),
                       ESP8266BASE_CFG_DEFERRED_SIZE);
+#else
+    ESP8266BASE_LOG_I("Cfg ", "config_module=disabled filesystem=%s",
+                      ESP8266BASE_USE_FILESYSTEM ? "enabled" : "disabled");
+#endif
 
     {
         char ssid[64] = "";
+#if ESP8266BASE_USE_WIFI_CONFIG
         Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid, sizeof(ssid), "(none)");
+#else
+        strncpy(ssid, Esp8266BaseWiFi::ssid(), sizeof(ssid) - 1);
+#endif
         ESP8266BASE_LOG_I("WiFi", "saved_station_ssid=%s default_config_ap_ssid=%s",
                           ssid, Esp8266BaseWiFi::apSSID());
     }

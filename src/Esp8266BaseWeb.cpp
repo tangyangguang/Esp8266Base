@@ -2,8 +2,12 @@
 #if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
 #include "Esp8266BaseLog.h"
+#if ESP8266BASE_USE_FILELOG
 #include "Esp8266BaseFileLog.h"
+#endif
+#if ESP8266BASE_USE_CONFIG
 #include "Esp8266BaseConfig.h"
+#endif
 #include "Esp8266BaseWiFi.h"
 #include "Esp8266BaseUtil.h"
 #include "Esp8266Base.h"
@@ -22,7 +26,9 @@
 #if ESP8266BASE_USE_MQTT
 #include "Esp8266BaseMQTT.h"
 #endif
+#if ESP8266BASE_USE_FILELOG
 #include <LittleFS.h>
+#endif
 #include <time.h>
 
 // ----------------------------------------------------------------------------
@@ -230,13 +236,19 @@ static const char WEB_SYSTEM_PAGE[] PROGMEM =
     "<p><a href='/ota'>OTA Update</a></p>"
     "</section>"
 #endif
+#if ESP8266BASE_USE_FILELOG
     "<section><h3>File Logs</h3>"
     "<p>Clear all rotated file log segments.</p>"
     "<form method=post action='/logs/clear' onsubmit=\"return confirm('Clear file logs?')&&once(this)\">"
     "<input class=danger type=submit value='Clear File Logs'>"
     "</form></section>"
+#endif
     "<section><h3>Reboot</h3>"
+#if ESP8266BASE_USE_FILELOG
     "<p>Flush pending config and file logs, then restart the device.</p>"
+#else
+    "<p>Flush pending config, then restart the device.</p>"
+#endif
     "<form method=post action='/reboot' onsubmit=\"return confirm('Reboot device now?')&&once(this)\">"
     "<input class=danger type=submit value='Reboot Device'>"
     "</form></section>"
@@ -246,8 +258,10 @@ static const char WEB_REBOOTING[] PROGMEM =
     "<h2>Rebooting...</h2>"
     "<p>Device is restarting. Please wait a few seconds, then <a href='/'>reload</a>.</p>";
 
+#if ESP8266BASE_USE_FILELOG
 static const char WEB_LOGS_PRE[] PROGMEM =
     "<h2>Logs</h2>";
+#endif
 #endif
 
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
@@ -308,7 +322,7 @@ static void _sendAttrEscaped(const char* s) {
     }
 }
 
-#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL && ESP8266BASE_USE_FILELOG
 static void _sendLogFileEscaped(const char* path) {
     if (!path || !LittleFS.exists(path)) return;
     File f = LittleFS.open(path, "r");
@@ -344,6 +358,7 @@ static void _redirect(const char* url) {
 }
 
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
+#if ESP8266BASE_USE_FILELOG
 static void _sendFileLogModeOption(const char* value,
                                    const char* label,
                                    Esp8266BaseFileLog::Mode mode) {
@@ -383,6 +398,7 @@ static bool _fileLogModeFromArg(const String& raw, Esp8266BaseFileLog::Mode& mod
 #endif
     return false;
 }
+#endif
 
 static const char* _validatedDefaultHostname() {
     return Esp8266Base::isValidHostname(ESP8266BASE_DEFAULT_HOSTNAME)
@@ -429,6 +445,7 @@ static void _sendHostnameSystemSection() {
     Esp8266BaseWeb::sendContent_P(WEB_HOSTNAME_FORM_POST);
 }
 
+#if ESP8266BASE_USE_FILELOG
 static void _sendFileLogSystemSection() {
     Esp8266BaseWeb::sendChunk("<section><h3>File Log Mode</h3><p>Current mode: ");
     Esp8266BaseWeb::sendChunk(Esp8266BaseFileLog::modeName());
@@ -445,6 +462,7 @@ static void _sendFileLogSystemSection() {
 #endif
     Esp8266BaseWeb::sendChunk("<p>Mode is capped by the build log level.</p><input type=submit value='Save File Log'></form></section>");
 }
+#endif
 #endif
 
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL || ESP8266BASE_WEB_MAX_APP_PAGES > 0 || ESP8266BASE_WEB_MAX_APP_APIS > 0
@@ -501,7 +519,9 @@ void Esp8266BaseWeb::_sendSystemLinks() {
         systemHome = "/esp8266base";
     }
     _sendLink(systemHome, _builtinLabel(Esp8266BaseWebBuiltinLabel::HOME), nullptr);
+#if ESP8266BASE_USE_FILELOG
     _sendLink("/logs", _builtinLabel(Esp8266BaseWebBuiltinLabel::LOGS), nullptr);
+#endif
     _sendLink("/system", _builtinLabel(Esp8266BaseWebBuiltinLabel::SYSTEM), nullptr);
 }
 #endif
@@ -544,10 +564,12 @@ bool Esp8266BaseWeb::begin() {
     _loadPersistedAuth();
 
     // 注册内置路由（静态成员函数指针，无捕获，无 std::function 对象驻留堆）
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     _server.on("/wifi",   HTTP_GET,  _handleWiFiGet);
     _server.on("/wifi",   HTTP_POST, _handleWiFiPost);
     _server.on("/auth",   HTTP_GET,  _handleAuthGet);
     _server.on("/auth",   HTTP_POST, _handleAuthPost);
+#endif
 #if ESP8266BASE_USE_OTA && !ESP8266BASE_PROFILE_MQTT_TERMINAL
     _server.on("/ota",    HTTP_GET,  _handleOtaGet);
     // POST /ota 由 Esp8266BaseOTA::begin() 注册（需要 upload handler）
@@ -555,19 +577,27 @@ bool Esp8266BaseWeb::begin() {
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     _server.on("/",       HTTP_GET,  _handleRoot);
     _server.on("/esp8266base", HTTP_GET, _handleSystemHome);
+#if ESP8266BASE_USE_FILELOG
     _server.on("/logs",   HTTP_GET,  _handleLogsGet);
     _server.on("/logs/clear", HTTP_POST, _handleLogsClearPost);
+#endif
     _server.on("/system", HTTP_GET,  _handleSystemGet);
+#if ESP8266BASE_USE_FILELOG
     _server.on("/system/filelog", HTTP_POST, _handleFileLogPost);
+#endif
     _server.on("/system/hostname", HTTP_POST, _handleHostnamePost);
     _server.on("/api/system/hostname", HTTP_GET, _handleHostnameApiGet);
     _server.on("/api/system/hostname", HTTP_POST, _handleHostnameApiPost);
     _server.on("/reboot", HTTP_POST, _handleRebootPost);
-#else
-    _server.on("/",       HTTP_GET,  _handleTerminalRoot);
 #endif
+#if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     _server.on("/health", HTTP_GET,  _handleHealth);
     _server.onNotFound(_handleNotFound);
+#else
+    // Terminal 用一个固定 dispatcher 承担所有基础 GET/POST 路由；仅 multipart
+    // OTA 仍需 ESP8266WebServer 的独立 upload handler。
+    _server.onNotFound(_handleTerminalDispatch);
+#endif
 
     _server.begin();
     _running = true;
@@ -810,9 +840,11 @@ bool Esp8266BaseWeb::verifyAuth() {
 void Esp8266BaseWeb::_loadPersistedAuth() {
     char pass[24] = "";
     bool passFound = false;
+#if ESP8266BASE_USE_WEB_AUTH_CONFIG
     if (Esp8266BaseConfig::isReady()) {
         passFound = Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WEB_PASS, pass, sizeof(pass), "");
     }
+#endif
     if (passFound && pass[0]) {
         strncpy(_authPass, pass, sizeof(_authPass) - 1);
         _authPass[sizeof(_authPass) - 1] = '\0';
@@ -1161,8 +1193,12 @@ void Esp8266BaseWeb::_handleWiFiGet() {
 
     char ssid[64] = "";
     char pass[64] = "";
+#if ESP8266BASE_USE_WIFI_CONFIG
     Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid, sizeof(ssid), "");
     Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_PASS, pass, sizeof(pass), "");
+#else
+    strncpy(ssid, Esp8266BaseWiFi::ssid(), sizeof(ssid) - 1);
+#endif
     sendContent_P(WEB_WIFI_FORM_PRE);
     _sendFormToken();
     sendContent_P(WEB_WIFI_FORM_SSID);
@@ -1277,12 +1313,14 @@ void Esp8266BaseWeb::_handleAuthPost() {
         return;
     }
 
+#if ESP8266BASE_USE_WEB_AUTH_CONFIG
     if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WEB_PASS, newPass)) {
         ESP8266BASE_LOG_E("Web ", "web_password_update_failed password=%s password_length=%u",
                           newPass, (unsigned)strlen(newPass));
         _redirect("/auth?error=save_failed");
         return;
     }
+#endif
 
     strncpy(_authPass, newPass, sizeof(_authPass) - 1);
     _authPass[sizeof(_authPass) - 1] = '\0';
@@ -1301,6 +1339,7 @@ void Esp8266BaseWeb::_handleOtaGet() {
 #endif
 
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
+#if ESP8266BASE_USE_FILELOG
 void Esp8266BaseWeb::_handleLogsGet() {
     if (!checkAuth()) return;
     sendHeader();
@@ -1428,6 +1467,7 @@ void Esp8266BaseWeb::_handleFileLogPost() {
     bool ok = Esp8266BaseFileLog::setMode(mode);
     _redirect(ok ? "/system?filelog_saved=1" : "/system?error=filelog_save_failed");
 }
+#endif
 
 void Esp8266BaseWeb::_handleHostnamePost() {
     if (!checkAuth()) return;
@@ -1506,22 +1546,28 @@ void Esp8266BaseWeb::_handleHostnameApiPost() {
 void Esp8266BaseWeb::_handleSystemGet() {
     if (!checkAuth()) return;
     sendHeader();
+#if ESP8266BASE_USE_FILELOG
     if (_server.hasArg("cleared")) {
         sendChunk("<p class=ok>File logs cleared.</p>");
     } else if (_server.hasArg("filelog_saved")) {
         sendChunk("<p class=ok>File log mode saved.</p>");
-    } else if (_server.hasArg("hostname_saved")) {
+    } else
+#endif
+    if (_server.hasArg("hostname_saved")) {
         sendChunk("<p class=ok>Hostname saved. Reboot to apply network discovery changes.</p>");
     } else if (_server.hasArg("error")) {
         char err[24] = "";
         strncpy(err, _server.arg("error").c_str(), sizeof(err) - 1);
+#if ESP8266BASE_USE_FILELOG
         if (strcmp(err, "clear_failed") == 0) {
             sendChunk("<p class=err>Failed to clear file logs.</p>");
         } else if (strcmp(err, "filelog_invalid_mode") == 0) {
             sendChunk("<p class=err>Invalid file log mode.</p>");
         } else if (strcmp(err, "filelog_save_failed") == 0) {
             sendChunk("<p class=err>Failed to save file log mode.</p>");
-        } else if (strcmp(err, "hostname_invalid") == 0) {
+        } else
+#endif
+        if (strcmp(err, "hostname_invalid") == 0) {
             sendChunk("<p class=err>Invalid hostname.</p>");
         } else if (strcmp(err, "hostname_save_failed") == 0) {
             sendChunk("<p class=err>Failed to save hostname.</p>");
@@ -1529,7 +1575,9 @@ void Esp8266BaseWeb::_handleSystemGet() {
     }
     sendChunk("<h2>System</h2><div class=grid>");
     _sendHostnameSystemSection();
+#if ESP8266BASE_USE_FILELOG
     _sendFileLogSystemSection();
+#endif
     sendContent_P(WEB_SYSTEM_PAGE);
     sendFooter();
 }
@@ -1541,8 +1589,12 @@ void Esp8266BaseWeb::_handleRebootPost() {
     sendFooter();
     _server.client().stop();
     ESP8266BASE_LOG_I("Web ", "reboot_requested source=web");
+#if ESP8266BASE_USE_CONFIG
     Esp8266BaseConfig::flush();
+#endif
+#if ESP8266BASE_USE_FILELOG
     Esp8266BaseFileLog::flush();
+#endif
     delay(500);
     ESP.restart();
 }
@@ -1554,6 +1606,18 @@ void Esp8266BaseWeb::_handleTerminalRoot() {
     } else {
         _redirect(ESP8266BASE_TERMINAL_HOME_PATH);
     }
+}
+
+void Esp8266BaseWeb::_handleTerminalDispatch() {
+    const String& uri = _server.uri();
+    const HTTPMethod method = _server.method();
+    if (uri == "/" && method == HTTP_GET) return _handleTerminalRoot();
+    if (uri == "/wifi" && method == HTTP_GET) return _handleWiFiGet();
+    if (uri == "/wifi" && method == HTTP_POST) return _handleWiFiPost();
+    if (uri == "/auth" && method == HTTP_GET) return _handleAuthGet();
+    if (uri == "/auth" && method == HTTP_POST) return _handleAuthPost();
+    if (uri == "/health" && method == HTTP_GET) return _handleHealth();
+    _handleNotFound();
 }
 #endif
 

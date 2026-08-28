@@ -165,17 +165,17 @@ log_timestamp_mode=absolute_datetime
 
 断线重试为 2s、4s、8s、16s、32s、60s，之后保持 60s。日志包含 `connect_attempt`、`connected`、`disconnected reason=`、`reconnect_scheduled` 以及 free heap/max block。TCP_DISCONNECTED 时若 BearSSL 存在错误，还会输出真实 `tls_code/tls_detail`；无 TLS 错误时不伪造。`lastTlsErrorCode()`/`lastTlsErrorText()` 提供只读诊断，`/health` 只含 code；新连接前清除旧值。
 
-当配置 `cleanSession=true`，断线完成后会在业务断线回调前清除上一个会话尚未确认的出站包，避免旧 QoS 证据跨到新连接周期，并释放对应队列内存；实际清除时记录 `session_queue_discarded`。`cleanSession=false` 保留上游持久会话重传行为。
+当配置 `cleanSession=true`，断线完成后会在业务断线回调前清空两个固定出站槽，避免旧 QoS 证据跨到新连接周期；实际清除时记录 `session_queue_discarded`。`cleanSession=false` 只保留未确认 QoS1 PUBLISH，并在重连后置 DUP 重发；SUBSCRIBE 和 QoS0 不跨连接。
 
-SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定 `uint8_t` code 数组；publish acknowledgement 回调在 QoS1 PUBACK 或 QoS2 PUBCOMP 后触发。`OUT_OF_MEMORY`、`MAX_RETRIES`、`MALFORMED_PARAMETER` 等 client error 会映射为基础库枚举、记录日志并交给业务。自动源码检查只验证绑定、顺序、映射和退避策略，不等于真实 broker ACL、SUBACK/PUBACK 或 TLS 握手验证。
+SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定 `uint8_t` code 数组；publish acknowledgement 回调在 QoS1 PUBACK 后触发。`CAPACITY_EXHAUSTED`、`PACKET_TOO_LARGE`、`MAX_RETRIES`、`PROTOCOL_ERROR` 会记录并交给业务。自动测试覆盖固定队列、匹配 ACK、边界和 wrap-safe 时间比较，但不等于真实 broker ACL、SUBACK/PUBACK 或 TLS 握手验证。
 
 如果业务要求订阅确认后才算 ready，应在 SUBACK 不匹配、拒绝或其他应用握手失败时调用 `requestReconnect()`，成功完成订阅和初始证据后调用 `markConnectionReady()`。CONNACK 不重置退避；连续握手失败保持 2s→60s 有界指数退避。ready 后退避恢复初始值，之后普通断线从 2s 开始。异步 disconnect callback 与 `handle()` fallback 通过 `BACKOFF` 状态避免重复 schedule。
 
-执行器运行期间可调用 `setConnectAttemptsEnabled(false)`，只暂停后续 DNS/TCP/TLS 新建连接；已经建立的 MQTT 会话仍保持并继续 `loop()` 和收发。运行结束恢复为 `true` 后沿既有退避时间继续。这个门禁用于避免同步建连阻塞本地截止，不修改 MQTT 协议、身份或 ACL。
+执行器运行期间可调用 `setConnectAttemptsEnabled(false)`，只暂停后续 DNS/TCP/TLS 新建连接；已经建立的 MQTT 会话仍保持并继续收发。运行结束恢复为 `true` 后沿既有退避时间继续。这个门禁用于避免同步建连阻塞本地截止，不修改 MQTT 协议、身份或 ACL。
 
-需要关闭 MQTT 或在 OTA 成功重启前正常下线时，业务调用 `beginShutdown(topic, payload)` 提供最终 availability。基础库固定使用 retained QoS1，并只接受对应 packetId 的 PUBACK；随后调用 `disconnect(false)`，保持暂停且不自动重连。不匹配 PUBACK、入队失败、连接丢失和两阶段超时均有独立结果；所有失败路径都拒绝 force close，以免 broker 发布 LWT 覆盖 shutdown retain。只有显式 `resumeAfterShutdown()` 恢复连接许可。
+需要关闭 MQTT 或在 OTA 成功重启前正常下线时，业务调用 `beginShutdown(topic, payload)` 提供最终 availability。基础库复制到固定槽，使用 retained QoS1，并只接受对应 packetId 的 PUBACK；随后写入正常 MQTT DISCONNECT、flush 并释放 TLS，保持暂停且不自动重连。不匹配 PUBACK、入队失败、连接丢失、PUBACK 超时和 DISCONNECT 写失败均有独立结果。只有显式 `resumeAfterShutdown()` 恢复连接许可。
 
-使用 `espMqttClient 1.7.3` 的同步安全客户端。正式构建必须定义 `EMC_MIN_FREE_MEMORY=4096`，使 TLS 连接后最大连续堆块达到 4KB 时仍可创建 SUBSCRIBE/PUBLISH 包；真实分配失败仍按返回 0 处理。MQTT 收发缓冲保持上游默认值，BearSSL 显式为 4096/1024；未降低证书校验。该客户端的大部分 MQTT 状态分步推进，但 ESP8266 底层 DNS/TCP/TLS connect 单次尝试可能阻塞到网络超时，无法宣称严格零阻塞；外围有界退避可避免忙循环。
+使用库内固定内存的 MQTT 3.1.1 同步安全传输，不依赖 `espMqttClient` 或异步 TCP。两个出站槽按优先级和 FIFO 选择，单个 QoS1 在途；默认 topic 128B、出站 payload 512B、RX 分块 256B、入站 payload 768B。CONNECT、SUBSCRIBE 和 PUBLISH 都分段写入，不构造动态 packet；容量不足明确拒绝。BearSSL 显式为 4096/1024，证书校验不降低。ESP8266 底层 DNS/TCP/TLS connect 单次尝试仍可能阻塞到连接超时；外围门禁与有界退避避免执行器运行期新建连接和失败忙循环。
 
 ---
 

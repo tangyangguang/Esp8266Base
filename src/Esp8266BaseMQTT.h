@@ -3,6 +3,7 @@
 #if ESP8266BASE_USE_MQTT
 
 #include <Arduino.h>
+#include "Esp8266BaseMQTTFixed.h"
 
 namespace BearSSL { class X509List; }
 
@@ -16,6 +17,14 @@ namespace BearSSL { class X509List; }
 
 #ifndef ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS
 #define ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS 5000UL
+#endif
+
+#ifndef ESP8266BASE_MQTT_ACK_TIMEOUT_MS
+#define ESP8266BASE_MQTT_ACK_TIMEOUT_MS 15000UL
+#endif
+
+#ifndef ESP8266BASE_MQTT_CONNECT_TIMEOUT_MS
+#define ESP8266BASE_MQTT_CONNECT_TIMEOUT_MS 10000UL
 #endif
 
 #if ESP8266BASE_MQTT_RETRY_INITIAL_MS < 1000UL
@@ -72,6 +81,9 @@ enum class Esp8266BaseMQTTClientError : uint8_t {
     MAX_RETRIES = 2,
     MALFORMED_PARAMETER = 3,
     MISC_ERROR = 4,
+    CAPACITY_EXHAUSTED = 5,
+    PACKET_TOO_LARGE = 6,
+    PROTOCOL_ERROR = 7,
     UNKNOWN = 255
 };
 
@@ -122,7 +134,13 @@ public:
     static uint16_t publish(const char* topic, uint8_t qos, bool retain,
                             const uint8_t* payload, size_t length);
     static uint16_t publish(const char* topic, uint8_t qos, bool retain,
+                            const uint8_t* payload, size_t length,
+                            Esp8266BaseMQTTPublishPriority priority);
+    static uint16_t publish(const char* topic, uint8_t qos, bool retain,
                             const char* payload);
+    static uint16_t publish(const char* topic, uint8_t qos, bool retain,
+                            const char* payload,
+                            Esp8266BaseMQTTPublishPriority priority);
     static uint16_t subscribe(const char* topic, uint8_t qos);
     // 非阻塞请求释放当前传输；下一轮 handle() 执行断开，随后沿用既有退避重连。
     // 未配置、未 begin 或受控下线暂停时返回 false；重复请求幂等返回 true。
@@ -162,6 +180,10 @@ public:
     static int lastTlsErrorCode();
     // 指向内部固定缓冲；下一次连接尝试会清空，调用方不得保存或修改。
     static const char* lastTlsErrorText();
+    static size_t queuedPackets();
+    static constexpr size_t outboxCapacity() { return ESP8266BASE_MQTT_TX_SLOTS; }
+    static constexpr size_t maxTopicBytes() { return ESP8266BASE_MQTT_MAX_TOPIC_BYTES; }
+    static constexpr size_t maxPayloadBytes() { return ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES; }
 
     // 由 OTA 编排调用。有活动会话时业务 prepare 必须先 beginShutdown()；无活动
     // transport 时直接暂停并返回 true，但 shutdownResult 不会伪装成 SUCCESS。
@@ -184,7 +206,6 @@ private:
     static Esp8266BaseMQTTShutdownResult _shutdownResult;
     static uint16_t _shutdownPacketId;
     static uint32_t _shutdownDeadline;
-    static uint32_t _shutdownTimeout;
 
     static char _host[65];
     static char _clientId[49];
@@ -213,14 +234,22 @@ private:
     static void _startGracefulDisconnect();
     static void _finishShutdown(Esp8266BaseMQTTShutdownResult result);
     static void _disconnectForGate(Esp8266BaseMQTTState waitingState);
+    static bool _connectTransport();
+    static bool _pumpTransport();
+    static bool _pumpIncoming();
+    static bool _pumpOutbox();
+    static bool _sendDisconnectPacket();
+    static void _closeTransport(Esp8266BaseMQTTDisconnectReason reason,
+                                bool scheduleRetry, bool notifyApplication = true);
+    static void _captureTlsError();
     static void _onConnect(bool sessionPresent);
-    static void _onDisconnect(uint8_t reason);
+    static void _onDisconnect(Esp8266BaseMQTTDisconnectReason reason);
     static void _onMessage(uint8_t qos, bool dup, bool retain, uint16_t packetId,
                            const char* topic, const uint8_t* payload,
                            size_t len, size_t index, size_t total);
     static void _onSubscribeAck(uint16_t packetId, const uint8_t* returnCodes, size_t length);
     static void _onPublishAck(uint16_t packetId);
-    static void _onClientError(uint16_t packetId, uint8_t error);
+    static void _onClientError(uint16_t packetId, Esp8266BaseMQTTClientError error);
 };
 
 #endif

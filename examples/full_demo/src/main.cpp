@@ -392,7 +392,9 @@ static void handleBoardButton() {
         Esp8266BaseWatchdog::pause();
 #endif
         Esp8266BaseConfig::clearAll();
+#if ESP8266BASE_USE_FILELOG
         Esp8266BaseFileLog::flush();
+#endif
         delay(300);
         ESP.restart();
     }

@@ -1,5 +1,7 @@
 #include "Esp8266BaseLog.h"
+#if ESP8266BASE_USE_CONFIG
 #include "Esp8266BaseConfig.h"
+#endif
 #include "Esp8266BaseUtil.h"
 #include <stdarg.h>
 
@@ -102,11 +104,19 @@ void Esp8266BaseLog::beginBootSession(const char* firmware,
 }
 
 void Esp8266BaseLog::enableConfigAudit(bool enabled) {
+#if ESP8266BASE_USE_CONFIG
     Esp8266BaseConfig::enableConfigAudit(enabled);
+#else
+    (void)enabled;
+#endif
 }
 
 void Esp8266BaseLog::enableConfigReadAudit(bool enabled) {
+#if ESP8266BASE_USE_CONFIG
     Esp8266BaseConfig::enableConfigReadAudit(enabled);
+#else
+    (void)enabled;
+#endif
 }
 
 const char* Esp8266BaseLog::_timestamp(char* buf, size_t len) {
