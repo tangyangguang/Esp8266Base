@@ -564,13 +564,28 @@ static bool requestReconnect();
 static bool markConnectionReady();
 static void setConnectAttemptsEnabled(bool enabled);
 static bool connectAttemptsEnabled();
+static bool beginShutdown(const char* topic, const uint8_t* payload, size_t length,
+                          uint32_t timeoutMs = ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS);
+static bool beginShutdown(const char* topic, const char* payload,
+                          uint32_t timeoutMs = ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS);
+static Esp8266BaseMQTTShutdownResult shutdownResult();
+static const char* shutdownResultName();
+static bool shutdownSucceeded();
+static bool shutdownPaused();
+static void resumeAfterShutdown();
 ```
 
-支持 QoS 0/1/2；未连接、OTA 暂停、空参数或非法 QoS 返回 0。LWT 通过 `Esp8266BaseMQTTConfig::willTopic/willPayload/willQos/willRetain` 配置。connected callback 每次成功连接都会调用，业务必须在其中重新订阅；subscribeAck 提供 packetId 和固定 `uint8_t` return codes，`0x80` 表示拒绝；publishAck 对 QoS1 为 PUBACK、QoS2 为 PUBCOMP；clientError 使用 `Esp8266BaseMQTTClientError` 稳定枚举。message callback 保留上游分块参数 `len/index/total`。
+支持 QoS 0/1/2；未连接、受控下线暂停、空参数或非法 QoS 返回 0。LWT 通过 `Esp8266BaseMQTTConfig::willTopic/willPayload/willQos/willRetain` 配置。connected callback 每次成功连接都会调用，业务必须在其中重新订阅；subscribeAck 提供 packetId 和固定 `uint8_t` return codes，`0x80` 表示拒绝；publishAck 对 QoS1 为 PUBACK、对 QoS2 为 PUBCOMP；clientError 使用 `Esp8266BaseMQTTClientError` 稳定枚举。message callback 保留上游分块参数 `len/index/total`。
 
 `requestReconnect()` 用于业务握手失败后的受控重试；下一轮 `handle()` 才释放传输。CONNACK 不视为应用 ready，也不重置退避，所以连续失败使用 2s→4s→8s→16s→32s→60s。业务完成订阅及初始握手后必须调用 `markConnectionReady()`，它只在已连接、未暂停且无待处理重连时成功，并把后续普通断线恢复为初始 2s。重复重连请求幂等；两个 API 都不会等待网络或暴露 `espMqttClient` 类型。
 
 `setConnectAttemptsEnabled(false)` 只禁止后续 DNS/TCP/TLS 新建连接，不主动断开已建立会话，也不停止该会话的 MQTT `loop()` 和收发；恢复为 `true` 后按既有退避时间继续。适用于执行器运行期间避免同步建连阻塞本地截止逻辑，不改变 Topic、消息、QoS 或认证契约。`connectAttemptsEnabled()` 返回当前门禁值。
+
+`beginShutdown()` 是正常关闭 MQTT 和 OTA 重启前共用的受控下线入口。业务提供不透明 topic/payload；基础库固定发布 retained QoS1，返回 `true` 只表示上游成功入队。入队后普通 publish/subscribe、消息分发、重连请求和 readiness 确认均被禁止；只有 packetId 精确匹配的 PUBACK 才推进 `disconnect(false)`。最终正常断开得到 `SUCCESS` 并保持 `PAUSED`，不会自动重连。Topic 或 payload 不会进入基础库常驻状态；上游出站队列会复制本次消息。
+
+`Esp8266BaseMQTTShutdownResult` 包含 `NONE/IN_PROGRESS/SUCCESS/NOT_CONNECTED/INVALID_ARGUMENT/PUBLISH_FAILED/CONNECTION_LOST/PUBACK_TIMEOUT/DISCONNECT_FAILED/DISCONNECT_TIMEOUT`。等待 PUBACK 与等待正常断开分别使用 `timeoutMs`，默认均为 5000ms，使用 wrap-safe `millis()` 比较。任何失败都不会伪装为成功，也不会调用 `disconnect(true)`；状态保持暂停，防止失败后自动重连或 LWT 覆盖业务最终消息。PUBACK 超时或最终包的异步发送错误会清空上游 outbox（上游没有按 packetId 删除 API），防止显式恢复后这条失败的 shutdown 迟到；因此同队列中尚未确认的其他消息也会被丢弃，业务恢复后应按当前状态重新发布。业务确认可以恢复后显式调用 `resumeAfterShutdown()`；恢复不会清除最后结果，下一次 `beginShutdown()` 会覆盖它。`shutdownPaused()` 表示受控下线门禁生效；只有 `shutdownSucceeded()` 才证明匹配 PUBACK 和正常 DISCONNECT 都已完成。
+
+OTA 场景中，业务 prepare callback 必须先完成执行器安全停机并调用 `beginShutdown()`；随后 `Esp8266BaseOTA` 有界推进同一状态机。下线不成功则 OTA 返回 `MQTT_PAUSE_FAILED`，并在 failure callback 前恢复 Watchdog 与 MQTT 连接许可；成功才进入 `Update.begin()`。参考 `examples/mqtt_terminal`。
 
 ```cpp
 static bool connected();
@@ -585,7 +600,7 @@ static int lastTlsErrorCode();
 static const char* lastTlsErrorText();
 ```
 
-只读诊断不返回 broker、clientId、用户名、密码或证书。TLS code/detail 在 BearSSL transport 释放前捕获；text 指向内部 96B 固定缓冲，并在下一轮连接前清空，不得长期保存。`/health` 只提供 TLS code。状态包括 `UNCONFIGURED/WAITING_WIFI/WAITING_TIME/BACKOFF/CONNECTING/CONNECTED/PAUSED_OTA`。
+只读诊断不返回 broker、clientId、用户名、密码或证书。TLS code/detail 在 BearSSL transport 释放前捕获；text 指向内部 96B 固定缓冲，并在下一轮连接前清空，不得长期保存。`/health` 只提供 TLS code。状态包括 `UNCONFIGURED/WAITING_WIFI/WAITING_TIME/BACKOFF/CONNECTING/CONNECTED/SHUTDOWN_WAIT_ACK/SHUTDOWN_DISCONNECTING/PAUSED`。
 
 基础库 API 和状态只保存固定函数指针；传给 `espMqttClient 1.7.3` 后，上游内部 callback 包装、出站队列、证书解析和 TLS 会话仍可能使用动态堆。正式 `MQTT_TERMINAL` 构建必须定义 `EMC_MIN_FREE_MEMORY=4096`，否则上游 Arduino 默认 16KB 最大连续堆块门槛可能在 TLS 已连接时拒绝创建 SUBSCRIBE/PUBLISH 包。MQTT 收发缓冲保持上游默认值，BearSSL 缓冲为 4096/1024。
 
@@ -869,6 +884,7 @@ void loop() {
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译通用 TLS MQTT 模块；要求 NTP |
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 初始退避 ms |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 退避上限 ms |
+| `ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS` | `5000` | 受控下线 PUBACK/正常断开单阶段超时 ms |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |

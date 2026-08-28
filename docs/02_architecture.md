@@ -198,7 +198,7 @@ struct AppRoute {
 
 业务握手失败通过 `requestReconnect()` 设置延迟处理标志，握手成功通过 `markConnectionReady()` 确认稳定。CONNACK 不重置 `_retryDelay`，连续握手失败由断线回调沿同一 `_scheduleRetry()` 推进到 60s；ready 确认才恢复初始 2s。强制断开的异步 callback 若已进入 `BACKOFF`，`handle()` 不会重复 schedule，因此单次失败只推进一次退避。
 
-MQTT 状态为 `UNCONFIGURED → WAITING_WIFI → WAITING_TIME → BACKOFF/CONNECTING → CONNECTED`。断线按 2s、4s、8s、16s、32s、60s 有界指数退避；WiFi 或 NTP 不就绪时回到门控状态。底层同步 BearSSL connect 在 ESP8266 上可能阻塞到单次网络超时，但外围不会忙循环。
+普通 MQTT 状态为 `UNCONFIGURED → WAITING_WIFI → WAITING_TIME → BACKOFF/CONNECTING → CONNECTED`。断线按 2s、4s、8s、16s、32s、60s 有界指数退避；WiFi 或 NTP 不就绪时回到门控状态。底层同步 BearSSL connect 在 ESP8266 上可能阻塞到单次网络超时，但外围不会忙循环。
 
 断线完成后，`cleanSession=true` 会先删除上一个会话仍在上游出站队列中的 QoS 包，再通知业务并安排下一次连接；旧连接周期证据不能进入新会话。`cleanSession=false` 不执行该删除，继续采用持久会话的重传语义。
 
@@ -206,7 +206,9 @@ MQTT 状态为 `UNCONFIGURED → WAITING_WIFI → WAITING_TIME → BACKOFF/CONNE
 
 实现文件内的 `Esp8266BaseMQTTInternal::DiagnosticSecureClient` 只继承 `espMqttClientSecure` 的 protected transport/state，在进入 `disconnectingTcp1`、transport 尚未 stop 时捕获 BearSSL 最后错误。第三方类型和 protected 实现不进入公共头；每次新连接前清空旧错误。SUBACK/PUBACK/PUBCOMP 和 client error 也只在实现文件适配为基础库稳定类型。
 
-OTA 顺序为：业务 prepare 判断 → `Esp8266BaseMQTT::pauseForOTA()` 禁止消息并正常 DISCONNECT（超时才强制释放）→ `Update.begin()`。失败路径先恢复 Watchdog，再恢复 MQTT 重连许可，最后调用业务 failure callback；成功路径保持 MQTT 为 `PAUSED_OTA`，flush 配置/日志后重启。没有事件总线，也不让 MQTT 依赖执行器状态。
+受控下线是 `CONNECTED → SHUTDOWN_WAIT_ACK → SHUTDOWN_DISCONNECTING → PAUSED` 的单向状态机。`beginShutdown(topic, payload)` 只创建 retained QoS1 出站包，不保存或解析业务内容；进入后立即禁止新的 publish/subscribe/message/reconnect/readiness。只有 `_onPublishAck()` 收到该最终消息 packetId 才调用 `disconnect(false)`，不匹配 PUBACK 仍转发给业务但不推进状态。正常 `USER_OK` 断线才得到 `SUCCESS`；入队失败、连接丢失、PUBACK 超时或正常断开超时均保留可诊断失败结果和暂停门禁，绝不 force close。PUBACK 超时或最终包异步发送错误会清空上游 outbox，避免恢复后失败的 shutdown 迟到；业务恢复后重发当前状态。业务显式 `resumeAfterShutdown()` 才重新允许连接。
+
+OTA 顺序为：业务 prepare 完成执行器安全停机并调用 `beginShutdown()` → `Esp8266BaseMQTT::pauseForOTA()` 有界推进同一状态机 → 匹配 PUBACK → 正常 MQTT DISCONNECT/TLS 释放 → `Update.begin()`。PUBACK 和正常断开各自最多等待配置超时；失败路径先恢复 Watchdog，再显式恢复 MQTT 连接许可，最后调用业务 failure callback；成功路径保持 `PAUSED`，flush 配置/日志后重启。没有事件总线，也不让 MQTT 依赖执行器状态或理解 availability JSON。
 
 ---
 

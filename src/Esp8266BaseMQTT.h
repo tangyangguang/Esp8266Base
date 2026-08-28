@@ -14,11 +14,18 @@ namespace BearSSL { class X509List; }
 #define ESP8266BASE_MQTT_RETRY_MAX_MS 60000UL
 #endif
 
+#ifndef ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS
+#define ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS 5000UL
+#endif
+
 #if ESP8266BASE_MQTT_RETRY_INITIAL_MS < 1000UL
 #error "ESP8266BASE_MQTT_RETRY_INITIAL_MS must be at least 1000"
 #endif
 #if ESP8266BASE_MQTT_RETRY_MAX_MS < ESP8266BASE_MQTT_RETRY_INITIAL_MS
 #error "ESP8266BASE_MQTT_RETRY_MAX_MS must be >= ESP8266BASE_MQTT_RETRY_INITIAL_MS"
+#endif
+#if ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS == 0 || ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS > 0x7FFFFFFFUL
+#error "ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS must be between 1 and 2147483647"
 #endif
 
 enum class Esp8266BaseMQTTState : uint8_t {
@@ -28,7 +35,22 @@ enum class Esp8266BaseMQTTState : uint8_t {
     BACKOFF,
     CONNECTING,
     CONNECTED,
-    PAUSED_OTA
+    SHUTDOWN_WAIT_ACK,
+    SHUTDOWN_DISCONNECTING,
+    PAUSED
+};
+
+enum class Esp8266BaseMQTTShutdownResult : uint8_t {
+    NONE = 0,
+    IN_PROGRESS,
+    SUCCESS,
+    NOT_CONNECTED,
+    INVALID_ARGUMENT,
+    PUBLISH_FAILED,
+    CONNECTION_LOST,
+    PUBACK_TIMEOUT,
+    DISCONNECT_FAILED,
+    DISCONNECT_TIMEOUT
 };
 
 enum class Esp8266BaseMQTTDisconnectReason : uint8_t {
@@ -103,7 +125,7 @@ public:
                             const char* payload);
     static uint16_t subscribe(const char* topic, uint8_t qos);
     // 非阻塞请求释放当前传输；下一轮 handle() 执行断开，随后沿用既有退避重连。
-    // 未配置、未 begin 或 OTA 暂停时返回 false；重复请求幂等返回 true。
+    // 未配置、未 begin 或受控下线暂停时返回 false；重复请求幂等返回 true。
     static bool requestReconnect();
     // 业务完成订阅/初始握手后确认本连接稳定，并把后续普通断线退避恢复为初始值。
     // 仅当前已连接、未暂停且没有待处理重连请求时成功。
@@ -112,6 +134,22 @@ public:
     // MQTT loop；适合执行器运行期间避免同步建连阻塞本地截止逻辑。
     static void setConnectAttemptsEnabled(bool enabled);
     static bool connectAttemptsEnabled();
+
+    // 发布业务提供的 retained QoS1 最终消息；匹配 PUBACK 后才发送正常 MQTT
+    // DISCONNECT，并保持暂停。topic/payload 会被上游出站队列复制，本库不保存业务内容。
+    // 返回 true 仅表示最终消息已成功入队，不表示 PUBACK 或关闭成功。
+    static bool beginShutdown(const char* topic, const uint8_t* payload, size_t length,
+                              uint32_t timeoutMs = ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS);
+    static bool beginShutdown(const char* topic, const char* payload,
+                              uint32_t timeoutMs = ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS);
+    static Esp8266BaseMQTTShutdownResult shutdownResult();
+    static const char* shutdownResultName();
+    // true 只表示已正常断开且最终消息收到匹配 PUBACK。
+    static bool shutdownSucceeded();
+    static bool shutdownPaused();
+    // 显式恢复连接许可；供关闭失败后的业务恢复或 OTA 失败恢复使用。
+    // 最后 shutdownResult 保留到下一次 beginShutdown()。
+    static void resumeAfterShutdown();
 
     static bool connected();
     static bool isConfigured();
@@ -125,7 +163,8 @@ public:
     // 指向内部固定缓冲；下一次连接尝试会清空，调用方不得保存或修改。
     static const char* lastTlsErrorText();
 
-    // 由 OTA 编排调用。先停止消息分发，再尝试正常 DISCONNECT；必要时强制释放 TLS。
+    // 由 OTA 编排调用。业务 prepare callback 必须先 beginShutdown()；这里有界推进
+    // 同一关闭状态机，只有匹配 PUBACK 且正常断开后才返回 true。
     static bool pauseForOTA();
     static void resumeAfterOTAFailure();
     static void keepPausedAfterOTASuccess();
@@ -133,7 +172,7 @@ public:
 private:
     static bool _configured;
     static bool _begun;
-    static bool _otaPaused;
+    static bool _shutdownActive;
     static bool _reconnectRequested;
     static bool _connectAttemptsEnabled;
     static Esp8266BaseMQTTState _state;
@@ -141,6 +180,10 @@ private:
     static uint32_t _attemptCount;
     static uint32_t _retryAt;
     static uint32_t _retryDelay;
+    static Esp8266BaseMQTTShutdownResult _shutdownResult;
+    static uint16_t _shutdownPacketId;
+    static uint32_t _shutdownDeadline;
+    static uint32_t _shutdownTimeout;
 
     static char _host[65];
     static char _clientId[49];
@@ -165,6 +208,9 @@ private:
 
     static void _scheduleRetry();
     static bool _isDue(uint32_t now, uint32_t due);
+    static void _handleShutdown();
+    static void _startGracefulDisconnect();
+    static void _finishShutdown(Esp8266BaseMQTTShutdownResult result);
     static void _disconnectForGate(Esp8266BaseMQTTState waitingState);
     static void _onConnect(bool sessionPresent);
     static void _onDisconnect(uint8_t reason);

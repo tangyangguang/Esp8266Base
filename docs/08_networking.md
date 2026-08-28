@@ -173,6 +173,8 @@ SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定
 
 执行器运行期间可调用 `setConnectAttemptsEnabled(false)`，只暂停后续 DNS/TCP/TLS 新建连接；已经建立的 MQTT 会话仍保持并继续 `loop()` 和收发。运行结束恢复为 `true` 后沿既有退避时间继续。这个门禁用于避免同步建连阻塞本地截止，不修改 MQTT 协议、身份或 ACL。
 
+需要关闭 MQTT 或在 OTA 成功重启前正常下线时，业务调用 `beginShutdown(topic, payload)` 提供最终 availability。基础库固定使用 retained QoS1，并只接受对应 packetId 的 PUBACK；随后调用 `disconnect(false)`，保持暂停且不自动重连。不匹配 PUBACK、入队失败、连接丢失和两阶段超时均有独立结果；所有失败路径都拒绝 force close，以免 broker 发布 LWT 覆盖 shutdown retain。只有显式 `resumeAfterShutdown()` 恢复连接许可。
+
 使用 `espMqttClient 1.7.3` 的同步安全客户端。正式构建必须定义 `EMC_MIN_FREE_MEMORY=4096`，使 TLS 连接后最大连续堆块达到 4KB 时仍可创建 SUBSCRIBE/PUBLISH 包；真实分配失败仍按返回 0 处理。MQTT 收发缓冲保持上游默认值，BearSSL 显式为 4096/1024；未降低证书校验。该客户端的大部分 MQTT 状态分步推进，但 ESP8266 底层 DNS/TCP/TLS connect 单次尝试可能阻塞到网络超时，无法宣称严格零阻塞；外围有界退避可避免忙循环。
 
 ---

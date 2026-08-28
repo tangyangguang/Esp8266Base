@@ -174,6 +174,7 @@ build_flags =
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译 `Esp8266BaseMQTT` 可选模块；要求 NTP |
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 首次退避间隔 |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 指数退避上限 |
+| `ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS` | `5000` | 受控下线等待 PUBACK、正常断开的单阶段超时 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
@@ -218,7 +219,9 @@ MQTT 使用 `bertmelis/espMqttClient 1.7.3` 同步 TLS 客户端。PlatformIO �
 
 执行器需要保护本地截止时，可在运行期间调用 `Esp8266BaseMQTT::setConnectAttemptsEnabled(false)`。该门禁只阻止后续 DNS/TCP/TLS 新建连接，不拆除已经建立的 MQTT 会话，也不停止既有会话的 `loop()` 和收发；运行结束后业务必须重新启用。它不改变 Topic、消息、QoS、认证或重连退避契约。
 
-OTA 仍只使用 `Esp8266BaseOTA`。业务 prepare callback 先检查执行器是否安全；通过后基础库自动停止 MQTT 消息分发并断开 MQTT/TLS，再调用 `Update.begin()`。任何失败恢复 Watchdog 与 MQTT 重连许可；成功保持 MQTT 关闭、flush 配置/日志并重启。业务不再需要自行释放基础 MQTT 模块，但仍负责执行器安全检查。
+正常关闭 MQTT 时，业务调用 `beginShutdown(topic, payload)` 提供最终消息。基础库固定以 retained QoS1 入队，立即停止新的 publish/subscribe/message 分发，只在收到该 packetId 的 PUBACK 后调用 `disconnect(false)`；正常断开后状态保持 `PAUSED`，不会让 LWT 覆盖最终消息，也不会自动重连。返回 `true` 只表示入队成功，最终结果必须读取 `shutdownResult()`/`shutdownSucceeded()`；入队失败、连接丢失、PUBACK 超时或正常断开超时都有明确失败结果并保持暂停，只有业务显式调用 `resumeAfterShutdown()` 才恢复连接许可。基础库不解析 Topic 或 payload，也不保存业务载荷。
+
+OTA 仍只使用 `Esp8266BaseOTA`。MQTT_TERMINAL 的业务 prepare callback 先完成执行器安全停机、构造最终 availability，再调用同一个 `beginShutdown()`；prepare 返回 true 后 OTA 有界推进该状态机，只有匹配 PUBACK 且 MQTT/TLS 正常释放才调用 `Update.begin()`。失败路径先恢复 Watchdog 和 MQTT 重连许可，再调用业务 failure callback；成功保持 `PAUSED`、flush 配置/日志并重启。该受控阶段每段默认最多等待 5 秒，绝不 force close；真实业务接法见 `examples/mqtt_terminal`。
 
 日志与回显策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段；`/wifi` GET 表单也会回显已保存密码，页面默认隐藏，可手动显示。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
 
@@ -242,7 +245,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 tools/test_all.sh
 ```
 
-默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、源码契约/顺序检查、纯退避策略和 OTA 上传脚本的 curl 兼容/失败语义回归，并编译根项目及全部示例的 `esp12f` 环境；`mqtt_terminal` 独立覆盖正式模式。它不动态验证 DNS/TLS、实际 MQTT 状态迁移、SUBACK/PUBACK 或设备端 OTA。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
+默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、源码契约/顺序检查、纯退避与受控下线转换向量、OTA 上传脚本的 curl 兼容/失败语义回归，并编译根项目及全部示例的 `esp12f` 环境；`mqtt_terminal` 独立覆盖正式模式。它不动态验证 DNS/TLS、真实 broker PUBACK/retained/LWT 顺序或设备端 OTA。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
 
 ```bash
 tools/test_all.sh --all-envs

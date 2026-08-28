@@ -161,7 +161,9 @@ MQTT 智能终端启用 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1`；此时没有 `GE
 
 业务在 `Esp8266Base::begin()` 前提供 `Esp8266BaseMQTTConfig`、长期有效的 `BearSSL::X509List` trust anchor 和普通函数指针回调。基础模块只负责 TLS MQTT 连接与生命周期，不包含 Topic 规则或 JSON 协议。每次连接成功都会调用 connected callback，业务应在其中重新订阅。配置缺 host、port、clientId、keepalive 或 trust anchor 时，`begin()` 明确返回失败并保持 `unconfigured`。
 
-OTA 的业务 prepare callback 只负责执行器空闲、安全停机等业务判断。prepare 拒绝时 MQTT 不受影响；通过后基础库自动停止新消息并断开 MQTT/TLS。上传失败会恢复 Watchdog 和 MQTT 重连许可，成功则保持业务通信关闭并重启。
+MQTT 正常下线由业务调用 `Esp8266BaseMQTT::beginShutdown(topic, payload)`，基础库固定发布 retained QoS1，确认该 packetId 的 PUBACK 后才正常发送 DISCONNECT；结果通过 `shutdownResult()`/`shutdownSucceeded()` 查询。成功或失败都保持暂停且不自动重连，只有明确需要恢复时调用 `resumeAfterShutdown()`。基础库不理解业务 Topic 或 JSON。
+
+MQTT_TERMINAL 的 OTA prepare callback 除执行器安全停机外，还必须构造最终 availability 并调用同一个 `beginShutdown()`；返回 true 后 OTA 才有界等待匹配 PUBACK 和正常断开。失败会恢复 Watchdog 和 MQTT 重连许可，成功则保持业务通信关闭并重启。完整代码见 `examples/mqtt_terminal`。
 
 ---
 

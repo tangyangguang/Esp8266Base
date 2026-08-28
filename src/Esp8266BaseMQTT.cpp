@@ -58,7 +58,7 @@ static Esp8266BaseMQTTInternal::DiagnosticSecureClient mqttClient;
 
 bool Esp8266BaseMQTT::_configured = false;
 bool Esp8266BaseMQTT::_begun = false;
-bool Esp8266BaseMQTT::_otaPaused = false;
+bool Esp8266BaseMQTT::_shutdownActive = false;
 bool Esp8266BaseMQTT::_reconnectRequested = false;
 bool Esp8266BaseMQTT::_connectAttemptsEnabled = true;
 Esp8266BaseMQTTState Esp8266BaseMQTT::_state = Esp8266BaseMQTTState::UNCONFIGURED;
@@ -66,6 +66,10 @@ Esp8266BaseMQTTDisconnectReason Esp8266BaseMQTT::_lastReason = Esp8266BaseMQTTDi
 uint32_t Esp8266BaseMQTT::_attemptCount = 0;
 uint32_t Esp8266BaseMQTT::_retryAt = 0;
 uint32_t Esp8266BaseMQTT::_retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
+Esp8266BaseMQTTShutdownResult Esp8266BaseMQTT::_shutdownResult = Esp8266BaseMQTTShutdownResult::NONE;
+uint16_t Esp8266BaseMQTT::_shutdownPacketId = 0;
+uint32_t Esp8266BaseMQTT::_shutdownDeadline = 0;
+uint32_t Esp8266BaseMQTT::_shutdownTimeout = ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS;
 char Esp8266BaseMQTT::_host[65] = "";
 char Esp8266BaseMQTT::_clientId[49] = "";
 char Esp8266BaseMQTT::_username[65] = "";
@@ -215,8 +219,8 @@ bool Esp8266BaseMQTT::begin() {
 
 void Esp8266BaseMQTT::handle() {
     if (!_begun || !_configured) return;
-    if (_otaPaused) {
-        _state = Esp8266BaseMQTTState::PAUSED_OTA;
+    if (_shutdownActive) {
+        _handleShutdown();
         return;
     }
     if (!Esp8266BaseWiFi::isConnected()) {
@@ -280,7 +284,7 @@ bool Esp8266BaseMQTT::_isDue(uint32_t now, uint32_t due) {
 
 uint16_t Esp8266BaseMQTT::publish(const char* topic, uint8_t qos, bool retain,
                                   const uint8_t* payload, size_t length) {
-    if (_otaPaused || !mqttClient.connected() || !topic ||
+    if (_shutdownActive || !mqttClient.connected() || !topic ||
         (length > 0 && !payload) || qos > 2) return 0;
     return mqttClient.publish(topic, qos, retain, payload, length);
 }
@@ -292,12 +296,12 @@ uint16_t Esp8266BaseMQTT::publish(const char* topic, uint8_t qos, bool retain,
 }
 
 uint16_t Esp8266BaseMQTT::subscribe(const char* topic, uint8_t qos) {
-    if (_otaPaused || !mqttClient.connected() || !topic || qos > 2) return 0;
+    if (_shutdownActive || !mqttClient.connected() || !topic || qos > 2) return 0;
     return mqttClient.subscribe(topic, qos);
 }
 
 bool Esp8266BaseMQTT::requestReconnect() {
-    if (!_configured || !_begun || _otaPaused) return false;
+    if (!_configured || !_begun || _shutdownActive) return false;
     if (!_reconnectRequested) {
         _reconnectRequested = true;
         ESP8266BASE_LOG_W("MQTT", "application_reconnect_requested deferred=yes");
@@ -306,7 +310,7 @@ bool Esp8266BaseMQTT::requestReconnect() {
 }
 
 bool Esp8266BaseMQTT::markConnectionReady() {
-    if (!_configured || !_begun || _otaPaused || _reconnectRequested ||
+    if (!_configured || !_begun || _shutdownActive || _reconnectRequested ||
         !mqttClient.connected()) {
         return false;
     }
@@ -326,7 +330,7 @@ bool Esp8266BaseMQTT::connectAttemptsEnabled() {
     return _connectAttemptsEnabled;
 }
 
-bool Esp8266BaseMQTT::connected() { return !_otaPaused && mqttClient.connected(); }
+bool Esp8266BaseMQTT::connected() { return !_shutdownActive && mqttClient.connected(); }
 bool Esp8266BaseMQTT::isConfigured() { return _configured; }
 Esp8266BaseMQTTState Esp8266BaseMQTT::state() { return _state; }
 uint32_t Esp8266BaseMQTT::attemptCount() { return _attemptCount; }
@@ -343,7 +347,9 @@ const char* Esp8266BaseMQTT::stateName() {
         case Esp8266BaseMQTTState::BACKOFF: return "backoff";
         case Esp8266BaseMQTTState::CONNECTING: return "connecting";
         case Esp8266BaseMQTTState::CONNECTED: return "connected";
-        case Esp8266BaseMQTTState::PAUSED_OTA: return "paused_ota";
+        case Esp8266BaseMQTTState::SHUTDOWN_WAIT_ACK: return "shutdown_wait_ack";
+        case Esp8266BaseMQTTState::SHUTDOWN_DISCONNECTING: return "shutdown_disconnecting";
+        case Esp8266BaseMQTTState::PAUSED: return "paused";
         default: return "unknown";
     }
 }
@@ -363,46 +369,168 @@ const char* Esp8266BaseMQTT::lastDisconnectReasonName() {
     }
 }
 
-bool Esp8266BaseMQTT::pauseForOTA() {
-    if (!_configured || !_begun) return true;
+bool Esp8266BaseMQTT::beginShutdown(const char* topic, const uint8_t* payload,
+                                    size_t length, uint32_t timeoutMs) {
+    if (_shutdownActive) return false;
+    if (!_configured || !_begun) {
+        _shutdownResult = Esp8266BaseMQTTShutdownResult::NOT_CONNECTED;
+        ESP8266BASE_LOG_E("MQTT", "shutdown_rejected result=%u", (unsigned)_shutdownResult);
+        return false;
+    }
+    if (!topic || topic[0] == '\0' || (length > 0 && !payload) ||
+        timeoutMs == 0 || timeoutMs > 0x7FFFFFFFUL) {
+        _shutdownResult = Esp8266BaseMQTTShutdownResult::INVALID_ARGUMENT;
+        ESP8266BASE_LOG_E("MQTT", "shutdown_rejected result=%u", (unsigned)_shutdownResult);
+        return false;
+    }
+
     _reconnectRequested = false;
-    _otaPaused = true;
-    _state = Esp8266BaseMQTTState::PAUSED_OTA;
-    if (mqttClient.connected()) {
-        mqttClient.disconnect(false);
-        for (uint8_t i = 0; i < 8 && !mqttClient.disconnected(); i++) {
-            mqttClient.loop();
-            yield();
-        }
+    _shutdownActive = true;
+    _shutdownTimeout = timeoutMs;
+    if (!mqttClient.connected()) {
+        _shutdownResult = Esp8266BaseMQTTShutdownResult::NOT_CONNECTED;
+        _state = Esp8266BaseMQTTState::PAUSED;
+        ESP8266BASE_LOG_E("MQTT", "shutdown_finished result=%u transport=unavailable reconnect=no",
+                          (unsigned)_shutdownResult);
+        return false;
     }
-    if (!mqttClient.disconnected()) {
-        ESP8266BASE_LOG_W("MQTT", "ota_graceful_disconnect_incomplete action=force_disconnect");
-        mqttClient.disconnect(true);
-        for (uint8_t i = 0; i < 4 && !mqttClient.disconnected(); i++) {
-            mqttClient.loop();
-            yield();
-        }
+    _shutdownResult = Esp8266BaseMQTTShutdownResult::IN_PROGRESS;
+    _shutdownDeadline = millis() + timeoutMs;
+    _shutdownPacketId = mqttClient.publish(topic, 1, true, payload, length);
+    if (_shutdownPacketId == 0) {
+        _finishShutdown(Esp8266BaseMQTTShutdownResult::PUBLISH_FAILED);
+        return false;
     }
-    bool released = mqttClient.disconnected();
-    ESP8266BASE_LOG_I("MQTT", "ota_pause result=%s heap=%u max=%u", released ? "ready" : "failed",
-                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
-    return released;
+    _state = Esp8266BaseMQTTState::SHUTDOWN_WAIT_ACK;
+    ESP8266BASE_LOG_I("MQTT", "shutdown_started packet=%u timeout_ms=%lu",
+                      (unsigned)_shutdownPacketId, (unsigned long)timeoutMs);
+    return true;
 }
 
-void Esp8266BaseMQTT::resumeAfterOTAFailure() {
-    if (!_otaPaused) return;
-    _otaPaused = false;
+bool Esp8266BaseMQTT::beginShutdown(const char* topic, const char* payload,
+                                    uint32_t timeoutMs) {
+    if (!payload) {
+        _shutdownResult = Esp8266BaseMQTTShutdownResult::INVALID_ARGUMENT;
+        return false;
+    }
+    return beginShutdown(topic, reinterpret_cast<const uint8_t*>(payload), strlen(payload), timeoutMs);
+}
+
+Esp8266BaseMQTTShutdownResult Esp8266BaseMQTT::shutdownResult() { return _shutdownResult; }
+
+const char* Esp8266BaseMQTT::shutdownResultName() {
+    switch (_shutdownResult) {
+        case Esp8266BaseMQTTShutdownResult::NONE: return "none";
+        case Esp8266BaseMQTTShutdownResult::IN_PROGRESS: return "in_progress";
+        case Esp8266BaseMQTTShutdownResult::SUCCESS: return "success";
+        case Esp8266BaseMQTTShutdownResult::NOT_CONNECTED: return "not_connected";
+        case Esp8266BaseMQTTShutdownResult::INVALID_ARGUMENT: return "invalid_argument";
+        case Esp8266BaseMQTTShutdownResult::PUBLISH_FAILED: return "publish_failed";
+        case Esp8266BaseMQTTShutdownResult::CONNECTION_LOST: return "connection_lost";
+        case Esp8266BaseMQTTShutdownResult::PUBACK_TIMEOUT: return "puback_timeout";
+        case Esp8266BaseMQTTShutdownResult::DISCONNECT_FAILED: return "disconnect_failed";
+        case Esp8266BaseMQTTShutdownResult::DISCONNECT_TIMEOUT: return "disconnect_timeout";
+        default: return "unknown";
+    }
+}
+
+bool Esp8266BaseMQTT::shutdownSucceeded() {
+    return _shutdownActive && _state == Esp8266BaseMQTTState::PAUSED &&
+           _shutdownResult == Esp8266BaseMQTTShutdownResult::SUCCESS;
+}
+
+bool Esp8266BaseMQTT::shutdownPaused() {
+    return _shutdownActive;
+}
+
+void Esp8266BaseMQTT::_startGracefulDisconnect() {
+    _state = Esp8266BaseMQTTState::SHUTDOWN_DISCONNECTING;
+    _shutdownDeadline = millis() + _shutdownTimeout;
+    if (mqttClient.disconnected()) {
+        _finishShutdown(_shutdownResult == Esp8266BaseMQTTShutdownResult::IN_PROGRESS
+                            ? Esp8266BaseMQTTShutdownResult::CONNECTION_LOST
+                            : _shutdownResult);
+        return;
+    }
+    if (!mqttClient.disconnect(false)) {
+        _finishShutdown(Esp8266BaseMQTTShutdownResult::DISCONNECT_FAILED);
+    }
+}
+
+void Esp8266BaseMQTT::_finishShutdown(Esp8266BaseMQTTShutdownResult result) {
+    _shutdownResult = result;
+    _shutdownPacketId = 0;
+    _state = Esp8266BaseMQTTState::PAUSED;
+    ESP8266BASE_LOG_I("MQTT", "shutdown_finished result=%u transport=%s reconnect=no",
+                      (unsigned)_shutdownResult,
+                      mqttClient.disconnected() ? "released" : "kept");
+}
+
+void Esp8266BaseMQTT::_handleShutdown() {
+    if (_state == Esp8266BaseMQTTState::PAUSED) {
+        // 超时结果已经对调用方终结，但若底层仍在释放 TLS，继续低扰动推进。
+        if (!mqttClient.disconnected()) mqttClient.loop();
+        return;
+    }
+    mqttClient.loop();
+    if (_state == Esp8266BaseMQTTState::PAUSED) return;
+
+    if (_state == Esp8266BaseMQTTState::SHUTDOWN_WAIT_ACK &&
+        _isDue(millis(), _shutdownDeadline)) {
+        // 上游没有按 packetId 删除 API；失败恢复前清空 outbox，避免未确认的
+        // 最终消息在 resume 后迟到并改写 retained availability。
+        mqttClient.clearQueue(true);
+        _finishShutdown(Esp8266BaseMQTTShutdownResult::PUBACK_TIMEOUT);
+        return;
+    }
+    if (_state == Esp8266BaseMQTTState::SHUTDOWN_DISCONNECTING) {
+        if (mqttClient.disconnected()) {
+            _finishShutdown(_shutdownResult == Esp8266BaseMQTTShutdownResult::IN_PROGRESS
+                                ? Esp8266BaseMQTTShutdownResult::CONNECTION_LOST
+                                : _shutdownResult);
+        } else if (_isDue(millis(), _shutdownDeadline)) {
+            _finishShutdown(Esp8266BaseMQTTShutdownResult::DISCONNECT_TIMEOUT);
+        }
+    }
+}
+
+void Esp8266BaseMQTT::resumeAfterShutdown() {
+    if (!_shutdownActive) return;
+    _shutdownActive = false;
+    _shutdownPacketId = 0;
     _retryAt = millis();
     _retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
     _state = Esp8266BaseWiFi::isConnected() ? Esp8266BaseMQTTState::WAITING_TIME
                                              : Esp8266BaseMQTTState::WAITING_WIFI;
-    ESP8266BASE_LOG_I("MQTT", "ota_failure_recovery reconnect_allowed=yes");
+    ESP8266BASE_LOG_I("MQTT", "shutdown_resume result=%u reconnect=yes",
+                      (unsigned)_shutdownResult);
+}
+
+bool Esp8266BaseMQTT::pauseForOTA() {
+    if (!_configured || !_begun) return true;
+    if (!_shutdownActive) {
+        ESP8266BASE_LOG_E("MQTT", "ota_pause result=not_started");
+        return false;
+    }
+    while (_state != Esp8266BaseMQTTState::PAUSED) {
+        _handleShutdown();
+        yield();
+    }
+    bool ready = shutdownSucceeded() && mqttClient.disconnected();
+    ESP8266BASE_LOG_I("MQTT", "ota_pause ready=%s result=%u heap=%u max=%u",
+                      ready ? "yes" : "no", (unsigned)_shutdownResult,
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
+    return ready;
+}
+
+void Esp8266BaseMQTT::resumeAfterOTAFailure() {
+    resumeAfterShutdown();
 }
 
 void Esp8266BaseMQTT::keepPausedAfterOTASuccess() {
     if (!_configured || !_begun) return;
-    _otaPaused = true;
-    _state = Esp8266BaseMQTTState::PAUSED_OTA;
+    _shutdownActive = true;
+    _state = Esp8266BaseMQTTState::PAUSED;
     ESP8266BASE_LOG_I("MQTT", "ota_success reconnect_allowed=no action=reboot");
 }
 
@@ -428,8 +556,10 @@ void Esp8266BaseMQTT::_disconnectForGate(Esp8266BaseMQTTState waitingState) {
 }
 
 void Esp8266BaseMQTT::_onConnect(bool sessionPresent) {
-    if (_otaPaused) {
-        mqttClient.disconnect(true);
+    if (_shutdownActive) {
+        // beginShutdown() 在未连接/建连中会形成 NOT_CONNECTED 暂停；若迟到的
+        // CONNACK 随后到达，保持传输暂停，不能在没有最终 PUBACK 时发送 DISCONNECT。
+        _state = Esp8266BaseMQTTState::PAUSED;
         return;
     }
     _state = Esp8266BaseMQTTState::CONNECTED;
@@ -462,18 +592,26 @@ void Esp8266BaseMQTT::_onDisconnect(uint8_t reason) {
                               (unsigned)discardedPackets);
         }
     }
-    if (_disconnectedCallback) _disconnectedCallback(_lastReason);
-    if (_otaPaused) {
-        _state = Esp8266BaseMQTTState::PAUSED_OTA;
-    } else {
-        _scheduleRetry();
+    const bool controlledShutdown = _shutdownActive;
+    if (controlledShutdown) {
+        Esp8266BaseMQTTShutdownResult result = _shutdownResult;
+        if (_state == Esp8266BaseMQTTState::SHUTDOWN_DISCONNECTING &&
+            result == Esp8266BaseMQTTShutdownResult::IN_PROGRESS &&
+            _lastReason == Esp8266BaseMQTTDisconnectReason::USER_OK) {
+            result = Esp8266BaseMQTTShutdownResult::SUCCESS;
+        } else if (result == Esp8266BaseMQTTShutdownResult::IN_PROGRESS) {
+            result = Esp8266BaseMQTTShutdownResult::CONNECTION_LOST;
+        }
+        _finishShutdown(result);
     }
+    if (_disconnectedCallback) _disconnectedCallback(_lastReason);
+    if (!controlledShutdown) _scheduleRetry();
 }
 
 void Esp8266BaseMQTT::_onMessage(uint8_t qos, bool dup, bool retain, uint16_t packetId,
                                  const char* topic, const uint8_t* payload,
                                  size_t len, size_t index, size_t total) {
-    if (_otaPaused || !_messageCallback) return;
+    if (_shutdownActive || !_messageCallback) return;
     _messageCallback(qos, dup, retain, packetId, topic, payload, len, index, total);
 }
 
@@ -496,6 +634,15 @@ void Esp8266BaseMQTT::_onSubscribeAck(uint16_t packetId, const uint8_t* returnCo
 
 void Esp8266BaseMQTT::_onPublishAck(uint16_t packetId) {
     ESP8266BASE_LOG_I("MQTT", "publish_ack packet_id=%u", (unsigned)packetId);
+    if (_shutdownActive && _state == Esp8266BaseMQTTState::SHUTDOWN_WAIT_ACK) {
+        if (packetId == _shutdownPacketId) {
+            _shutdownPacketId = 0;
+            _startGracefulDisconnect();
+        } else {
+            ESP8266BASE_LOG_W("MQTT", "shutdown_ack_ignored got=%u expected=%u",
+                              (unsigned)packetId, (unsigned)_shutdownPacketId);
+        }
+    }
     if (_publishAckCallback) _publishAckCallback(packetId);
 }
 
@@ -512,6 +659,11 @@ void Esp8266BaseMQTT::_onClientError(uint16_t packetId, uint8_t error) {
     }
     ESP8266BASE_LOG_E("MQTT", "client_error packet_id=%u error=%u name=%s",
                       (unsigned)packetId, (unsigned)mapped, name);
+    if (_shutdownActive && _state == Esp8266BaseMQTTState::SHUTDOWN_WAIT_ACK &&
+        packetId == _shutdownPacketId && mapped != Esp8266BaseMQTTClientError::SUCCESS) {
+        mqttClient.clearQueue(true);
+        _finishShutdown(Esp8266BaseMQTTShutdownResult::PUBLISH_FAILED);
+    }
     if (_clientErrorCallback) _clientErrorCallback(packetId, mapped);
 }
 

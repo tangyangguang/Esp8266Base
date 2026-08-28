@@ -26,7 +26,8 @@ enum class Esp8266BaseOTAFailure : uint8_t {
     MQTT_PAUSE_FAILED
 };
 
-// prepare 可把拒绝原因写入 reason（含结尾 \0 的容量为 reasonLen）。
+// prepare 可把拒绝原因写入 reason（含结尾 \0 的容量为 reasonLen）。启用 MQTT 时，
+// MQTT_TERMINAL 业务须在 prepare 中完成安全停机并调用 Esp8266BaseMQTT::beginShutdown()。
 typedef bool (*Esp8266BaseOTAPrepareCallback)(char* reason, size_t reasonLen);
 typedef void (*Esp8266BaseOTAFailureCallback)(Esp8266BaseOTAFailure failure);
 typedef void (*Esp8266BaseOTASuccessCallback)();

@@ -7,6 +7,9 @@
 static const char MQTT_HOST[] = "mqtt.example.invalid";
 static const char MQTT_CLIENT_ID[] = "replace-me-terminal";
 static const char MQTT_SUBSCRIBE_TOPIC[] = "esp8266base/example";
+static const char MQTT_AVAILABILITY_TOPIC[] = "esp8266base/example/availability";
+static const char MQTT_LWT_PAYLOAD[] = "unexpected_disconnect";
+static const char MQTT_SHUTDOWN_PAYLOAD[] = "shutdown";
 
 // DigiCert Global Root G2 是公开 trust anchor，不是设备凭据；保存在 Flash。
 static const char MQTT_ROOT_CA[] PROGMEM = R"CERT(-----BEGIN CERTIFICATE-----
@@ -82,6 +85,26 @@ static void onMqttMessage(uint8_t qos, bool dup, bool retain, uint16_t packetId,
                       (unsigned)index, (unsigned)len, (unsigned)total);
 }
 
+static bool onOtaPrepare(char* reason, size_t reasonLen) {
+    // 真实业务可在这里先让执行器进入安全状态，再构造自己的 availability payload。
+    // 基础库不解析 topic 或 payload，只确认这条 retained QoS1 消息的 PUBACK。
+    if (Esp8266BaseMQTT::beginShutdown(MQTT_AVAILABILITY_TOPIC,
+                                       MQTT_SHUTDOWN_PAYLOAD)) {
+        return true;
+    }
+    if (reason && reasonLen > 0) {
+        strncpy(reason, "MQTT controlled shutdown failed", reasonLen - 1);
+        reason[reasonLen - 1] = '\0';
+    }
+    return false;
+}
+
+static void onOtaFailure(Esp8266BaseOTAFailure failure) {
+    // 回调前基础库已经显式恢复 MQTT 连接许可。
+    ESP8266BASE_LOG_E("App ", "ota_failed reason=%u mqtt_shutdown=%s",
+                      (unsigned)failure, Esp8266BaseMQTT::shutdownResultName());
+}
+
 void setup() {
     Serial.begin(115200);
     Esp8266Base::setFirmwareInfo("mqtt-terminal-example", "1.0.0");
@@ -93,9 +116,15 @@ void setup() {
     config.keepAliveSeconds = 30;
     config.cleanSession = true;
     config.trustAnchors = &mqttTrustAnchor;
+    config.willTopic = MQTT_AVAILABILITY_TOPIC;
+    config.willPayload = reinterpret_cast<const uint8_t*>(MQTT_LWT_PAYLOAD);
+    config.willPayloadLength = strlen(MQTT_LWT_PAYLOAD);
+    config.willQos = 1;
+    config.willRetain = true;
     Esp8266BaseMQTT::configure(config);
     Esp8266BaseMQTT::setCallbacks(onMqttConnected, onMqttDisconnected, onMqttMessage,
                                   onMqttSubscribeAck, onMqttPublishAck, onMqttClientError);
+    Esp8266BaseOTA::setLifecycleCallbacks(onOtaPrepare, onOtaFailure);
 
     Esp8266Base::begin();
 }

@@ -111,7 +111,7 @@ Config 正式配置写入必须使用安全策略：
 tools/test_all.sh
 ```
 
-`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、源码契约/顺序检查、wrap-safe due 与有界退避纯策略、OTA 上传脚本的 curl 新旧版本/失败语义回归、根项目和全部示例编译。它不动态验证 DNS/TLS、实际 MQTT 状态迁移、SUBACK/PUBACK 或设备端 OTA；这些仍需真机和真实测试 broker。
+`tools/test_all.sh` 不烧录、不访问串口、不要求 ESP12F 在线；它覆盖 `git diff --check`、源码契约/顺序检查、wrap-safe due、有界退避与受控下线转换向量、OTA 上传脚本的 curl 新旧版本/失败语义回归、根项目和全部示例编译。它不动态验证 DNS/TLS、真实 broker PUBACK/retained/LWT 最终顺序或设备端 OTA；这些仍需真机和真实测试 broker。
 
 硬件：
 

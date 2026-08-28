@@ -460,10 +460,11 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     mqtt_handle = mqtt_cpp[handle_start:handle_end]
     wifi_gate = mqtt_handle.index("!Esp8266BaseWiFi::isConnected()")
     ntp_gate = mqtt_handle.index("!Esp8266BaseNTP::isSynced()")
-    client_loop = mqtt_handle.index("mqttClient.loop()")
+    shutdown_gate = mqtt_handle.index("if (_shutdownActive)")
+    client_loop = mqtt_handle.index("\n    mqttClient.loop();", ntp_gate)
     connect_gate = mqtt_handle.index("if (!_connectAttemptsEnabled)")
     connect_call = mqtt_handle.index("mqttClient.connect()")
-    if not (wifi_gate < ntp_gate < client_loop < connect_gate < connect_call):
+    if not (shutdown_gate < wifi_gate < ntp_gate < client_loop < connect_gate < connect_call):
         fail("MQTT handle must gate client loop/new connects on WiFi, NTP and business permission")
 
     base_handle_start = base_cpp.index("void Esp8266Base::handle()")
@@ -473,7 +474,8 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         fail("Web handle must run before potentially blocking MQTT connect work")
 
     for state in ["UNCONFIGURED", "WAITING_WIFI", "WAITING_TIME", "BACKOFF",
-                  "CONNECTING", "CONNECTED", "PAUSED_OTA"]:
+                  "CONNECTING", "CONNECTED", "SHUTDOWN_WAIT_ACK",
+                  "SHUTDOWN_DISCONNECTING", "PAUSED"]:
         require_token(mqtt_h, state, f"MQTT state {state}")
     require_token(mqtt_cpp, "if (_retryDelay < ESP8266BASE_MQTT_RETRY_MAX_MS)", "bounded backoff")
     require_token(mqtt_cpp, "_retryDelay * 2UL", "exponential backoff")
@@ -493,7 +495,7 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         fail("MQTT retry due policy is not uint32 wrap-safe")
     require_token(mqtt_cpp, "if (_connectedCallback) _connectedCallback(sessionPresent);",
                   "business resubscribe callback on every connect")
-    require_token(mqtt_cpp, "ota_pause result=%s heap=%u max=%u",
+    require_token(mqtt_cpp, "ota_pause ready=%s result=%u heap=%u max=%u",
                   "OTA post-TLS-release heap diagnostic")
     require_token(mqtt_h, "static bool requestReconnect();", "deferred reconnect public API")
     require_token(mqtt_h, "static bool markConnectionReady();", "application ready public API")
@@ -527,7 +529,7 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     ready_start = mqtt_cpp.index("bool Esp8266BaseMQTT::markConnectionReady()")
     ready_end = mqtt_cpp.index("bool Esp8266BaseMQTT::connected()", ready_start)
     ready_body = mqtt_cpp[ready_start:ready_end]
-    for token in ["_configured", "_begun", "_otaPaused", "_reconnectRequested",
+    for token in ["_configured", "_begun", "_shutdownActive", "_reconnectRequested",
                   "mqttClient.connected()", "_retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;"]:
         require_token(ready_body, token, f"application ready boundary {token}")
     on_connect_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onConnect")
@@ -559,6 +561,73 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         fail("clean-session disconnect must discard queued session data before business reconnect")
     require_token(disconnect_body, "session_queue_discarded clean_session=yes packets=%u",
                   "clean-session queue discard diagnostic")
+
+    # Controlled shutdown is one fixed contract: retained QoS1 enqueue, exact PUBACK,
+    # graceful DISCONNECT, then a paused terminal state until explicit resume.
+    begin_shutdown = mqtt_cpp[mqtt_cpp.index("bool Esp8266BaseMQTT::beginShutdown("):
+                              mqtt_cpp.index("Esp8266BaseMQTTShutdownResult Esp8266BaseMQTT::shutdownResult")]
+    for token in ["mqttClient.publish(topic, 1, true, payload, length)",
+                  "Esp8266BaseMQTTShutdownResult::PUBLISH_FAILED",
+                  "_finishShutdown(Esp8266BaseMQTTShutdownResult::PUBLISH_FAILED)",
+                  "_shutdownActive = true;"]:
+        require_token(begin_shutdown, token, f"controlled shutdown start {token}")
+    graceful_start = mqtt_cpp.index("void Esp8266BaseMQTT::_startGracefulDisconnect()")
+    graceful_end = mqtt_cpp.index("void Esp8266BaseMQTT::_finishShutdown", graceful_start)
+    graceful_body = mqtt_cpp[graceful_start:graceful_end]
+    require_token(graceful_body, "mqttClient.disconnect(false)", "normal MQTT DISCONNECT")
+    if "disconnect(true)" in graceful_body:
+        fail("controlled shutdown must never force disconnect and risk LWT overwrite")
+    publish_ack_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onPublishAck")
+    publish_ack_end = mqtt_cpp.index("void Esp8266BaseMQTT::_onClientError", publish_ack_start)
+    publish_ack_body = mqtt_cpp[publish_ack_start:publish_ack_end]
+    exact_ack = publish_ack_body.index("packetId == _shutdownPacketId")
+    graceful_after_ack = publish_ack_body.index("_startGracefulDisconnect();", exact_ack)
+    ignored_ack = publish_ack_body.index("shutdown_ack_ignored", graceful_after_ack)
+    if not exact_ack < graceful_after_ack < ignored_ack:
+        fail("only the exact shutdown PUBACK may advance graceful disconnect")
+    shutdown_handle_start = mqtt_cpp.index("void Esp8266BaseMQTT::_handleShutdown()")
+    shutdown_handle_end = mqtt_cpp.index("void Esp8266BaseMQTT::resumeAfterShutdown", shutdown_handle_start)
+    shutdown_handle = mqtt_cpp[shutdown_handle_start:shutdown_handle_end]
+    for token in ["PUBACK_TIMEOUT", "DISCONNECT_TIMEOUT"]:
+        require_token(shutdown_handle, token, f"bounded shutdown failure {token}")
+    timeout_branch = shutdown_handle[shutdown_handle.index("SHUTDOWN_WAIT_ACK"):]
+    if timeout_branch.index("mqttClient.clearQueue(true)") > timeout_branch.index("PUBACK_TIMEOUT"):
+        fail("PUBACK timeout must discard the stale final packet before recovery")
+    resume_start = mqtt_cpp.index("void Esp8266BaseMQTT::resumeAfterShutdown()")
+    resume_end = mqtt_cpp.index("bool Esp8266BaseMQTT::pauseForOTA()", resume_start)
+    resume_body = mqtt_cpp[resume_start:resume_end]
+    require_token(resume_body, "_shutdownActive = false;", "explicit shutdown recovery")
+    require_token(resume_body, "reconnect=yes", "explicit reconnect recovery diagnostic")
+    for blocked_api in ["uint16_t Esp8266BaseMQTT::publish", "uint16_t Esp8266BaseMQTT::subscribe",
+                        "bool Esp8266BaseMQTT::requestReconnect", "bool Esp8266BaseMQTT::markConnectionReady"]:
+        start = mqtt_cpp.index(blocked_api)
+        end = mqtt_cpp.index("\n}", start)
+        require_token(mqtt_cpp[start:end], "_shutdownActive", f"paused API gate {blocked_api}")
+
+    # Executable transition vectors cover success, mismatched ACK, enqueue failure,
+    # ACK timeout, normal disconnect completion, and explicit recovery.
+    def shutdown_vector(enqueued: bool, acks: list[int], expected: int,
+                        ack_timeout: bool, disconnect_reason: str) -> tuple[str, bool, bool]:
+        paused = True
+        if not enqueued:
+            return ("publish_failed", paused, False)
+        matched = any(packet_id == expected for packet_id in acks)
+        if not matched:
+            return ("puback_timeout" if ack_timeout else "in_progress", paused, False)
+        if disconnect_reason == "user_ok":
+            return ("success", paused, True)
+        return ("connection_lost", paused, False)
+
+    vectors = [
+        (shutdown_vector(True, [41], 41, False, "user_ok"), ("success", True, True)),
+        (shutdown_vector(True, [40], 41, False, "none"), ("in_progress", True, False)),
+        (shutdown_vector(False, [], 0, False, "none"), ("publish_failed", True, False)),
+        (shutdown_vector(True, [], 41, True, "none"), ("puback_timeout", True, False)),
+        (shutdown_vector(True, [41], 41, False, "tcp_lost"), ("connection_lost", True, False)),
+    ]
+    for actual, expected in vectors:
+        if actual != expected:
+            fail(f"controlled shutdown vector mismatch: {actual} != {expected}")
     require_token(mqtt_cpp, "missing_required_config", "missing MQTT config failure")
     require_token(mqtt_cpp, "config.password == nullptr || config.password[0] == '\\0' ||",
                   "password requires username")
