@@ -13,6 +13,12 @@
 #define ESP8266BASE_PROFILE_MQTT_TERMINAL 0
 #endif
 
+// MQTT_TERMINAL 在 STA/重连状态下的根路径跳转目标。业务可以在构建期
+// 指向自己的只读状态页；AP 配网仍始终跳转 /wifi。
+#ifndef ESP8266BASE_TERMINAL_HOME_PATH
+#define ESP8266BASE_TERMINAL_HOME_PATH "/health"
+#endif
+
 #if ESP8266BASE_PROFILE_MQTT_TERMINAL != 0 && ESP8266BASE_PROFILE_MQTT_TERMINAL != 1
 #error "ESP8266BASE_PROFILE_MQTT_TERMINAL must be 0 or 1"
 #endif

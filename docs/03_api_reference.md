@@ -506,7 +506,7 @@ static bool isRunning();
 
 页面式路由和未知路径使用 Basic Auth 挑战；未知路径认证通过后返回 404。`/api/system/hostname` 未认证时返回 JSON 401，不发送 `WWW-Authenticate`，调用方需要显式提供 `Authorization` header。`/health` 保持免认证。
 
-`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 时只注册极小 `GET /` 引导、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`POST /ota` 和显式容量的应用路由。AP_CONFIG 下 `/` 为 `303 /wifi`，STA 下为 `303 /health`。完整系统首页、Logs、System、hostname、reboot 与 `GET /ota` 均不注册；容量为 0 时不保留对应应用路由数组。
+`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 时只注册极小 `GET /` 引导、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`POST /ota` 和显式容量的应用路由。AP_CONFIG 下 `/` 为 `303 /wifi`，STA 下为 `303 ESP8266BASE_TERMINAL_HOME_PATH`（默认 `/health`）。完整系统首页、Logs、System、hostname、reboot 与 `GET /ota` 均不注册；容量为 0 时不保留对应应用路由数组。
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
@@ -863,6 +863,7 @@ void loop() {
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
 | `ESP8266BASE_PROFILE_MQTT_TERMINAL` | `0` | 正式 MQTT 智能终端模式；要求 Web/OTA/NTP/WDT/MQTT |
+| `ESP8266BASE_TERMINAL_HOME_PATH` | `"/health"` | MQTT_TERMINAL 的 STA 根路径跳转目标；AP 配网仍固定跳转 `/wifi` |
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译通用 TLS MQTT 模块；要求 NTP |
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 初始退避 ms |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 退避上限 ms |

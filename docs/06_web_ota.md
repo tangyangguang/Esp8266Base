@@ -43,7 +43,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
 | `/health` | GET | 无 | JSON 健康信息 |
 
-`MQTT_TERMINAL`（`ESP8266BASE_PROFILE_MQTT_TERMINAL=1`）只注册 `GET /`、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`POST /ota` 和显式容量的业务页面/API。`GET /` 是极小引导：AP_CONFIG 时 `303 /wifi`，STA 连接或重连时 `303 /health`，不会恢复完整首页。它不注册 `/esp8266base`、`/logs`、`/system`、hostname、`/reboot` 和 `GET /ota`，也不输出完整系统导航。
+`MQTT_TERMINAL`（`ESP8266BASE_PROFILE_MQTT_TERMINAL=1`）只注册 `GET /`、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`POST /ota` 和显式容量的业务页面/API。`GET /` 是极小引导：AP_CONFIG 时 `303 /wifi`，STA 连接或重连时 `303 ESP8266BASE_TERMINAL_HOME_PATH`（默认 `/health`），不会恢复完整首页。它不注册 `/esp8266base`、`/logs`、`/system`、hostname、`/reboot` 和 `GET /ota`，也不输出完整系统导航。
 
 不需要本地业务页面/API 时把容量设为 0，对应数组也不会保留：
 

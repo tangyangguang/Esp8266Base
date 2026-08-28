@@ -121,7 +121,7 @@ tools/test_all.sh
 - Web 首页可访问。
 - OTA 页面可上传。
 - NTP 输出 `time_synchronized` 和 `time_mapping`。
-- MQTT_TERMINAL 在无凭据 AP 下 `/` 跳转 `/wifi`，STA 下跳转 `/health`。
+- MQTT_TERMINAL 在无凭据 AP 下 `/` 跳转 `/wifi`，STA 下跳转 `ESP8266BASE_TERMINAL_HOME_PATH`（默认 `/health`）。
 - 真机记录 MQTT 未连接、TLS 尝试、已连接和断开后的 free heap/max block；验证路由器断网恢复和长时间运行。
 - `/logs` 显示 4 段文件状态。
 - System 页面可切换 FileLog 模式；System 页面可通过 `/logs/clear` 清空日志。

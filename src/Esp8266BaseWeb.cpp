@@ -1523,7 +1523,7 @@ void Esp8266BaseWeb::_handleTerminalRoot() {
     if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG) {
         _redirect("/wifi");
     } else {
-        _redirect("/health");
+        _redirect(ESP8266BASE_TERMINAL_HOME_PATH);
     }
 }
 #endif

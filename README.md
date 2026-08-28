@@ -168,6 +168,7 @@ build_flags =
 | `ESP8266BASE_CFG_READ_AUDIT_LEVEL` | `0` | 配置读审计等级，默认 DEBUG |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
 | `ESP8266BASE_PROFILE_MQTT_TERMINAL` | `0` | 正式 MQTT 智能终端模式；要求 Web/OTA/NTP/WDT/MQTT 全部启用 |
+| `ESP8266BASE_TERMINAL_HOME_PATH` | `"/health"` | MQTT_TERMINAL 的 STA 根路径跳转目标；AP 配网仍固定跳转 `/wifi` |
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译 `Esp8266BaseMQTT` 可选模块；要求 NTP |
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 首次退避间隔 |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 指数退避上限 |
@@ -201,7 +202,7 @@ Hostname 策略：默认 hostname 来自 `ESP8266BASE_DEFAULT_HOSTNAME`；设备
 
 OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
 
-正式智能终端设置 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1`。它保留 `GET /` 极小入口、WiFi/Auth、Health、`POST /ota` 与显式容量的应用路由；不编译完整首页、Logs、System、hostname、reboot、导航或 `GET /ota`。AP 配网时 `/` 返回 `303 /wifi`，STA 时返回 `303 /health`。应用页/API 容量设为 `0` 时不保留对应路由数组。
+正式智能终端设置 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1`。它保留 `GET /` 极小入口、WiFi/Auth、Health、`POST /ota` 与显式容量的应用路由；不编译完整首页、Logs、System、hostname、reboot、导航或 `GET /ota`。AP 配网时 `/` 返回 `303 /wifi`，STA 时返回 `303 ESP8266BASE_TERMINAL_HOME_PATH`（默认 `/health`）。应用页/API 容量设为 `0` 时不保留对应路由数组。
 
 MQTT 连接配置必须在 `Esp8266Base::begin()` 前通过 `Esp8266BaseMQTT::configure()` 提供。host、clientId、用户名/密码和 LWT topic 会复制到固定缓冲；password 非空时 username 必须非空，LWT payload 非空时 willTopic 必须非空。`BearSSL::X509List` trust anchor 与可选 LWT payload 由业务长期持有并覆盖整个 MQTT 生命周期。配置可来自业务的私有构建配置或 `Esp8266BaseConfig`，库不新增 MQTT 持久化 key，也不接受不安全 TLS。不要把真实 broker 凭据写入仓库。
 

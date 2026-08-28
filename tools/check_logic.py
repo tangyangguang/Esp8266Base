@@ -403,6 +403,8 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     config_cpp = read("src/Esp8266BaseConfig.cpp")
 
     require_token(options_h, "#define ESP8266BASE_PROFILE_MQTT_TERMINAL 0", "MQTT_TERMINAL default")
+    require_token(options_h, '#define ESP8266BASE_TERMINAL_HOME_PATH "/health"',
+                  "MQTT_TERMINAL default home")
     require_token(options_h, 'ESP8266BASE_PROFILE_MQTT_TERMINAL must be 0 or 1', "profile value guard")
     for dependency in ["ESP8266BASE_USE_WEB", "ESP8266BASE_USE_OTA", "ESP8266BASE_USE_NTP",
                        "ESP8266BASE_USE_WATCHDOG", "ESP8266BASE_USE_MQTT"]:
@@ -428,7 +430,8 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     root_body = web_cpp[root_start:root_end]
     require_token(root_body, 'Esp8266BaseWiFiState::AP_CONFIG', "AP root state check")
     require_token(root_body, '_redirect("/wifi")', "AP root WiFi redirect")
-    require_token(root_body, '_redirect("/health")', "STA root health redirect")
+    require_token(root_body, '_redirect(ESP8266BASE_TERMINAL_HOME_PATH)',
+                  "STA configurable terminal home redirect")
     full_guard_start = begin_body.index("#if !ESP8266BASE_PROFILE_MQTT_TERMINAL")
     full_guard_end = begin_body.index("#endif", full_guard_start)
     full_routes = begin_body[full_guard_start:full_guard_end]

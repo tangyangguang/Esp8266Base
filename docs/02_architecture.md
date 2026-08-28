@@ -163,7 +163,7 @@ ESP8266WebServer（端口 80）
 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 只注册以下基础路由：
 
 ```text
-GET       /           （AP_CONFIG 时 303 /wifi；STA 时 303 /health）
+GET       /           （AP_CONFIG 时 303 /wifi；STA 时 303 ESP8266BASE_TERMINAL_HOME_PATH，默认 /health）
 GET/POST /wifi
 GET/POST /auth
 GET       /health

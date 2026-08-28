@@ -138,6 +138,7 @@ build_flags =
 | `ESP8266BASE_DEFAULT_HOSTNAME` | `"esp8266base"` | 编译期默认 hostname，合法 `eb_hostname` 优先 |
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页和 Web 扩展 API |
 | `ESP8266BASE_PROFILE_MQTT_TERMINAL` | `0` | 正式 MQTT 智能终端模式；要求 Web/OTA/NTP/WDT/MQTT |
+| `ESP8266BASE_TERMINAL_HOME_PATH` | `"/health"` | MQTT_TERMINAL 的 STA 根路径跳转目标；AP 配网仍固定跳转 `/wifi` |
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译可选 TLS MQTT 模块 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
