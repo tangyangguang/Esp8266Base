@@ -79,6 +79,8 @@ void loop() {
 }
 ```
 
+统一调度会先处理已经到达的 Web 请求，再推进 MQTT 状态机，避免本轮本地请求先等待 ESP8266 的同步 DNS/TCP/TLS 建连。
+
 ---
 
 ## 2. Esp8266BaseLog — 日志

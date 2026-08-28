@@ -391,6 +391,7 @@ def test_watchdog_and_ota_failure_contract() -> None:
 
 def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     options_h = read("src/Esp8266BaseOptions.h")
+    base_cpp = read("src/Esp8266Base.cpp")
     mqtt_h = read("src/Esp8266BaseMQTT.h")
     mqtt_cpp = read("src/Esp8266BaseMQTT.cpp")
     web_cpp = read("src/Esp8266BaseWeb.cpp")
@@ -454,6 +455,12 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     connect_call = mqtt_handle.index("mqttClient.connect()")
     if not (wifi_gate < ntp_gate < client_loop < connect_gate < connect_call):
         fail("MQTT handle must gate client loop/new connects on WiFi, NTP and business permission")
+
+    base_handle_start = base_cpp.index("void Esp8266Base::handle()")
+    base_handle_end = base_cpp.index("void Esp8266Base::logDiagnostics()", base_handle_start)
+    base_handle = base_cpp[base_handle_start:base_handle_end]
+    if base_handle.index("Esp8266BaseWeb::handle()") > base_handle.index("Esp8266BaseMQTT::handle()"):
+        fail("Web handle must run before potentially blocking MQTT connect work")
 
     for state in ["UNCONFIGURED", "WAITING_WIFI", "WAITING_TIME", "BACKOFF",
                   "CONNECTING", "CONNECTED", "PAUSED_OTA"]:

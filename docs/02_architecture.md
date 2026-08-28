@@ -97,13 +97,13 @@ Esp8266Base（主入口）
                                        WiFi 掉线时：重置 mDNS 状态，等待重连后重启
 6. Esp8266BaseNTP::handle()         — `ESP8266BASE_USE_NTP=1` 时
 7. Esp8266BaseMDNS::handle()        — `ESP8266BASE_USE_MDNS=1` 时
-8. Esp8266BaseMQTT::handle()        — `ESP8266BASE_USE_MQTT=1` 时；WiFi/NTP 门控后推进连接
-9. Esp8266BaseWeb::handle()         — `ESP8266BASE_USE_WEB=1` 时，请求前后喂库级 WDT
+8. Esp8266BaseWeb::handle()         — `ESP8266BASE_USE_WEB=1` 时，请求前后喂库级 WDT
+9. Esp8266BaseMQTT::handle()        — `ESP8266BASE_USE_MQTT=1` 时；WiFi/NTP 门控后推进连接
 10. Esp8266BaseWatchdog::handle()   — `ESP8266BASE_USE_WATCHDOG=1` 时
    Esp8266BaseWatchdog::feed()      — 本轮完成后喂狗
 ```
 
-库自有状态机不得忙等或长阻塞。`espMqttClient` 的 MQTT 状态机分步推进，但 ESP8266 同步安全传输的 DNS/TCP/TLS connect 单次尝试可能阻塞到网络超时；有界退避保证失败后不会立即重试。
+库自有状态机不得忙等或长阻塞。Web 固定先于 MQTT 推进，使已经到达的本地请求不会先等待本轮 DNS/TCP/TLS 建连。`espMqttClient` 的 MQTT 状态机分步推进，但 ESP8266 同步安全传输的 connect 单次尝试仍可能阻塞到网络超时；有界退避保证失败后不会立即重试。
 
 ---
 

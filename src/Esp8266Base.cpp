@@ -255,18 +255,9 @@ void Esp8266Base::handle() {
 #endif
 
 
-    // 6. MQTT handle：NTP 本轮推进后再检查时间门控。
-#if ESP8266BASE_USE_MQTT
-#if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::feed();
-#endif
-    Esp8266BaseMQTT::handle();
-#if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::feed();
-#endif
-#endif
-
-    // 7. Web handle（server.handleClient()）
+    // 6. Web handle（server.handleClient()）
+    // Web must run before MQTT: a secure DNS/TCP/TLS connect attempt can block
+    // for seconds on ESP8266, while local control must remain responsive.
     // Feed around Web I/O so slow clients do not trip the library watchdog.
     // Do not pause/resume here: handle() runs every loop and Debug logs would flood serial.
 #if ESP8266BASE_USE_WEB
@@ -274,6 +265,17 @@ void Esp8266Base::handle() {
     Esp8266BaseWatchdog::feed();
 #endif
     Esp8266BaseWeb::handle();
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+#endif
+
+    // 7. MQTT handle：NTP 本轮推进后再检查时间门控。
+#if ESP8266BASE_USE_MQTT
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+    Esp8266BaseMQTT::handle();
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::feed();
 #endif
