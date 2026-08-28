@@ -200,6 +200,8 @@ struct AppRoute {
 
 MQTT 状态为 `UNCONFIGURED → WAITING_WIFI → WAITING_TIME → BACKOFF/CONNECTING → CONNECTED`。断线按 2s、4s、8s、16s、32s、60s 有界指数退避；WiFi 或 NTP 不就绪时回到门控状态。底层同步 BearSSL connect 在 ESP8266 上可能阻塞到单次网络超时，但外围不会忙循环。
 
+断线完成后，`cleanSession=true` 会先删除上一个会话仍在上游出站队列中的 QoS 包，再通知业务并安排下一次连接；旧连接周期证据不能进入新会话。`cleanSession=false` 不执行该删除，继续采用持久会话的重传语义。
+
 业务可用 `setConnectAttemptsEnabled(false)` 暂停后续 DNS/TCP/TLS 新建连接，以保护执行器的本地单调截止。门禁不拆除已建立会话，已连接客户端仍执行 `loop()`；恢复为 `true` 后沿既有退避时间继续。该接口只调整传输调度，不改变 MQTT 协议契约。
 
 实现文件内的 `Esp8266BaseMQTTInternal::DiagnosticSecureClient` 只继承 `espMqttClientSecure` 的 protected transport/state，在进入 `disconnectingTcp1`、transport 尚未 stop 时捕获 BearSSL 最后错误。第三方类型和 protected 实现不进入公共头；每次新连接前清空旧错误。SUBACK/PUBACK/PUBCOMP 和 client error 也只在实现文件适配为基础库稳定类型。

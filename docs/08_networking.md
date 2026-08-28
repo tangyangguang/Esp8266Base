@@ -165,6 +165,8 @@ log_timestamp_mode=absolute_datetime
 
 断线重试为 2s、4s、8s、16s、32s、60s，之后保持 60s。日志包含 `connect_attempt`、`connected`、`disconnected reason=`、`reconnect_scheduled` 以及 free heap/max block。TCP_DISCONNECTED 时若 BearSSL 存在错误，还会输出真实 `tls_code/tls_detail`；无 TLS 错误时不伪造。`lastTlsErrorCode()`/`lastTlsErrorText()` 提供只读诊断，`/health` 只含 code；新连接前清除旧值。
 
+当配置 `cleanSession=true`，断线完成后会在业务断线回调前清除上一个会话尚未确认的出站包，避免旧 QoS 证据跨到新连接周期，并释放对应队列内存；实际清除时记录 `session_queue_discarded`。`cleanSession=false` 保留上游持久会话重传行为。
+
 SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定 `uint8_t` code 数组；publish acknowledgement 回调在 QoS1 PUBACK 或 QoS2 PUBCOMP 后触发。`OUT_OF_MEMORY`、`MAX_RETRIES`、`MALFORMED_PARAMETER` 等 client error 会映射为基础库枚举、记录日志并交给业务。自动源码检查只验证绑定、顺序、映射和退避策略，不等于真实 broker ACL、SUBACK/PUBACK 或 TLS 握手验证。
 
 如果业务要求订阅确认后才算 ready，应在 SUBACK 不匹配、拒绝或其他应用握手失败时调用 `requestReconnect()`，成功完成订阅和初始证据后调用 `markConnectionReady()`。CONNACK 不重置退避；连续握手失败保持 2s→60s 有界指数退避。ready 后退避恢复初始值，之后普通断线从 2s 开始。异步 disconnect callback 与 `handle()` fallback 通过 `BACKOFF` 状态避免重复 schedule。

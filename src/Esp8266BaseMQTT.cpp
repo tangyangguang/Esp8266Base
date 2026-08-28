@@ -454,6 +454,14 @@ void Esp8266BaseMQTT::_onDisconnect(uint8_t reason) {
                           lastDisconnectReasonName(), (unsigned)reason,
                           (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
     }
+    if (_cleanSession) {
+        const size_t discardedPackets = mqttClient.queueSize();
+        mqttClient.clearQueue(true);
+        if (discardedPackets > 0) {
+            ESP8266BASE_LOG_I("MQTT", "session_queue_discarded clean_session=yes packets=%u",
+                              (unsigned)discardedPackets);
+        }
+    }
     if (_disconnectedCallback) _disconnectedCallback(_lastReason);
     if (_otaPaused) {
         _state = Esp8266BaseMQTTState::PAUSED_OTA;

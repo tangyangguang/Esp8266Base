@@ -71,9 +71,9 @@
 | `custom_web` | Web + mDNS + WDT | 40,740B | 396,124B |
 | `wifi_config_ota` | Web + OTA + NTP + mDNS + WDT | 44,276B | 421,784B |
 | `full_demo` | 完整 Web + OTA + NTP + mDNS + Sleep + WDT，MQTT 排除 | 45,928B | 429,644B |
-| `mqtt_terminal` | MQTT_TERMINAL 0+0 应用路由，含 MQTT 静态对象；构建期/尚未建连 | 45,136B | 509,261B |
+| `mqtt_terminal` | MQTT_TERMINAL 0+0 应用路由，含 MQTT 静态对象；构建期/尚未建连 | 45,252B | 509,465B |
 
-这些数值来自 PlatformIO 链接结果，只能证明静态 RAM/Flash 趋势。`MQTT_TERMINAL` 强制启用 MQTT，因此不存在“该模式但不含 MQTT 对象”的正式构建组合；无对象基线由 `basic_wifi` 给出。未连接、连接尝试、TLS 已连接和断开后的 free heap/max block 只能在真机测量，不能由 45,136B 静态 RAM 推算。TLS 诊断使用 96B 固定文本缓冲，不缩小通信缓冲。
+这些数值来自 PlatformIO 链接结果，只能证明静态 RAM/Flash 趋势。`MQTT_TERMINAL` 强制启用 MQTT，因此不存在“该模式但不含 MQTT 对象”的正式构建组合；无对象基线由 `basic_wifi` 给出。未连接、连接尝试、TLS 已连接和断开后的 free heap/max block 只能在真机测量，不能由 45,252B 静态 RAM 推算。TLS 诊断使用 96B 固定文本缓冲，不缩小通信缓冲。
 
 正式 `MQTT_TERMINAL` 构建定义 `EMC_MIN_FREE_MEMORY=4096`。该值是 `espMqttClient 1.7.3` 创建出站包前检查的最大连续堆块门槛，不是静态预留；若真实分配失败，SUBSCRIBE/PUBLISH 仍返回 0。未定义 `EMC_RX_BUFFER_SIZE` 或 `EMC_TX_BUFFER_SIZE`，MQTT 收发保持上游默认值；BearSSL 显式保持 4096B RX / 1024B TX。第三方会为证书解析、TLS 会话、callback 包装与出站 MQTT packet 动态分配，峰值和碎片必须真机记录。
 

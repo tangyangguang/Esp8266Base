@@ -528,8 +528,17 @@ def test_mqtt_terminal_and_ota_lifecycle_contract() -> None:
         fail("application readiness must restore initial ordinary-disconnect backoff")
     disconnect_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onDisconnect")
     disconnect_end = mqtt_cpp.index("void Esp8266BaseMQTT::_onMessage", disconnect_start)
-    require_token(mqtt_cpp[disconnect_start:disconnect_end], "_reconnectRequested = false;",
+    disconnect_body = mqtt_cpp[disconnect_start:disconnect_end]
+    require_token(disconnect_body, "_reconnectRequested = false;",
                   "completed transport release clears deferred request")
+    clean_session_guard = disconnect_body.index("if (_cleanSession)")
+    queue_size = disconnect_body.index("mqttClient.queueSize()", clean_session_guard)
+    clear_session_queue = disconnect_body.index("mqttClient.clearQueue(true)", queue_size)
+    business_disconnect = disconnect_body.index("if (_disconnectedCallback)", clear_session_queue)
+    if not clean_session_guard < queue_size < clear_session_queue < business_disconnect:
+        fail("clean-session disconnect must discard queued session data before business reconnect")
+    require_token(disconnect_body, "session_queue_discarded clean_session=yes packets=%u",
+                  "clean-session queue discard diagnostic")
     require_token(mqtt_cpp, "missing_required_config", "missing MQTT config failure")
     require_token(mqtt_cpp, "config.password == nullptr || config.password[0] == '\\0' ||",
                   "password requires username")
