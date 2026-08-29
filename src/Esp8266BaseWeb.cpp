@@ -48,6 +48,7 @@ uint8_t                  Esp8266BaseWeb::_pageCount = 0;
 uint8_t                  Esp8266BaseWeb::_apiCount  = 0;
 #endif
 bool                     Esp8266BaseWeb::_running   = false;
+uint32_t                 Esp8266BaseWeb::_lastActivityMs = 0;
 char                     Esp8266BaseWeb::_authUser[24] = ESP8266BASE_WEB_AUTH_USER;
 char                     Esp8266BaseWeb::_authPass[24] = ESP8266BASE_WEB_AUTH_PASS;
 char                     Esp8266BaseWeb::_deviceName[24] = "";
@@ -599,6 +600,7 @@ bool Esp8266BaseWeb::begin() {
     _server.onNotFound(_handleTerminalDispatch);
 #endif
 
+    _server.addHook(_heapGateHook);
     _server.begin();
     _running = true;
     ESP8266BASE_LOG_I("Web ", "web_server_started profile=%s auth_required=yes builtin_routes=%u app_pages_registered=%d/%d app_apis_registered=%d/%d",
@@ -831,6 +833,35 @@ bool Esp8266BaseWeb::checkAuth() {
     if (_server.authenticate(_authUser, _authPass)) return true;
     _server.requestAuthentication();
     return false;
+}
+
+ESP8266WebServer::ClientFuture Esp8266BaseWeb::_heapGateHook(
+    const String&, const String&, WiFiClient* client,
+    ESP8266WebServer::ContentTypeFunction) {
+    _lastActivityMs = millis();
+    const uint32_t freeHeap = ESP.getFreeHeap();
+    const uint32_t maxBlock = ESP.getMaxFreeBlockSize();
+    if (freeHeap >= ESP8266BASE_WEB_HEAP_GATE_FREE_BYTES &&
+        maxBlock >= ESP8266BASE_WEB_HEAP_GATE_BLOCK_BYTES) {
+        return ESP8266WebServer::CLIENT_REQUEST_CAN_CONTINUE;
+    }
+    ESP8266BASE_LOG_W("Web", "heap_gate_reject free_heap=%u max_block=%u action=503",
+                      (unsigned)freeHeap, (unsigned)maxBlock);
+    if (client) {
+        // 预解析阶段：直接写最小响应后要求关闭连接，不进入请求头解析。
+        client->setNoDelay(true);
+        client->print(F("HTTP/1.1 503 Service Unavailable\r\n"
+                        "Content-Type: text/plain\r\n"
+                        "Content-Length: 11\r\n"
+                        "Connection: close\r\n"
+                        "Cache-Control: no-store\r\n\r\nbusy retry"));
+        client->flush();
+    }
+    return ESP8266WebServer::CLIENT_MUST_STOP;
+}
+
+uint32_t Esp8266BaseWeb::lastActivityMs() {
+    return _lastActivityMs;
 }
 
 bool Esp8266BaseWeb::verifyAuth() {
@@ -1611,6 +1642,13 @@ void Esp8266BaseWeb::_handleTerminalRoot() {
 void Esp8266BaseWeb::_handleTerminalDispatch() {
     const String& uri = _server.uri();
     const HTTPMethod method = _server.method();
+    _markRequest();
+    // Browser icon probes: answer with no auth and no memory-heavy response.
+    if (method == HTTP_GET &&
+        (uri == "/favicon.ico" || uri.startsWith("/apple-touch-icon"))) {
+        _server.send(204, "image/x-icon", "");
+        return;
+    }
     if (uri == "/" && method == HTTP_GET) return _handleTerminalRoot();
     if (uri == "/wifi" && method == HTTP_GET) return _handleWiFiGet();
     if (uri == "/wifi" && method == HTTP_POST) return _handleWiFiPost();
@@ -1690,6 +1728,12 @@ void Esp8266BaseWeb::_handleHealth() {
 
 void Esp8266BaseWeb::_handleNotFound() {
     _markRequest();
+    const String& uri = _server.uri();
+    if (_server.method() == HTTP_GET &&
+        (uri == "/favicon.ico" || uri.startsWith("/apple-touch-icon"))) {
+        _server.send(204, "image/x-icon", "");
+        return;
+    }
     if (!checkAuth()) return;
     _server.send(404, "text/plain", "Not found");
 }

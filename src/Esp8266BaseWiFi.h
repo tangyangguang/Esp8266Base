@@ -72,8 +72,10 @@ public:
     // 当前 RSSI；仅 STA 已连接时有效
     static int rssi();
 
-    // 当前 STA MAC 地址，格式化到调用方缓冲
+    // 当前 STA MAC 地址，格式化到调用方缓冲（大写、带冒号，用于展示）
     static void macAddressTo(char* out, size_t len);
+    // 当前 STA MAC，12 位小写十六进制（无分隔符），用于拼设备唯一 ID
+    static void macAddressHex(char* out, size_t len);
 
     // 当前状态机状态
     static Esp8266BaseWiFiState state();

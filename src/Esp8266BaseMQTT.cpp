@@ -2,6 +2,9 @@
 #if ESP8266BASE_USE_MQTT
 
 #include "Esp8266BaseMQTT.h"
+#if ESP8266BASE_USE_WEB
+#include "Esp8266BaseWeb.h"
+#endif
 #include "Esp8266BaseLog.h"
 #include "Esp8266BaseNTP.h"
 #include "Esp8266BaseWiFi.h"
@@ -250,6 +253,18 @@ void Esp8266BaseMQTT::handle() {
         _state = Esp8266BaseMQTTState::BACKOFF;
         return;
     }
+#if ESP8266BASE_USE_WEB
+    // Defer new DNS/TCP/TLS handshakes while a local Web request was served
+    // recently: handshake allocations and Web response peaks must not overlap.
+    // Established connections are unaffected; the attempt resumes next loop.
+    {
+        const uint32_t webLast = Esp8266BaseWeb::lastActivityMs();
+        if (webLast != 0U && (millis() - webLast) < 3000UL) {
+            _state = Esp8266BaseMQTTState::BACKOFF;
+            return;
+        }
+    }
+#endif
     if (_attemptCount < 0xffffffffUL) ++_attemptCount;
     ESP8266BASE_LOG_I("MQTT", "connect_attempt attempt=%lu host=%s port=%u free_heap=%u max_block=%u",
         static_cast<unsigned long>(_attemptCount), _host, static_cast<unsigned>(_port),

@@ -41,6 +41,18 @@
 #define ESP8266BASE_WEB_AUTH_PASS "admin"
 #endif
 
+// 堆水位闸门：在 ESP8266WebServer 的 addHook 预解析钩子里（读完请求行、
+// 解析请求头之前）检查。低于阈值直接回 503 并关闭连接，请求头尚未解析，
+// 拒绝本身几乎不消耗堆。
+// 阈值口径：从该点起一个轻量请求还要吃 解析(~1KB)+鉴权(~0.5KB)+响应在途
+// (~1KB) ≈ 2.5KB，加 ~2KB 安全底 → ~4.5KB。阈值越高越保守（低堆时拒绝更多）。
+#ifndef ESP8266BASE_WEB_HEAP_GATE_FREE_BYTES
+#define ESP8266BASE_WEB_HEAP_GATE_FREE_BYTES 4608U
+#endif
+#ifndef ESP8266BASE_WEB_HEAP_GATE_BLOCK_BYTES
+#define ESP8266BASE_WEB_HEAP_GATE_BLOCK_BYTES 3072U
+#endif
+
 typedef void (*Esp8266BaseWebHandler)();
 
 enum class Esp8266BaseWebHomeMode : uint8_t {
@@ -85,6 +97,8 @@ public:
     static void sendChunk(const char* content);   // 流式输出动态内容块
     static bool checkAuth();                      // 验证 Basic Auth，失败自动返回 401
     static bool verifyAuth();                     // 仅验证，不发 401
+    // 最近一次被服务的 HTTP 请求时间戳（monotonic ms），供其它模块错峰使用。
+    static uint32_t lastActivityMs();
     static void setDefaultAuth(const char* user, const char* pass);
 
     // 暴露底层 server，供需要直接操作的 handler 使用
@@ -116,6 +130,7 @@ private:
     static uint8_t          _apiCount;                          // 1B
 #endif
     static bool             _running;                           // 1B
+    static uint32_t         _lastActivityMs;                    // 4B
     static char             _authUser[24];                      // 24B
     static char             _authPass[24];                      // 24B
     static char             _deviceName[24];                    // 24B
@@ -137,6 +152,11 @@ private:
     static Esp8266BaseWebHomeMode      _homeMode;
     static Esp8266BaseWebSystemNavMode _systemNavMode;
 #endif
+
+    // 预解析钩子：堆水位闸门 + 请求活动时间戳（addHook 注册）
+    static ESP8266WebServer::ClientFuture _heapGateHook(
+        const String& method, const String& url, WiFiClient* client,
+        ESP8266WebServer::ContentTypeFunction contentType);
 
     // 内置路由处理函数（静态，无捕获）
     static void _markRequest();

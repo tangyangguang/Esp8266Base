@@ -181,3 +181,15 @@
 - 如果需要额外验证 `nodemcuv2` 编译环境，运行 `tools/test_all.sh --all-envs`。
 - 硬件烧录、WiFi 配网、OTA、deep sleep、GPIO 按钮仍属于人工或单独硬件验收，不纳入默认自动化测试。
 - 推荐业务项目在 `Esp8266Base::begin()` 前配置 `setHomePath()` / `setHomeMode()`，在 `begin()` 后用 `addPage(path, title, handler)` 注册业务首页；不要通过 CSS 隐藏基础库导航、手写 `/` 重定向或绕过 `sendHeader()` / `sendFooter()` 输出页面框架。
+
+## 2026-08-29
+
+### 修复
+
+- Web 新增预解析堆水位闸门：`ESP8266WebServer::addHook` 在读请求行后、解析请求头前检查
+  `ESP8266BASE_WEB_HEAP_GATE_FREE_BYTES`（默认 4608）与 `ESP8266BASE_WEB_HEAP_GATE_BLOCK_BYTES`
+  （默认 3072），不足时直接 503 并关闭连接，避免低堆时请求头解析/响应构建引发 OOM 或
+  pbuf 损坏重启。替代早前放在业务 handler 内的闸门（测量点过晚、阈值失真）。
+- `/favicon.ico` 与 `/apple-touch-icon*` 免鉴权直接 204，避免浏览器每次刷新产生的无谓 401/404 开销。
+- MQTT 在"本地 Web 最近 3 秒内服务过请求"时推迟新 DNS/TCP/TLS 连接（已建立连接不受影响），
+  避免 TLS 握手瞬时堆峰值与 Web 响应峰值叠加。
