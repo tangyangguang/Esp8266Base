@@ -1706,9 +1706,9 @@ void Esp8266BaseWeb::_handleHealth() {
                    "Connection: close\r\nCache-Control: no-store\r\n\r\n"));
     char json[160];
     snprintf(json, sizeof(json),
-             "{\"firmware\":\"%s\",\"version\":\"%s\",\"uptime\":%lu,"
+             "{\"hostname\":\"%s\",\"firmware\":\"%s\",\"version\":\"%s\",\"uptime\":%lu,"
              "\"heap\":%u,\"maxBlock\":%u,",
-             _fwName, _fwVersion, millis() / 1000UL,
+             Esp8266Base::hostname(), _fwName, _fwVersion, millis() / 1000UL,
              (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
     client.write((const uint8_t*)json, strlen(json));
     snprintf(json, sizeof(json),
