@@ -103,8 +103,11 @@ void Esp8266Base::_resolveHostname() {
         source = "fallback";
     }
 
-    strncpy(_hostname, selected, sizeof(_hostname) - 1);
-    _hostname[sizeof(_hostname) - 1] = '\0';
+    // 默认 hostname 追加 MAC 后 4 位十六进制，保证同一固件烧到多台设备时默认名唯一；
+    // 用户手动持久化的 hostname 仍优先（下方覆盖）。基础值限 27 字节以留出 "-xxxx"。
+    char mac[13];
+    Esp8266BaseWiFi::macAddressHex(mac, sizeof(mac));
+    snprintf(_hostname, sizeof(_hostname), "%.27s-%s", selected, mac + 8);
 
 #if ESP8266BASE_USE_CONFIG
     if (Esp8266BaseConfig::isReady()) {
