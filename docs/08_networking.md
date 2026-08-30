@@ -181,7 +181,7 @@ SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定
 
 需要关闭 MQTT 或在 OTA 成功重启前正常下线时，业务调用 `beginShutdown(topic, payload)` 提供最终 availability。基础库复制到固定槽，使用 retained QoS1，并只接受对应 packetId 的 PUBACK；随后写入正常 MQTT DISCONNECT、flush 并释放 TLS，保持暂停且不自动重连。不匹配 PUBACK、入队失败、连接丢失、PUBACK 超时和 DISCONNECT 写失败均有独立结果。只有显式 `resumeAfterShutdown()` 恢复连接许可。
 
-使用库内固定内存的 MQTT 3.1.1 同步安全传输，不依赖 `espMqttClient` 或异步 TCP。两个出站槽按优先级和 FIFO 选择，单个 QoS1 在途；默认 topic 128B、出站 payload 512B、RX 分块 256B、入站 payload 768B。CONNECT、SUBSCRIBE 和 PUBLISH 都分段写入，不构造动态 packet；容量不足明确拒绝。BearSSL 显式为 4096/1024，证书校验不降低。ESP8266 底层 DNS/TCP/TLS connect 单次尝试仍可能阻塞到连接超时；外围门禁与有界退避避免执行器运行期新建连接和失败忙循环。
+使用库内固定内存的 MQTT 3.1.1 同步安全传输，不依赖 `espMqttClient` 或异步 TCP。两个出站槽按优先级和 FIFO 选择，单个 QoS1 在途；默认 topic 128B、出站 payload 512B、RX 分块 256B、入站 payload 768B。出站 payload 可按业务封闭协议配置为 64～768B；超过 512B 时固定槽位拆成 512B head 与最多 256B tail 并顺序发送，仍不构造动态 packet或大于 512B 的单个静态数组。容量不足明确拒绝。BearSSL 显式为 4096/1024，证书校验不降低。ESP8266 底层 DNS/TCP/TLS connect 单次尝试仍可能阻塞到连接超时；外围门禁与有界退避避免执行器运行期新建连接和失败忙循环。
 
 ---
 

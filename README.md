@@ -183,7 +183,7 @@ build_flags =
 | `ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS` | `5000` | 受控下线等待 PUBACK、正常断开的单阶段超时 |
 | `ESP8266BASE_MQTT_TX_SLOTS` | `2` | 固定出站槽位；仅一个 QoS1 包在途 |
 | `ESP8266BASE_MQTT_MAX_TOPIC_BYTES` | `128` | topic 最大字节数，不含结尾 `NUL` |
-| `ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES` | `512` | 出站 payload 最大字节数 |
+| `ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES` | `512` | 出站 payload 最大字节数；可配置 64～768，超过 512 时内部拆成两个不超过 512B 的固定数组 |
 | `ESP8266BASE_MQTT_RX_CHUNK_BYTES` | `256` | 入站回调分块窗口 |
 | `ESP8266BASE_MQTT_MAX_INBOUND_PAYLOAD_BYTES` | `768` | 单个入站 PUBLISH payload 上限 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
@@ -222,7 +222,7 @@ OTA 策略：`GET /ota` 页面、空 body `POST /ota` 两阶段准备和 multipa
 
 MQTT 连接配置必须在 `Esp8266Base::begin()` 前通过 `Esp8266BaseMQTT::configure()` 提供。host、clientId、用户名/密码和 LWT topic 会复制到固定缓冲；password 非空时 username 必须非空，LWT payload 非空时 willTopic 必须非空。`BearSSL::X509List` trust anchor 与可选 LWT payload 由业务长期持有并覆盖整个 MQTT 生命周期。配置可来自业务的私有构建配置或 `Esp8266BaseConfig`，库不新增 MQTT 持久化 key，也不接受不安全 TLS。不要把真实 broker 凭据写入仓库。
 
-MQTT Terminal 使用库内裁剪的 MQTT 3.1.1 同步 TLS 传输，不依赖 `espMqttClient`、异步 TCP、STL 容器或 `std::function`。出站只有两个固定槽位，每槽 topic 128B、payload 512B；同一时刻只发送一个 QoS1 包，精确匹配 PUBACK 后才推进下一包。入站用 256B 固定窗口分块回调，单包 payload 上限 768B。超出容量或槽位耗尽会同步返回 0 并报告 `PACKET_TOO_LARGE` / `CAPACITY_EXHAUSTED`，不会增长 heap 或静默丢弃。BearSSL RX/TX 仍固定为 4096/1024，证书校验不降级。第三方动态堆边界只剩 ESP8266 Core 的 DNS/TCP、BearSSL 证书与 TLS 会话，以及 `ESP8266WebServer` 活跃请求；正常 MQTT packet/outbox 不再调用通用 heap。同步 DNS/TCP/TLS connect 单次尝试仍可能阻塞到网络超时，外围门禁和有界退避不会忙循环。
+MQTT Terminal 使用库内裁剪的 MQTT 3.1.1 同步 TLS 传输，不依赖 `espMqttClient`、异步 TCP、STL 容器或 `std::function`。出站默认只有两个固定槽位，每槽 topic 128B、payload 512B；业务可在完成静态 RAM 预算后把 payload 配置为 64～768B，超过 512B 的槽位内部拆成 512B head 和最多 256B tail，发送时顺序写出，不形成更大的临时 packet。任意构建同一时刻只发送一个 QoS1 包，精确匹配 PUBACK 后才推进下一包。入站用 256B 固定窗口分块回调，单包 payload 上限 768B。超出容量或槽位耗尽会同步返回 0 并报告 `PACKET_TOO_LARGE` / `CAPACITY_EXHAUSTED`，不会增长 heap 或静默丢弃。BearSSL RX/TX 仍固定为 4096/1024，证书校验不降级。第三方动态堆边界只剩 ESP8266 Core 的 DNS/TCP、BearSSL 证书与 TLS 会话，以及 `ESP8266WebServer` 活跃请求；正常 MQTT packet/outbox 不再调用通用 heap。同步 DNS/TCP/TLS connect 单次尝试仍可能阻塞到网络超时，外围门禁和有界退避不会忙循环。
 
 `cleanSession=true` 时，传输断开完成后基础库会在业务断线回调之前清空固定槽位；新连接不会重放旧连接周期的 QoS 消息。`cleanSession=false` 时仅保留未确认的 QoS1 PUBLISH，重连后置 DUP 重发；SUBSCRIBE 和 QoS0 不跨连接。发生清理时日志记录 `session_queue_discarded` 和包数，不输出载荷。
 

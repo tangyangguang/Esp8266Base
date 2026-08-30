@@ -590,7 +590,7 @@ static void resumeAfterShutdown();
 
 支持 QoS 0/1；未连接、受控下线暂停、空参数、非法 QoS、固定槽耗尽或 topic/payload 越界时返回 0。LWT 通过 `Esp8266BaseMQTTConfig::willTopic/willPayload/willQos/willRetain` 配置。subscribeAck 的 `0x80` 表示拒绝；publishAck 对应 QoS1 PUBACK；clientError 包含 `CAPACITY_EXHAUSTED/PACKET_TOO_LARGE/PROTOCOL_ERROR`。message callback 的 `len/index/total` 由固定接收窗口分块产生。
 
-出站默认两个固定槽位，优先级为 `CRITICAL/EVIDENCE/STATE`，同优先级保持 FIFO；任意时刻只有一个 QoS1 包在途，匹配 PUBACK 后才发送下一包。业务按相同优先级顺序提交 runtime、overview 时，overview 必须等待 runtime 的 PUBACK。默认边界是 128B topic、512B 出站 payload、256B RX 分块和 768B 单个入站 payload，均可在允许范围内由构建期宏调整。
+出站默认两个固定槽位，优先级为 `CRITICAL/EVIDENCE/STATE`，同优先级保持 FIFO；任意时刻只有一个 QoS1 包在途，匹配 PUBACK 后才发送下一包。业务按相同优先级顺序提交 runtime、overview 时，overview 必须等待 runtime 的 PUBACK。默认边界是 128B topic、512B 出站 payload、256B RX 分块和 768B 单个入站 payload，均可在允许范围内由构建期宏调整。出站 payload 可配置 64～768B；配置超过 512B 时，每个固定槽位由 512B head 和最多 256B tail 组成，发送时顺序写出，不创建大于 512B 的单个静态数组或额外完整 packet。
 
 `requestReconnect()` 用于业务握手失败后的受控重试；下一轮 `handle()` 才释放传输。CONNACK 不视为应用 ready，也不重置退避，所以连续失败使用 2s→4s→8s→16s→32s→60s。业务完成订阅及初始握手后必须调用 `markConnectionReady()`，它只在已连接、未暂停且无待处理重连时成功，并把后续普通断线恢复为初始 2s。重复重连请求幂等；两个 API 都不会等待网络或暴露第三方 MQTT 类型。
 
@@ -911,7 +911,7 @@ void loop() {
 | `ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS` | `5000` | 受控下线 PUBACK/正常断开单阶段超时 ms |
 | `ESP8266BASE_MQTT_TX_SLOTS` | `2` | 固定出站槽位，范围 1-4 |
 | `ESP8266BASE_MQTT_MAX_TOPIC_BYTES` | `128` | MQTT topic 上限 |
-| `ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES` | `512` | 出站 payload 上限 |
+| `ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES` | `512` | 出站 payload 上限；范围 64～768，超过 512 时增加固定 tail RAM |
 | `ESP8266BASE_MQTT_RX_CHUNK_BYTES` | `256` | 入站分块窗口 |
 | `ESP8266BASE_MQTT_MAX_INBOUND_PAYLOAD_BYTES` | `768` | 入站 payload 上限 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |

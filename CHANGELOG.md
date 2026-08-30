@@ -45,6 +45,11 @@
 
 - `Esp8266BaseWiFi::attemptCount()`、`radioResetCount()` 及 `/health` 的 `wifiAttempt`、`wifiRadioReset` 提供本次启动的 WiFi 恢复证据。
 - `Esp8266BaseNTP::hasMeasuredUncertainty()`、`lastSyncRttMs()` 和 `estimatedUncertaintyMs()` 暴露主动 NTP 的 RTT/误差估计；系统 SNTP 无测量证据时明确不可用，业务不得伪造亚秒精度。
+- `ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES` 的可配置上限从 512B 扩展到 768B；默认仍为 512B。超过 512B 时固定出站槽拆成 512B head 与最多 256B tail 并顺序写出，不新增动态 packet，也不改变 BearSSL 4096/1024 缓冲。
+
+### 行为变化 / 使用建议
+
+- 业务只有在封闭协议单包确实超过 512B 且完成静态 RAM 与真机堆验证后才应提高出站上限；每增加 1B 会按 `ESP8266BASE_MQTT_TX_SLOTS` 增加固定 RAM，其他项目的默认构建不受影响。
 
 ## 2026-08-28
 

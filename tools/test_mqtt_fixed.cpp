@@ -86,6 +86,16 @@ int main() {
     memset(payload, 7, sizeof(payload));
     assert(queue.enqueuePublish(50, topic, 1, false, payload, sizeof(payload),
                                 Esp8266BaseMQTTPublishPriority::STATE));
+    FixedPacket* full = queue.nextToSend();
+    assert(full && full->payloadHeadLength() <= 512U);
+    assert(full->payloadHeadLength() + full->payloadTailLength() ==
+           sizeof(payload));
+    assert(memcmp(full->payloadHead, payload, full->payloadHeadLength()) == 0);
+    if (full->payloadTailLength() > 0) {
+        assert(memcmp(full->payloadTail,
+                      payload + full->payloadHeadLength(),
+                      full->payloadTailLength()) == 0);
+    }
     queue.clear();
     topic[ESP8266BASE_MQTT_MAX_TOPIC_BYTES] = 'x';
     topic[ESP8266BASE_MQTT_MAX_TOPIC_BYTES + 1] = '\0';

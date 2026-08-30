@@ -30,8 +30,8 @@
 #if ESP8266BASE_MQTT_MAX_TOPIC_BYTES < 16 || ESP8266BASE_MQTT_MAX_TOPIC_BYTES > 128
 #error "ESP8266BASE_MQTT_MAX_TOPIC_BYTES must be between 16 and 128"
 #endif
-#if ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES < 64 || ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES > 512
-#error "ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES must be between 64 and 512"
+#if ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES < 64 || ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES > 768
+#error "ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES must be between 64 and 768"
 #endif
 #if ESP8266BASE_MQTT_RX_CHUNK_BYTES < 32 || ESP8266BASE_MQTT_RX_CHUNK_BYTES > 256
 #error "ESP8266BASE_MQTT_RX_CHUNK_BYTES must be between 32 and 256"
@@ -86,7 +86,29 @@ struct FixedPacket {
     bool dup;
     bool sent;
     char topic[ESP8266BASE_MQTT_MAX_TOPIC_BYTES + 1];
-    uint8_t payload[ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES];
+    // Keep every individual static array within the library's 512B hard limit.
+    // Builds needing a 513..768B protocol payload use a second bounded tail;
+    // the default 512B build retains its existing capacity and RAM profile.
+    static constexpr size_t PAYLOAD_HEAD_BYTES =
+        ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES > 512
+            ? 512
+            : ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES;
+    static constexpr size_t PAYLOAD_TAIL_BYTES =
+        ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES > 512
+            ? ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES - 512
+            : 1;
+    uint8_t payloadHead[PAYLOAD_HEAD_BYTES];
+    uint8_t payloadTail[PAYLOAD_TAIL_BYTES];
+
+    size_t payloadHeadLength() const {
+        return payloadLength < PAYLOAD_HEAD_BYTES
+                   ? payloadLength
+                   : PAYLOAD_HEAD_BYTES;
+    }
+    size_t payloadTailLength() const {
+        const size_t head = payloadHeadLength();
+        return payloadLength > head ? payloadLength - head : 0;
+    }
 };
 
 class FixedOutbox {
@@ -103,7 +125,13 @@ public:
         init(*slot, PacketKind::PUBLISH, packetId, topic, qos, priority);
         slot->retain = retain;
         slot->payloadLength = static_cast<uint16_t>(length);
-        if (length > 0) memcpy(slot->payload, payload, length);
+        if (length > 0) {
+            const size_t head = slot->payloadHeadLength();
+            memcpy(slot->payloadHead, payload, head);
+            if (length > head) {
+                memcpy(slot->payloadTail, payload + head, length - head);
+            }
+        }
         return true;
     }
 

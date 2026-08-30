@@ -850,7 +850,13 @@ def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:
 
     require_token(fixed_h, "#define ESP8266BASE_MQTT_TX_SLOTS 2", "two fixed TX slots")
     require_token(fixed_h, "#define ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES 512",
-                  "bounded outbound payload")
+                  "bounded outbound payload default")
+    require_token(fixed_h, "ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES > 768",
+                  "bounded outbound payload configurable maximum")
+    require_token(fixed_h, "payloadHead[PAYLOAD_HEAD_BYTES]",
+                  "split outbound payload head")
+    require_token(fixed_h, "payloadTail[PAYLOAD_TAIL_BYTES]",
+                  "split outbound payload tail")
     require_token(fixed_h, "#define ESP8266BASE_MQTT_RX_CHUNK_BYTES 256",
                   "streaming receive chunk")
     for token in ["CAPACITY_EXHAUSTED", "PACKET_TOO_LARGE", "PROTOCOL_ERROR"]:

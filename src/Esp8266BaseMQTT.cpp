@@ -360,7 +360,8 @@ bool Esp8266BaseMQTT::_pumpOutbox() {
             (packet->qos ? 2U : 0U) | (packet->dup ? 8U : 0U);
         ok = writeFixedHeader(header, remaining) && writeString(packet->topic) &&
             (!packet->qos || writeUint16(packet->packetId)) &&
-            writeExact(packet->payload, packet->payloadLength);
+            writeExact(packet->payloadHead, packet->payloadHeadLength()) &&
+            writeExact(packet->payloadTail, packet->payloadTailLength());
     }
     if (!ok) return false;
     const bool waits = packet->qos != 0;
