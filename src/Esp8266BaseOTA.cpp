@@ -37,6 +37,7 @@ Esp8266BaseOTAFailureCallback Esp8266BaseOTA::_failureCallback = nullptr;
 Esp8266BaseOTASuccessCallback Esp8266BaseOTA::_successCallback = nullptr;
 
 static const uint8_t OTA_PROGRESS_STEP = 25;
+static const uint16_t OTA_RESPONSE_ACK_TIMEOUT_MS = 1500;
 
 static uint32_t _elapsedMs(uint32_t startedMs) {
     return startedMs ? (uint32_t)(millis() - startedMs) : 0;
@@ -253,7 +254,10 @@ void Esp8266BaseOTA::_handleUploadComplete() {
         Esp8266BaseWeb::server().sendHeader("WWW-Authenticate", "Basic realm=\"ESP8266Base\"");
     }
     Esp8266BaseWeb::server().send(_status, "text/plain", msg);
-    Esp8266BaseWeb::server().client().stop();
+    WiFiClient& responseClient = Esp8266BaseWeb::server().client();
+    // WiFiClient::stop() 默认只等 300ms。弱信号下成功响应可能尚未被对端 ACK，
+    // 随后的重启会让调用方看到 connection reset，误判为 OTA 失败。
+    const bool responseDelivered = responseClient.stop(OTA_RESPONSE_ACK_TIMEOUT_MS);
 
     if (ok) {
         char heapBuf[16];
@@ -265,8 +269,9 @@ void Esp8266BaseOTA::_handleUploadComplete() {
         Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
         _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
         _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-        ESP8266BASE_LOG_I("OTA ", "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s action=reboot",
-                          uploadedBuf, elapsedBuf, rateBuf, heapBuf);
+        ESP8266BASE_LOG_I("OTA ", "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s response_delivered=%s action=reboot",
+                          uploadedBuf, elapsedBuf, rateBuf, heapBuf,
+                          responseDelivered ? "yes" : "no");
         delay(500);
         ESP.restart();
     } else {

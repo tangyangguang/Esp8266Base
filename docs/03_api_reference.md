@@ -510,7 +510,7 @@ static bool isRunning();
 | `/api/system/hostname` | POST | 保存 hostname 表单参数 `hostname`（需要 Basic Auth，重启生效） |
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
 | `/reboot` | POST | flush Config 后重启 |
-| `/health` | GET | 固定 JSON：firmware/version/uptime/heap/maxBlock/wifi/ip/ntp/MQTT 状态、attempt、last reason、TLS error code、WDT/OTA（无需认证，不含错误长文本和敏感配置） |
+| `/health` | GET | 固定 JSON：firmware/version/uptime/heap/maxBlock/wifi/wifiSsid/wifiRssi/ip/ntp/MQTT 状态、attempt、last reason、TLS error code、WDT/OTA（无需认证；SSID 用于现场诊断，不含密码、broker、clientId、证书或错误长文本） |
 
 页面式路由和未知路径使用 Basic Auth 挑战；未知路径认证通过后返回 404。`/api/system/hostname` 未认证时返回 JSON 401，不发送 `WWW-Authenticate`，调用方需要显式提供 `Authorization` header。`/health` 保持免认证。
 
@@ -662,7 +662,7 @@ static void setLifecycleCallbacks(Esp8266BaseOTAPrepareCallback prepare,
 4. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，日志输出 `upload_started`
 5. 首个数据块：服务端做固件头检查，业务 prepare 通过后暂停 MQTT/TLS；`ota_pause` 在 TLS 释放判定后精确输出 `heap` 和最大连续块 `max` 的原始字节值，随后调用 `Update.begin(ESP.getFreeSketchSpace())`
 6. 上传期间：分块写入固件，每块后 `yield()`，按 25% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
-7. 上传完成：先检查 Config/FileLog flush，再调用 `Update.end(true)`；输出 `upload_finished`，启用 Watchdog 时 `resume()`，执行 success callback、输出 `upload_success`，延迟 500ms 后 `ESP.restart()`
+7. 上传完成：先检查 Config/FileLog flush，再调用 `Update.end(true)`；输出 `upload_finished`，启用 Watchdog 时 `resume()`，执行 success callback；成功响应最多等待 1500ms TCP ACK 后输出含 `response_delivered` 的 `upload_success`，再延迟 500ms 后 `ESP.restart()`
 8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息
 
 OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。当前不计算 SHA256；页面预检和服务端 ESP8266 镜像头快速校验用于提前拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，接收是否成功由 `Update.write()` 和 `Update.end(true)` 的写入与镜像校验结果决定。浏览器进度条表示上传进度，不代表服务端已经接受固件。

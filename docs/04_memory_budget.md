@@ -189,11 +189,12 @@ LittleFS 写入会阻塞 CPU 约 1-5ms：
 `GET /health` 返回实时 heap 信息（无需认证）：
 
 ```json
-{"heap":43200,"maxBlock":43088,"ip":"192.168.1.100","uptime":123,"wifi":"connected"}
+{"heap":43200,"maxBlock":43088,"ip":"192.168.1.100","uptime":123,"wifi":"connected","wifiSsid":"IOTHOME","wifiRssi":-63}
 ```
 
 关注两个指标：
 - `heap`：当前总空闲堆
 - `maxBlock`：最大连续空闲块；低于 8KB 时说明碎片化严重
+- `wifiSsid` / `wifiRssi`：当前 STA WiFi 名称和 RSSI(dBm)，用于对比弱网下的请求与 OTA 速度；`/health` 无需认证，因此 SSID 对同一局域网可见
 
 维护要求：新增模块或新增常驻状态时，必须同步本文件的预算表，并在 `docs/11_maintainer_guide.md` 的发布检查中确认构建后的 RAM 用量没有突破目标。

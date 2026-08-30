@@ -41,7 +41,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 | `/api/system/hostname` | GET/POST | Basic Auth | 查询或保存 hostname；POST 使用表单参数 `hostname`，重启生效 |
 | `/logs/clear` | POST | Basic Auth | 清空文件日志；入口在 System 页面 |
 | `/reboot` | POST | Basic Auth | flush 配置后重启 |
-| `/health` | GET | 无 | JSON 健康信息 |
+| `/health` | GET | 无 | JSON 健康信息；含当前 STA WiFi 名称 `wifiSsid` 和 RSSI(dBm) `wifiRssi` |
 
 `MQTT_TERMINAL`（`ESP8266BASE_PROFILE_MQTT_TERMINAL=1`）用一个 URI/method dispatcher 承担 `GET /`、`GET/POST /wifi`、`GET/POST /auth` 和 `GET /health`，避免为每个基础 URI 保留独立动态路由节点；multipart `POST /ota` 因上传回调语义仍单独注册。业务固定页面/API 继续使用显式容量。`GET /` 在 AP_CONFIG 时 `303 /wifi`，STA 时 `303 ESP8266BASE_TERMINAL_HOME_PATH`。完整首页、Logs、System、hostname、reboot、动态导航和 `GET /ota` 都不进入 Terminal ELF。
 
@@ -233,7 +233,7 @@ http://<device-ip>/ota
 - prepare 通过后，活动会话必须有界完成 retained QoS1/PUBACK 和正常断开。MQTT 未配置、未 begin 或 transport 已完全断开时直接暂停并继续，但 shutdown 结果不伪装为成功；连接中或 transport 尚未释放则拒绝。
 - 每个失败、拒绝或中止的上传请求最多调用一次可选 failure callback；Watchdog 和 MQTT 重连许可会先恢复，再调用业务 failure callback。
 - 基础库在 `Update.end(true)` 前检查配置和文件日志 flush；失败会中止 Update、返回 500 并恢复通信许可。成功时 MQTT 保持关闭，可选 success callback 只用于最终业务安全关闭，随后返回 2xx 并重启。
-- 成功后 flush 响应并重启。
+- 成功后最多等待 1500ms 确认响应已被 TCP ACK，再关闭连接并重启；日志的 `response_delivered` 用于区分响应已送达和弱网下结果待确认。
 - 当前不计算 SHA256；OTA 依赖页面预检、服务端头部兜底校验，以及 `Update.write()` / `Update.end(true)` 的写入与镜像校验结果决定是否接受固件。头部快速校验不是完整签名机制，不承诺识别所有同平台非 app 镜像。
 
 如果出现 `Unauthorized`，先确认浏览器当前会话已经通过 Basic Auth，或重新打开 `/ota` 输入用户名密码。

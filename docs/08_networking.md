@@ -90,7 +90,7 @@ station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 
 普通连接 attempt 连续失败达到 `ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT`（默认 6）时，本库执行一次有界的 WiFi radio 完整恢复：断开 STA、切换 `WIFI_OFF`、等待 `ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新调用 `WiFi.begin()`。这用于恢复路由器晚于终端启动或路由器重启时，ESP8266 SDK 可能长期停在 station 连接状态的问题。radio reset 不重启 MCU、不清除 Config、不进入 AP；已有业务仍按本地状态机运行。路由器持续不可用时，每 6 次失败最多执行一次 radio reset，连接成功后重新计数。
 
-`/health` 的 `wifiAttempt` 和 `wifiRadioReset` 分别表示本次启动累计 `WiFi.begin()` 次数和 radio reset 次数，可在恢复后确认是否走过升级恢复路径。
+`/health` 的 `wifiSsid` / `wifiRssi` 表示当前 STA WiFi 名称和 RSSI(dBm)，`wifiAttempt` 和 `wifiRadioReset` 分别表示本次启动累计 `WiFi.begin()` 次数和 radio reset 次数，可在恢复后确认信号环境及是否走过升级恢复路径。该接口无需认证，因此 SSID 对同一局域网可见。
 
 ---
 

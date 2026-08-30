@@ -1659,6 +1659,30 @@ void Esp8266BaseWeb::_handleTerminalDispatch() {
 }
 #endif
 
+static void _sendJsonString(WiFiClient& client, const char* value) {
+    client.write('"');
+    if (value) {
+        const uint8_t* p = reinterpret_cast<const uint8_t*>(value);
+        while (*p) {
+            const uint8_t ch = *p++;
+            if (ch == '"' || ch == '\\') {
+                client.write('\\');
+                client.write(ch);
+            } else if (ch < 0x20) {
+                const uint8_t high = ch >> 4;
+                const uint8_t low = ch & 0x0f;
+                char escaped[] = {'\\', 'u', '0', '0',
+                                  static_cast<char>(high < 10 ? '0' + high : 'a' + high - 10),
+                                  static_cast<char>(low < 10 ? '0' + low : 'a' + low - 10)};
+                client.write(reinterpret_cast<const uint8_t*>(escaped), sizeof(escaped));
+            } else {
+                client.write(ch);
+            }
+        }
+    }
+    client.write('"');
+}
+
 void Esp8266BaseWeb::_handleHealth() {
     _markRequest();
     const char* wifiState = "idle";
@@ -1699,7 +1723,8 @@ void Esp8266BaseWeb::_handleHealth() {
     mqttTlsError = Esp8266BaseMQTT::lastTlsErrorCode();
 #endif
 
-    // 分块输出固定 JSON，不包含 SSID、broker、clientId、用户名、密码或证书。
+    // 分块输出固定 JSON。SSID 按产品诊断契约公开；不包含 broker、clientId、
+    // 用户名、密码或证书。
     WiFiClient& client = _server.client();
     client.setNoDelay(true);
     client.print(F("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -1712,10 +1737,14 @@ void Esp8266BaseWeb::_handleHealth() {
              (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
     client.write((const uint8_t*)json, strlen(json));
     snprintf(json, sizeof(json),
-             "\"wifi\":\"%s\",\"ip\":\"%s\",\"ntp\":\"%s\","
+             "\"wifi\":\"%s\",\"wifiSsid\":", wifiState);
+    client.write((const uint8_t*)json, strlen(json));
+    _sendJsonString(client, Esp8266BaseWiFi::isConnected() ? Esp8266BaseWiFi::ssid() : "");
+    snprintf(json, sizeof(json),
+             ",\"wifiRssi\":%d,\"ip\":\"%s\",\"ntp\":\"%s\","
              "\"wifiAttempt\":%u,\"wifiRadioReset\":%u,"
              "\"mqtt\":\"%s\",\"mqttConnected\":%s,",
-             wifiState, ip, ntpState,
+             Esp8266BaseWiFi::isConnected() ? Esp8266BaseWiFi::rssi() : 0, ip, ntpState,
              (unsigned)Esp8266BaseWiFi::attemptCount(),
              (unsigned)Esp8266BaseWiFi::radioResetCount(),
              mqttState, mqttConnected ? "true" : "false");

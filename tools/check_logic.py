@@ -407,7 +407,7 @@ def test_watchdog_and_ota_failure_contract() -> None:
                   "OTA progress diagnostics")
     require_token(ota_cpp, "upload_finished uploaded=%s elapsed=%s average_speed=%s free_heap=%s",
                   "OTA finish diagnostics")
-    require_token(ota_cpp, "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s action=reboot",
+    require_token(ota_cpp, "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s response_delivered=%s action=reboot",
                   "OTA success diagnostics")
     require_token(ota_cpp, "_startedMs", "OTA elapsed state")
     require_token(ota_cpp, "_uploadedBytes", "OTA uploaded byte state")
@@ -792,7 +792,8 @@ def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     require_token(ota_cpp, "upload_failed status=%u", "OTA failure diagnostic before state reset")
     require_token(ota_cpp, "_resetRequestState();\n    }", "OTA failure internal state reset")
 
-    for token in ["firmware", "version", "uptime", "heap", "maxBlock", "wifi", "ip",
+    for token in ["firmware", "version", "uptime", "heap", "maxBlock", "wifi",
+                  "wifiSsid", "wifiRssi", "ip",
                   "ntp", "mqtt", "mqttConnected", "mqttAttempt", "mqttLastReason",
                   "mqttTlsError", "lastWdtReset", "otaInProgress"]:
         require_token(web_cpp, token, f"health field {token}")
@@ -809,6 +810,9 @@ def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     require_token(upload_script, "Firmware size:", "OTA script firmware size output")
     require_token(upload_script, "HTTP result:", "OTA script HTTP result output")
     require_token(upload_script, "Device response:", "OTA script response output")
+    require_token(ota_cpp, "OTA_RESPONSE_ACK_TIMEOUT_MS = 1500",
+                  "OTA success response bounded ACK wait")
+    require_token(ota_cpp, "response_delivered=%s", "OTA response delivery diagnostic")
 
     for token in [".tmp", ".bak", "verify_failed", "backup_rename_failed",
                   "commit_rename_failed", "LittleFS.rename(bak, path)"]:
