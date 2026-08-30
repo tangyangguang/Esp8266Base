@@ -23,6 +23,9 @@ uint32_t Esp8266BaseNTP::_nextManualMs = 0;
 uint32_t Esp8266BaseNTP::_manualSentMs = 0;
 uint8_t  Esp8266BaseNTP::_manualServer = 0;
 bool     Esp8266BaseNTP::_manualWaiting = false;
+bool     Esp8266BaseNTP::_uncertaintyMeasured = false;
+uint16_t Esp8266BaseNTP::_estimatedUncertaintyMs = 0;
+uint32_t Esp8266BaseNTP::_lastSyncRttMs = 0;
 
 static WiFiUDP _ntpUdp;
 static IPAddress _manualIp;
@@ -46,6 +49,21 @@ static void _formatIP(const IPAddress& ip, char* out, size_t len) {
              (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2], (unsigned)ip[3]);
 }
 
+static uint64_t _ntpTimestampUs(const uint8_t* value) {
+    const uint32_t seconds = ((uint32_t)value[0] << 24)
+                           | ((uint32_t)value[1] << 16)
+                           | ((uint32_t)value[2] << 8)
+                           |  (uint32_t)value[3];
+    const uint32_t fraction = ((uint32_t)value[4] << 24)
+                            | ((uint32_t)value[5] << 16)
+                            | ((uint32_t)value[6] << 8)
+                            |  (uint32_t)value[7];
+    if (seconds <= NTP_EPOCH_DELTA) return 0;
+    const uint64_t unixSeconds = (uint64_t)(seconds - NTP_EPOCH_DELTA);
+    const uint64_t micros = ((uint64_t)fraction * 1000000ULL) >> 32;
+    return unixSeconds * 1000000ULL + micros;
+}
+
 // ----------------------------------------------------------------------------
 // begin
 // ----------------------------------------------------------------------------
@@ -66,6 +84,9 @@ bool Esp8266BaseNTP::begin() {
     _manualSentMs = 0;
     _manualServer = 0;
     _manualWaiting = false;
+    _uncertaintyMeasured = false;
+    _estimatedUncertaintyMs = 0;
+    _lastSyncRttMs = 0;
     _ntpUdp.stop();
     _ntpUdp.begin(NTP_LOCAL_PORT);
 
@@ -124,6 +145,9 @@ void Esp8266BaseNTP::reset() {
     _manualSentMs = 0;
     _manualServer = 0;
     _manualWaiting = false;
+    _uncertaintyMeasured = false;
+    _estimatedUncertaintyMs = 0;
+    _lastSyncRttMs = 0;
     ESP8266BASE_LOG_I("NTP ", "ntp_client_reset reason=wifi_disconnected");
 }
 
@@ -149,23 +173,38 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
                               _manualWaiting ? "yes" : "no");
             return false;
         }
-        uint32_t ntpSec = ((uint32_t)pkt[40] << 24)
-                        | ((uint32_t)pkt[41] << 16)
-                        | ((uint32_t)pkt[42] << 8)
-                        |  (uint32_t)pkt[43];
-        time_t epoch = (ntpSec > NTP_EPOCH_DELTA) ? (time_t)(ntpSec - NTP_EPOCH_DELTA) : 0;
-        if (epoch > 1000000000UL) {
+        const uint64_t receivedUs = _ntpTimestampUs(pkt + 32);
+        const uint64_t transmittedUs = _ntpTimestampUs(pkt + 40);
+        if (transmittedUs >= 1000000000ULL * 1000000ULL &&
+            (receivedUs == 0 || transmittedUs >= receivedUs)) {
+            const uint32_t rttMs = now - _manualSentMs;
+            const uint64_t serverProcessingUs = receivedUs == 0
+                ? 0
+                : transmittedUs - receivedUs;
+            const uint64_t rttUs = (uint64_t)rttMs * 1000ULL;
+            const uint64_t networkUs = rttUs > serverProcessingUs
+                ? rttUs - serverProcessingUs
+                : 0;
+            // 主动请求在本地尚无可信 UTC 时无法构造完整 T1/T4 UTC，使用
+            // NTP server receive/transmit 与本地单调 RTT 估算单程延迟。保留
+            // RTT/uncertainty 证据，不把该估计描述成严格误差上界。
+            const uint64_t currentUs = transmittedUs + networkUs / 2ULL;
             timeval tv;
-            tv.tv_sec = epoch;
-            tv.tv_usec = 0;
+            tv.tv_sec = (time_t)(currentUs / 1000000ULL);
+            tv.tv_usec = (suseconds_t)(currentUs % 1000000ULL);
             settimeofday(&tv, nullptr);
             _manualWaiting = false;
+            _lastSyncRttMs = rttMs;
+            const uint32_t uncertainty = (uint32_t)((networkUs + 1999ULL) / 2000ULL) + 1UL;
+            _estimatedUncertaintyMs = (uint16_t)(uncertainty > 65535UL ? 65535UL : uncertainty);
+            _uncertaintyMeasured = true;
             char ip[16];
             _formatIP(_manualIp, ip, sizeof(ip));
-            ESP8266BASE_LOG_I("NTP ", "manual_ntp_synchronized server_index=%u ip=%s rtt=%lums",
+            ESP8266BASE_LOG_I("NTP ", "manual_ntp_synchronized server_index=%u ip=%s rtt=%lums uncertainty_estimate=%ums",
                               (unsigned)_manualServer,
                               ip,
-                              (unsigned long)(now - _manualSentMs));
+                              (unsigned long)rttMs,
+                              (unsigned)_estimatedUncertaintyMs);
             _finishSync(time(nullptr));
             return true;
         }
@@ -267,6 +306,18 @@ void Esp8266BaseNTP::_finishSync(time_t t) {
 // ----------------------------------------------------------------------------
 bool Esp8266BaseNTP::isSynced() {
     return _synced;
+}
+
+bool Esp8266BaseNTP::hasMeasuredUncertainty() {
+    return _synced && _uncertaintyMeasured;
+}
+
+uint32_t Esp8266BaseNTP::lastSyncRttMs() {
+    return hasMeasuredUncertainty() ? _lastSyncRttMs : 0;
+}
+
+uint16_t Esp8266BaseNTP::estimatedUncertaintyMs() {
+    return hasMeasuredUncertainty() ? _estimatedUncertaintyMs : 0;
 }
 
 uint32_t Esp8266BaseNTP::timestamp() {

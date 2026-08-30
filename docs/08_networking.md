@@ -159,7 +159,7 @@ log_timestamp_mode=absolute_datetime
 
 这用于把对时前的 `millis()` 日志换算为实际日期时间。
 
-库内主动 UDP NTP 只接受当前等待服务器的响应，并校验来源 IP、端口 123、server mode、stratum 和 leap indicator。无关 UDP 包会记录 `manual_ntp_packet_rejected` 并丢弃，不会改写系统时间。
+库内主动 UDP NTP 只接受当前等待服务器的响应，并校验来源 IP、端口 123、server mode、stratum 和 leap indicator。无关 UDP 包会记录 `manual_ntp_packet_rejected` 并丢弃，不会改写系统时间。有效响应解析 receive/transmit 的秒与 32 位小数，结合本地单调 RTT 和服务端处理时间估算单程延迟，避免旧实现丢弃小数后形成接近 1 秒的量化误差。同步日志同时给出 `rtt` 与 `uncertainty_estimate`；只有主动路径具有该测量，系统 SNTP 路径不伪造误差证据。该估计仍受链路不对称影响，不能替代业务终端的单调截止和低压台架精度验收。
 
 ---
 

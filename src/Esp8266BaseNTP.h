@@ -46,6 +46,12 @@ public:
     static uint32_t timestamp();                                   // Unix 时间戳，未同步返回 0
     static bool     formatTo(char* out, size_t len, const char* fmt); // strftime 格式化
 
+    // 主动 UDP NTP 路径可提供本次同步的 RTT 与保守估计误差；系统 SNTP
+    // 路径没有可读取的测量证据，因此 hasMeasuredUncertainty() 返回 false。
+    static bool     hasMeasuredUncertainty();
+    static uint32_t lastSyncRttMs();
+    static uint16_t estimatedUncertaintyMs();
+
 private:
     static bool     _synced;        // 1B
     static bool     _logSwitched;   // 1B：Log 时间格式是否已切换
@@ -56,6 +62,9 @@ private:
     static uint32_t _manualSentMs;  // 4B：库内 UDP NTP 请求发送时间
     static uint8_t  _manualServer;  // 1B：当前库内 UDP NTP 服务器索引
     static bool     _manualWaiting; // 1B：正在等待库内 UDP NTP 响应
+    static bool     _uncertaintyMeasured; // 1B：主动 NTP 有 RTT 证据
+    static uint16_t _estimatedUncertaintyMs; // 2B：保守估计，不伪装硬上界
+    static uint32_t _lastSyncRttMs; // 4B
 
     static bool _pollManual(uint32_t now);
     static bool _isDue(uint32_t now, uint32_t due);

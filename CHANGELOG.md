@@ -39,10 +39,12 @@
 ### 修复
 
 - WiFi 有凭证但连续连接失败达到 6 次时执行有界 `WIFI_OFF → WIFI_STA` radio 恢复并重新启动 STA/DHCP，修复路由器晚启动或重启后普通 `disconnect + begin` 可能长期停在 ESP8266 SDK station 卡态的问题；不重启 MCU、不清除配置、不进入 AP。
+- 主动 UDP NTP 不再丢弃 transmit timestamp 的 32 位小数并把系统时间截断到整秒；现在结合 server receive/transmit 和本地单调 RTT 估算响应到达时 UTC，避免基础库人为引入接近 1 秒的量化误差。
 
 ### 新增
 
 - `Esp8266BaseWiFi::attemptCount()`、`radioResetCount()` 及 `/health` 的 `wifiAttempt`、`wifiRadioReset` 提供本次启动的 WiFi 恢复证据。
+- `Esp8266BaseNTP::hasMeasuredUncertainty()`、`lastSyncRttMs()` 和 `estimatedUncertaintyMs()` 暴露主动 NTP 的 RTT/误差估计；系统 SNTP 无测量证据时明确不可用，业务不得伪造亚秒精度。
 
 ## 2026-08-28
 

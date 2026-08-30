@@ -679,7 +679,7 @@ OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZ
 ```cpp
 static bool begin();
 ```
-配置 NTP 服务器和时区，启动系统 SNTP 客户端，并启用库内主动 UDP NTP 查询。由 `Esp8266Base::handle()` 在 WiFi 首次连接时自动调用。主动 UDP NTP 只在等待响应期间接受数据包，并校验响应来源 IP、端口、mode、stratum，避免局域网无关 UDP 包改写系统时间。
+配置 NTP 服务器和时区，启动系统 SNTP 客户端，并启用库内主动 UDP NTP 查询。由 `Esp8266Base::handle()` 在 WiFi 首次连接时自动调用。主动 UDP NTP 只在等待响应期间接受数据包，并校验响应来源 IP、端口、mode、stratum；它解析 NTP receive/transmit 的秒和 32 位小数部分，以本地单调 RTT 扣除服务端处理时间后估算单程延迟，不再把时间截断到整秒。
 
 ```cpp
 static void handle();
@@ -689,8 +689,11 @@ static void handle();
 ```cpp
 static bool isSynced();
 static uint32_t timestamp();
+static bool hasMeasuredUncertainty();
+static uint32_t lastSyncRttMs();
+static uint16_t estimatedUncertaintyMs();
 ```
-`timestamp()` 返回当前 Unix 时间戳，未同步时返回 0。
+`timestamp()` 返回当前 Unix 时间戳，未同步时返回 0。主动 UDP NTP 路径保留本次 RTT 和基于网络往返的保守误差估计，`hasMeasuredUncertainty()` 为 true 时另外两个值才有效；系统 SNTP 没有公开单次测量证据，因此明确返回 false/0，业务不得把格式上的毫秒当成已验证的毫秒准确度。该 uncertainty 是链路对称假设下的估计，不是硬实时误差保证。
 
 ```cpp
 static bool formatTo(char* out, size_t len, const char* fmt);
