@@ -801,6 +801,10 @@ def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     health_end = web_cpp.index("void Esp8266BaseWeb::_handleNotFound()", health_start)
     if "lastTlsErrorText" in web_cpp[health_start:health_end]:
         fail("health endpoint must not expose long TLS error text")
+    require_token(web_cpp, "char chunk[64];", "health JSON bounded write buffer")
+    json_writer_start = web_cpp.index("static void _sendJsonString")
+    if "client.write(ch);" in web_cpp[json_writer_start:health_start]:
+        fail("health JSON must not emit one TCP write per SSID byte")
 
     require_token(upload_script, "--fail-with-body", "curl body-preserving fail support")
     require_token(upload_script, "exit 22", "legacy curl explicit HTTP failure")

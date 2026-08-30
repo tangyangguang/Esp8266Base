@@ -1660,27 +1660,41 @@ void Esp8266BaseWeb::_handleTerminalDispatch() {
 #endif
 
 static void _sendJsonString(WiFiClient& client, const char* value) {
-    client.write('"');
+    char chunk[64];
+    size_t used = 0;
+    chunk[used++] = '"';
     if (value) {
         const uint8_t* p = reinterpret_cast<const uint8_t*>(value);
         while (*p) {
             const uint8_t ch = *p++;
+            const size_t needed = (ch == '"' || ch == '\\') ? 2U : (ch < 0x20 ? 6U : 1U);
+            if (used + needed > sizeof(chunk)) {
+                client.write(reinterpret_cast<const uint8_t*>(chunk), used);
+                used = 0;
+            }
             if (ch == '"' || ch == '\\') {
-                client.write('\\');
-                client.write(ch);
+                chunk[used++] = '\\';
+                chunk[used++] = static_cast<char>(ch);
             } else if (ch < 0x20) {
                 const uint8_t high = ch >> 4;
                 const uint8_t low = ch & 0x0f;
-                char escaped[] = {'\\', 'u', '0', '0',
-                                  static_cast<char>(high < 10 ? '0' + high : 'a' + high - 10),
-                                  static_cast<char>(low < 10 ? '0' + low : 'a' + low - 10)};
-                client.write(reinterpret_cast<const uint8_t*>(escaped), sizeof(escaped));
+                chunk[used++] = '\\';
+                chunk[used++] = 'u';
+                chunk[used++] = '0';
+                chunk[used++] = '0';
+                chunk[used++] = static_cast<char>(high < 10 ? '0' + high : 'a' + high - 10);
+                chunk[used++] = static_cast<char>(low < 10 ? '0' + low : 'a' + low - 10);
             } else {
-                client.write(ch);
+                chunk[used++] = static_cast<char>(ch);
             }
         }
     }
-    client.write('"');
+    if (used == sizeof(chunk)) {
+        client.write(reinterpret_cast<const uint8_t*>(chunk), used);
+        used = 0;
+    }
+    chunk[used++] = '"';
+    client.write(reinterpret_cast<const uint8_t*>(chunk), used);
 }
 
 void Esp8266BaseWeb::_handleHealth() {
