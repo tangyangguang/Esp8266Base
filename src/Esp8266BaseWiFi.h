@@ -38,6 +38,17 @@
 #define ESP8266BASE_WIFI_RETRY_SLOW 60000        // ms：后续慢速重试间隔
 #endif
 
+#ifndef ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT
+#define ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT 6 // 连续失败达到该次数后完整重置 WiFi radio
+#endif
+
+#ifndef ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS
+#define ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS 100 // ms：WIFI_OFF 后的稳定等待
+#endif
+
+static_assert(ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT <= 255,
+              "ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT must fit uint8_t");
+
 // WiFi 状态枚举
 enum class Esp8266BaseWiFiState : uint8_t {
     IDLE       = 0,
@@ -80,6 +91,10 @@ public:
     // 当前状态机状态
     static Esp8266BaseWiFiState state();
 
+    // 本次启动累计发起 STA 连接次数 / 完整 WiFi radio 重置次数
+    static uint16_t attemptCount();
+    static uint8_t radioResetCount();
+
     // AP 模式的 SSID（格式：ESP8266-Config-XXXX）
     static const char* apSSID();
 
@@ -89,12 +104,17 @@ private:
     static uint32_t             _retryAt;      // 4B：下次重试的绝对 millis
     static uint8_t              _retryCount;   // 1B：已重试次数（用于区分首次/慢速）
     static bool                 _stuckRestarted; // 1B：本轮 attempt 是否已做过 stuck restart
+    static uint8_t              _failuresSinceRadioReset; // 1B：距上次 radio reset 的连续失败次数
+    static uint16_t             _attemptCount; // 2B：本次启动累计 WiFi.begin 次数
+    static uint8_t              _radioResetCount; // 1B：本次启动完整 radio reset 次数
     static char                 _apSSID[28];   // 28B："ESP8266-Config-XXXX\0"
     static char                 _ip[16];       // 16B：点分十进制 IP
     static char                 _staSSID[64];  // 64B：缓存的 STA SSID，避免重连时重读 Flash
     static char                 _staPass[64];  // 64B：缓存的 STA 密码
 
     static void _startSTA(const char* ssid, const char* pass, bool keepAP = false);
+    static void _beginSTA(const char* ssid, const char* pass, bool keepAP);
+    static void _resetRadioAndStartSTA();
     static void _startAP();
     static void _handleConnected();
     static void _scheduleRetry();

@@ -34,6 +34,16 @@
 
 没有内容的小节可以省略。
 
+## 2026-08-30
+
+### 修复
+
+- WiFi 有凭证但连续连接失败达到 6 次时执行有界 `WIFI_OFF → WIFI_STA` radio 恢复并重新启动 STA/DHCP，修复路由器晚启动或重启后普通 `disconnect + begin` 可能长期停在 ESP8266 SDK station 卡态的问题；不重启 MCU、不清除配置、不进入 AP。
+
+### 新增
+
+- `Esp8266BaseWiFi::attemptCount()`、`radioResetCount()` 及 `/health` 的 `wifiAttempt`、`wifiRadioReset` 提供本次启动的 WiFi 恢复证据。
+
 ## 2026-08-28
 
 ### 修复

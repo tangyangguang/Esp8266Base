@@ -13,6 +13,9 @@ uint32_t             Esp8266BaseWiFi::_connectStart   = 0;
 uint32_t             Esp8266BaseWiFi::_retryAt        = 0;
 uint8_t              Esp8266BaseWiFi::_retryCount     = 0;
 bool                 Esp8266BaseWiFi::_stuckRestarted = false;
+uint8_t              Esp8266BaseWiFi::_failuresSinceRadioReset = 0;
+uint16_t             Esp8266BaseWiFi::_attemptCount   = 0;
+uint8_t              Esp8266BaseWiFi::_radioResetCount = 0;
 char                 Esp8266BaseWiFi::_apSSID[28]     = "";
 char                 Esp8266BaseWiFi::_ip[16]         = "";
 char                 Esp8266BaseWiFi::_staSSID[64]    = "";
@@ -36,13 +39,15 @@ bool Esp8266BaseWiFi::begin() {
     WiFi.persistent(false);
     WiFi.setAutoConnect(false);
     WiFi.setAutoReconnect(false);
-    ESP8266BASE_LOG_I("WiFi", "wifi_retry_policy connect_timeout=%lus sta_settle=%ums stuck_disconnected=%lus fast_retry=%lus fast_count=%u slow_retry=%lus",
+    ESP8266BASE_LOG_I("WiFi", "wifi_retry_policy connect_timeout=%lus sta_settle=%ums stuck_disconnected=%lus fast_retry=%lus fast_count=%u slow_retry=%lus radio_reset_failures=%u radio_settle=%ums",
                       (unsigned long)(ESP8266BASE_WIFI_CONNECT_TIMEOUT / 1000UL),
                       (unsigned)ESP8266BASE_WIFI_STA_SETTLE_MS,
                       (unsigned long)(ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS / 1000UL),
                       (unsigned long)(ESP8266BASE_WIFI_RETRY_FAST / 1000UL),
                       (unsigned)ESP8266BASE_WIFI_RETRY_FAST_COUNT,
-                      (unsigned long)(ESP8266BASE_WIFI_RETRY_SLOW / 1000UL));
+                      (unsigned long)(ESP8266BASE_WIFI_RETRY_SLOW / 1000UL),
+                      (unsigned)ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT,
+                      (unsigned)ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS);
 
     // 读取凭证并缓存，后续重连直接使用缓存，避免重复读 Flash
 #if ESP8266BASE_USE_WIFI_CONFIG
@@ -101,7 +106,7 @@ void Esp8266BaseWiFi::handle() {
                                       (unsigned)status,
                                       (unsigned long)(now - _connectStart),
                                       (int)WiFi.RSSI());
-                    WiFi.disconnect(false);
+                    WiFi.disconnect(false, false);
                     _scheduleRetry();
                     break;
                 }
@@ -112,7 +117,7 @@ void Esp8266BaseWiFi::handle() {
                                   (unsigned)status,
                                   (unsigned long)(now - _connectStart),
                                   (int)WiFi.RSSI());
-                WiFi.disconnect(false);
+                WiFi.disconnect(false, false);
                 _startSTA(_staSSID, _staPass);
                 _stuckRestarted = true;
                 break;
@@ -126,7 +131,7 @@ void Esp8266BaseWiFi::handle() {
                                   (unsigned)status,
                                   (unsigned long)(now - _connectStart),
                                   (int)WiFi.RSSI());
-                WiFi.disconnect(false);
+                WiFi.disconnect(false, false);
                 _scheduleRetry();
             }
             break;
@@ -210,6 +215,8 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
         delay(100);
     }
 
+    _retryCount = 0;
+    _failuresSinceRadioReset = 0;
     _startSTA(_staSSID, _staPass);
     return true;
 }
@@ -268,6 +275,14 @@ Esp8266BaseWiFiState Esp8266BaseWiFi::state() {
     return _state;
 }
 
+uint16_t Esp8266BaseWiFi::attemptCount() {
+    return _attemptCount;
+}
+
+uint8_t Esp8266BaseWiFi::radioResetCount() {
+    return _radioResetCount;
+}
+
 const char* Esp8266BaseWiFi::apSSID() {
     return _apSSID;
 }
@@ -278,13 +293,20 @@ const char* Esp8266BaseWiFi::apSSID() {
 void Esp8266BaseWiFi::_startSTA(const char* ssid, const char* pass, bool keepAP) {
     if (keepAP) {
         WiFi.mode(WIFI_AP_STA);
-        WiFi.disconnect(false);
+        WiFi.disconnect(false, false);
     } else {
         WiFi.mode(WIFI_STA);
-        WiFi.disconnect(false);
+        WiFi.disconnect(false, false);
     }
     delay(ESP8266BASE_WIFI_STA_SETTLE_MS);
+    _beginSTA(ssid, pass, keepAP);
+}
+
+void Esp8266BaseWiFi::_beginSTA(const char* ssid, const char* pass, bool keepAP) {
     WiFi.begin(ssid, (pass && strlen(pass) > 0) ? pass : nullptr);
+    if (_attemptCount < 0xFFFFU) {
+        _attemptCount++;
+    }
     if (!keepAP) {
         _state = Esp8266BaseWiFiState::CONNECTING;
     }
@@ -296,6 +318,35 @@ void Esp8266BaseWiFi::_startSTA(const char* ssid, const char* pass, bool keepAP)
     ESP8266BASE_LOG_I("WiFi", "station_connecting ssid=%s password=%s password_length=%u keep_config_ap=%s status=%s status_code=%u",
                       ssid, pass ? pass : "", (unsigned)(pass ? strlen(pass) : 0),
                       keepAP ? "yes" : "no", _statusName(status), (unsigned)status);
+}
+
+void Esp8266BaseWiFi::_resetRadioAndStartSTA() {
+    const uint8_t status = (uint8_t)WiFi.status();
+    ESP8266BASE_LOG_W("WiFi",
+                      "station_radio_reset_begin failures=%u total_attempts=%u status=%s status_code=%u",
+                      (unsigned)_failuresSinceRadioReset,
+                      (unsigned)_attemptCount,
+                      _statusName(status),
+                      (unsigned)status);
+
+    // 普通 disconnect + begin 仍可能保留 ESP8266 SDK 的卡滞 station 状态。
+    // 只重置无线子系统，不重启 MCU、不触碰 Config，也不切换到配置 AP。
+    WiFi.disconnect(false, false);
+    const bool offOk = WiFi.mode(WIFI_OFF);
+    delay(ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS);
+    const bool staOk = WiFi.mode(WIFI_STA);
+    delay(ESP8266BASE_WIFI_STA_SETTLE_MS);
+
+    if (_radioResetCount < 0xFFU) {
+        _radioResetCount++;
+    }
+    _failuresSinceRadioReset = 0;
+    ESP8266BASE_LOG_W("WiFi",
+                      "station_radio_reset_complete reset_count=%u off=%s sta=%s action=reconnect",
+                      (unsigned)_radioResetCount,
+                      offOk ? "ok" : "failed",
+                      staOk ? "ok" : "failed");
+    _beginSTA(_staSSID, _staPass, false);
 }
 
 void Esp8266BaseWiFi::_startAP() {
@@ -322,6 +373,7 @@ void Esp8266BaseWiFi::_handleConnected() {
     _state         = Esp8266BaseWiFiState::CONNECTED;
     _retryCount    = 0;
     _stuckRestarted = false;
+    _failuresSinceRadioReset = 0;
     char gateway[16];
     char dns[16];
     _formatIP(WiFi.gatewayIP(), gateway, sizeof(gateway));
@@ -333,6 +385,14 @@ void Esp8266BaseWiFi::_handleConnected() {
 void Esp8266BaseWiFi::_scheduleRetry() {
     if (_retryCount < 0xFF) {
         _retryCount++;
+    }
+    if (_failuresSinceRadioReset < 0xFFU) {
+        _failuresSinceRadioReset++;
+    }
+    if (ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT > 0 &&
+        _failuresSinceRadioReset >= ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT) {
+        _resetRadioAndStartSTA();
+        return;
     }
     uint32_t interval = (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT)
         ? ESP8266BASE_WIFI_RETRY_FAST

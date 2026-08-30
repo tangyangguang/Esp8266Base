@@ -154,10 +154,16 @@ def test_wifi_retry_rules() -> None:
     fast_count = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RETRY_FAST_COUNT")
     slow = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RETRY_SLOW")
     stuck = parse_define_int(wifi_h, "ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS")
+    radio_reset_failures = parse_define_int(
+        wifi_h, "ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT")
+    radio_reset_settle = parse_define_int(
+        wifi_h, "ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS")
     assert_eq(fast, 2000, "default fast retry")
     assert_eq(fast_count, 3, "default fast retry count")
     assert_eq(slow, 60000, "default slow retry")
     assert_eq(stuck, 7000, "default stuck disconnected restart")
+    assert_eq(radio_reset_failures, 6, "default WiFi radio reset failure count")
+    assert_eq(radio_reset_settle, 100, "default WiFi radio reset settle")
     assert_eq([retry_interval(i, fast_count, fast, slow) for i in range(1, 6)],
               [2000, 2000, 2000, 60000, 60000],
               "retry interval sequence")
@@ -169,6 +175,25 @@ def test_wifi_retry_rules() -> None:
         fail("stuck restart must not replace the full connect timeout")
     if "stuck_disconnected=%lus" not in wifi_cpp:
         fail("wifi_retry_policy must include stuck_disconnected")
+    require_token(wifi_cpp, "WiFi.disconnect(false, false)",
+                  "WiFi reconnect must retain SDK credentials")
+    require_token(wifi_cpp, "WiFi.mode(WIFI_OFF)",
+                  "WiFi repeated failures must reset the radio")
+    require_token(wifi_cpp, "WiFi.mode(WIFI_STA)",
+                  "WiFi radio reset must restore STA mode")
+    require_token(wifi_cpp, "station_radio_reset_begin",
+                  "WiFi radio reset start diagnostic")
+    require_token(wifi_cpp, "station_radio_reset_complete",
+                  "WiFi radio reset completion diagnostic")
+    require_token(wifi_cpp, "_failuresSinceRadioReset >= ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT",
+                  "WiFi radio reset failure threshold")
+    if "ESP.restart()" in wifi_cpp:
+        fail("WiFi recovery must not reboot the MCU")
+    web_cpp = read("src/Esp8266BaseWeb.cpp")
+    require_token(web_cpp, r'\"wifiAttempt\":%u', "health WiFi attempt evidence")
+    require_token(web_cpp, r'\"wifiRadioReset\":%u', "health WiFi radio reset evidence")
+    require_token(networking, "不重启 MCU、不清除 Config、不进入 AP",
+                  "bounded WiFi radio recovery contract")
     require_token(wifi_cpp, "_isDue(now, _retryAt)", "wrap-safe WiFi retry deadline")
     require_token(wifi_cpp, "static_cast<int32_t>(now - due) >= 0",
                   "WiFi retry signed delta comparison")
@@ -178,7 +203,6 @@ def test_wifi_retry_rules() -> None:
     require_token(wifi_cpp, "reason=password_too_long", "WiFi password length validation")
     require_token(wifi_cpp, "max=32", "WiFi SSID length limit log")
     require_token(wifi_cpp, "max=63", "WiFi password length limit log")
-    web_cpp = read("src/Esp8266BaseWeb.cpp")
     require_token(web_cpp, "ssidArg.length() > 32", "Web WiFi raw SSID length validation")
     require_token(web_cpp, "passArg.length() > 63", "Web WiFi raw password length validation")
     require_token(web_cpp, "reason=password_too_long length=%u max=63", "Web WiFi password too long log")
@@ -1072,8 +1096,14 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, "Clear File Logs", "System page log clear action")
     require_token(web_cpp, "_redirect(ok ? \"/system?cleared=1\" : \"/system?error=clear_failed\")",
                   "log clear returns to System page")
-    require_token(web_cpp, "void Esp8266BaseWeb::_handleNotFound() {\n    _markRequest();\n    if (!checkAuth()) return;",
-                  "404 requires Basic Auth")
+    not_found_start = web_cpp.index("void Esp8266BaseWeb::_handleNotFound()")
+    not_found_end = web_cpp.index("\n}\n#endif", not_found_start)
+    not_found = web_cpp[not_found_start:not_found_end]
+    favicon_check = not_found.index('uri == "/favicon.ico"')
+    auth_check = not_found.index("if (!checkAuth()) return;")
+    not_found_response = not_found.index('_server.send(404, "text/plain", "Not found")')
+    if not favicon_check < auth_check < not_found_response:
+        fail("only favicon probes may bypass 404 Basic Auth")
     require_token(web_cpp, '_server.send(401, "application/json"', "hostname API JSON 401")
     require_token(web_cpp, '\\"error\\":\\"unauthorized\\"', "hostname API unauthorized JSON body")
     require_token(web_doc, "未认证时返回 JSON 401", "Web JSON API auth policy")

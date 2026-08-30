@@ -71,6 +71,8 @@ station_connect_stuck_restarting ssid=IOTHOME status=WL_DISCONNECTED status_code
 station_connect_stuck_retrying ssid=IOTHOME status=WL_DISCONNECTED status_code=7 elapsed=7000ms restart_count=1 rssi=-72
 station_connect_timeout ssid=IOTHOME status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
 station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
+station_radio_reset_begin failures=6 total_attempts=9 status=WL_DISCONNECTED status_code=7
+station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 ```
 
 `status` 是 `WiFi.status()` 的可读名称，`status_code` 是原始数值。常见值包括 `WL_NO_SSID_AVAIL`、`WL_CONNECT_FAILED`、`WL_CONNECTION_LOST`、`WL_DISCONNECTED`。
@@ -85,6 +87,10 @@ station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECT
 单次连接观察窗口为 `ESP8266BASE_WIFI_CONNECT_TIMEOUT`，默认 20s。每次切换到 STA 并断开旧状态后，会等待 `ESP8266BASE_WIFI_STA_SETTLE_MS`，默认 150ms，再调用 `WiFi.begin()`；这用于降低 ESP8266 上电后首轮连接停在 `WL_DISCONNECTED` 的概率。
 
 如果连接开始后持续停在 `WL_DISCONNECTED` 且超过 `ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS`，默认 7s，本库会记录 `station_connect_stuck_restarting` 并提前重启本轮 `WiFi.begin()`，避免 ESP8266 WiFi SDK 卡住时白等完整 20s。每个连接 attempt 最多做 1 次 stuck restart；如果重启后仍然卡住，会记录 `station_connect_stuck_retrying` 并进入快速重试，不再继续等满 20s。
+
+普通连接 attempt 连续失败达到 `ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT`（默认 6）时，本库执行一次有界的 WiFi radio 完整恢复：断开 STA、切换 `WIFI_OFF`、等待 `ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新调用 `WiFi.begin()`。这用于恢复路由器晚于终端启动或路由器重启时，ESP8266 SDK 可能长期停在 station 连接状态的问题。radio reset 不重启 MCU、不清除 Config、不进入 AP；已有业务仍按本地状态机运行。路由器持续不可用时，每 6 次失败最多执行一次 radio reset，连接成功后重新计数。
+
+`/health` 的 `wifiAttempt` 和 `wifiRadioReset` 分别表示本次启动累计 `WiFi.begin()` 次数和 radio reset 次数，可在恢复后确认是否走过升级恢复路径。
 
 ---
 

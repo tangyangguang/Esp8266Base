@@ -356,9 +356,11 @@ static const char* ssid();
 static int rssi();
 static void macAddressTo(char* out, size_t len);
 static Esp8266BaseWiFiState state();
+static uint16_t attemptCount();
+static uint8_t radioResetCount();
 static const char* apSSID();
 ```
-状态查询。`ip()` 未连接时返回空字符串。`ssid()` 返回当前内存缓存中的 STA SSID。`rssi()` 仅连接后有效，未连接时返回 0。`macAddressTo()` 输出 STA MAC 地址。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
+状态查询。`ip()` 未连接时返回空字符串。`ssid()` 返回当前内存缓存中的 STA SSID。`rssi()` 仅连接后有效，未连接时返回 0。`macAddressTo()` 输出 STA MAC 地址。`attemptCount()` 与 `radioResetCount()` 返回本次启动累计 STA 连接次数和 WiFi radio 完整重置次数，计数饱和后不回绕。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
 
 ### 默认参数
 
@@ -370,8 +372,12 @@ static const char* apSSID();
 | 快速重试间隔 | 2000ms（`ESP8266BASE_WIFI_RETRY_FAST`） |
 | 快速重试次数 | 3（`ESP8266BASE_WIFI_RETRY_FAST_COUNT`） |
 | 慢速重试间隔 | 60000ms（`ESP8266BASE_WIFI_RETRY_SLOW`） |
+| Radio reset 连续失败阈值 | 6（`ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT`） |
+| `WIFI_OFF` 稳定等待 | 100ms（`ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS`） |
 | AP SSID | `ESP8266-Config-<ChipID后4位>` |
 | AP 密码 | 空（开放 AP） |
+
+连续失败达到 radio reset 阈值时，只重置 WiFi radio 并重新进入 STA，不重启 MCU、不清除凭证、不进入 AP。该恢复路径用于路由器晚启动或重启后普通 `disconnect + begin` 无法退出 ESP8266 SDK 卡滞状态的场景。
 
 ---
 

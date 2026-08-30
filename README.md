@@ -69,7 +69,7 @@ void loop() {
 | 主入口 | `Esp8266Base` | 初始化协调、统一 handle |
 | 日志 | `Esp8266BaseLog` | 串口日志、编译期等级、时间戳 |
 | 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
-| WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、状态机 |
+| WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、持续重试与有界 radio 卡态恢复 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
 | OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、业务安全生命周期回调 |
 | MQTT | `Esp8266BaseMQTT` | 可选 TLS MQTT 传输、门控、退避、OTA 协调和诊断 |

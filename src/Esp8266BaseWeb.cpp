@@ -1713,8 +1713,12 @@ void Esp8266BaseWeb::_handleHealth() {
     client.write((const uint8_t*)json, strlen(json));
     snprintf(json, sizeof(json),
              "\"wifi\":\"%s\",\"ip\":\"%s\",\"ntp\":\"%s\","
+             "\"wifiAttempt\":%u,\"wifiRadioReset\":%u,"
              "\"mqtt\":\"%s\",\"mqttConnected\":%s,",
-             wifiState, ip, ntpState, mqttState, mqttConnected ? "true" : "false");
+             wifiState, ip, ntpState,
+             (unsigned)Esp8266BaseWiFi::attemptCount(),
+             (unsigned)Esp8266BaseWiFi::radioResetCount(),
+             mqttState, mqttConnected ? "true" : "false");
     client.write((const uint8_t*)json, strlen(json));
     snprintf(json, sizeof(json),
              "\"mqttAttempt\":%lu,\"mqttLastReason\":\"%s\",\"mqttTlsError\":%d,"

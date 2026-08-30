@@ -33,6 +33,8 @@
 loaded_saved_wifi_credentials ssid=... password=... password_length=...
 station_connect_timeout ssid=... status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
 station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
+station_radio_reset_begin failures=6 total_attempts=9 status=WL_DISCONNECTED status_code=7
+station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 ```
 
 可能原因：
@@ -46,8 +48,11 @@ station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECT
 
 - 日志会明文显示密码，先核对密码。
 - 看 `status`、`status_code`、RSSI、路由器 DHCP 列表。
+- 看 `/health` 的 `wifiAttempt`、`wifiRadioReset`；`wifiRadioReset` 增长说明普通重试未恢复，状态机已经执行 `WIFI_OFF → WIFI_STA` 升级恢复。
 - 临时靠近路由器测试。
 - 清除凭证后重新配网。
+
+已有凭证且路由器晚于设备启动时，设备应在路由器恢复后自动连接，不需要再次给设备断电。连续 6 次普通连接失败会完整重置一次 WiFi radio，但不会重启 MCU 或切到 AP。如果 radio reset 后仍长期离线，优先检查串口中的 `off` / `sta` 结果、供电与 EN/RST 上电波形、路由器 2.4GHz 和 DHCP，而不是增加整机循环重启。
 
 ---
 
