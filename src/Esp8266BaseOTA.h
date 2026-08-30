@@ -23,7 +23,8 @@ enum class Esp8266BaseOTAFailure : uint8_t {
     NO_FIRMWARE_DATA,
     CONFIG_FLUSH_FAILED,
     FILELOG_FLUSH_FAILED,
-    MQTT_PAUSE_FAILED
+    MQTT_PAUSE_FAILED,
+    PREPARE_TIMEOUT
 };
 
 // prepare 可把拒绝原因写入 reason（含结尾 \0 的容量为 reasonLen）。有活动 MQTT
@@ -38,6 +39,9 @@ public:
     // 注册 POST /ota 路由到 Esp8266BaseWeb::server()
     // 必须在 Esp8266BaseWeb::begin() 之后调用
     static bool begin();
+
+    // 推进两阶段 OTA 准备租约；由 Esp8266Base::handle() 自动调用。
+    static void handle();
 
     // OTA 是否正在上传
     static bool isInProgress();
@@ -58,8 +62,9 @@ private:
     static uint16_t _status;  // 2B：上传完成时返回的 HTTP 状态码
     static uint32_t _startedMs;       // 4B：上传开始 millis
     static uint32_t _uploadedBytes;   // 4B：已写入固件字节数
-    static uint32_t _requestBytes;    // 4B：multipart request Content-Length
+    static uint32_t _requestBytes;    // 4B：上传长度；准备阶段复用为租约截止 millis
     static uint8_t  _lastProgressPct; // 1B：最近一次 25% 阶梯进度日志
+    static bool _prepared;            // 1B：MQTT/TLS 已在独立准备请求中释放
     static char _failureMessage[64]; // 失败时返回给客户端的固定长度原因
     static Esp8266BaseOTAPrepareCallback _prepareCallback;
     static Esp8266BaseOTAFailureCallback _failureCallback;
@@ -68,9 +73,11 @@ private:
     // 静态回调函数（注册给 ESP8266WebServer，无捕获，无 std::function 驻留堆）
     static void _handleUploadComplete();
     static void _handleUploadChunk();
+    static void _handlePrepareRequest();
+    static void _expirePrepare();
     static void _pauseWatchdog();
     static void _resumeWatchdog();
-    static void _resetRequestState();
+    static void _resetRequestState(bool preservePrepared = false);
     static void _notifyFailure(Esp8266BaseOTAFailure failure);
     static void _notifySuccess();
     static void _failUpload(uint16_t status, const char* message, bool abortUpdate,

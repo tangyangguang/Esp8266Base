@@ -214,7 +214,7 @@ Web Auth 策略：认证用户名来自 `ESP8266BASE_WEB_AUTH_USER` 或 `Esp8266
 
 Hostname 策略：默认 hostname 来自 `ESP8266BASE_DEFAULT_HOSTNAME`；设备已保存的 `eb_hostname` 优先级最高。hostname 必须为 1-32 位小写字母、数字或短横线，不能以短横线开头或结尾，不允许 `.local`。System 页面和 `/api/system/hostname` 可保存新 hostname，重启后对 mDNS、Web 标题和设备发现生效；`clearAll()` 后恢复编译期默认值。
 
-OTA 策略：`GET /ota` 页面和 `POST /ota` 上传都强制使用同一组 Basic Auth。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态。
+OTA 策略：`GET /ota` 页面、空 body `POST /ota` 两阶段准备和 multipart `POST /ota` 上传都强制使用同一组 Basic Auth。命令行客户端推荐先在独立小请求中完成 MQTT retained shutdown/PUBACK/TLS 释放，收到 `READY` 后于 15 秒租约内上传固件；未使用租约会自动恢复 MQTT。上传页面使用 XMLHttpRequest 显示百分比、已上传大小和结果状态，并保留单请求兼容流程。
 
 健康接口：`GET /health` 无需认证，返回固定 JSON；其中 `wifiSsid` 和 `wifiRssi` 分别表示当前 STA WiFi 名称和 RSSI(dBm)，用于现场对比网络环境与 OTA 速度。因此 SSID 对同一局域网可见，但接口不输出 WiFi 密码、broker、MQTT 身份或证书。
 

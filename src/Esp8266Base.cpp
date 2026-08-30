@@ -291,7 +291,12 @@ void Esp8266Base::handle() {
 #endif
 #endif
 
-    // 7. MQTT handle：NTP 本轮推进后再检查时间门控。
+    // 7. OTA 准备租约：两阶段上传未及时开始时恢复 MQTT。
+#if ESP8266BASE_USE_OTA
+    Esp8266BaseOTA::handle();
+#endif
+
+    // 8. MQTT handle：NTP 本轮推进后再检查时间门控。
 #if ESP8266BASE_USE_MQTT
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::feed();
@@ -302,7 +307,7 @@ void Esp8266Base::handle() {
 #endif
 #endif
 
-    // 8. Watchdog handle — 最后检查，再喂狗，确保本轮所有模块都已执行且未超时
+    // 9. Watchdog handle — 最后检查，再喂狗，确保本轮所有模块都已执行且未超时
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::handle();
     Esp8266BaseWatchdog::feed();

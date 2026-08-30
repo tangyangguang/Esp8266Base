@@ -76,7 +76,7 @@ Esp8266Base（主入口）
 6. Esp8266BaseWiFi::begin()         — 读取凭证并缓存，启动状态机（非阻塞）
 7. Esp8266BaseWatchdog::begin()     — `ESP8266BASE_USE_WATCHDOG=1` 时
 8. Esp8266BaseWeb::begin()          — `ESP8266BASE_USE_WEB=1` 时（注册内置路由，开始监听）
-9. Esp8266BaseOTA::begin()          — `ESP8266BASE_USE_OTA=1` 时（要求 Web，注册 POST /ota）
+9. Esp8266BaseOTA::begin()          — `ESP8266BASE_USE_OTA=1` 时（要求 Web，注册 POST /ota；`handle()` 维护准备租约）
 10. Esp8266BaseMQTT::begin()        — `ESP8266BASE_USE_MQTT=1` 时准备固定区与 TLS，不立即建连
 11. Esp8266Base::logDiagnostics()   — 输出启动诊断日志
 ```
@@ -209,7 +209,7 @@ MQTT 传输直接使用 `BearSSL::WiFiClientSecure` 实现所需的 MQTT 3.1.1 �
 
 受控下线是 `CONNECTED → SHUTDOWN_WAIT_ACK → SHUTDOWN_DISCONNECTING → PAUSED` 的单向状态机。`beginShutdown(topic, payload)` 把 retained QoS1 最终消息复制到固定槽；进入后立即禁止新的 publish/subscribe/message/reconnect/readiness。只有固定槽精确匹配最终 packetId 的 PUBACK 才发送正常 MQTT DISCONNECT，随后 flush socket、释放 TLS 并得到 `SUCCESS`；不匹配 PUBACK 不推进。入队失败、连接丢失或 PUBACK 超时保留明确结果和暂停门禁，绝不主动用异常 close 冒充正常成功。业务显式 `resumeAfterShutdown()` 才重新允许连接。
 
-OTA 顺序为：业务 prepare 完成执行器安全停机；若存在活动会话则调用 `beginShutdown()` → `pauseForOTA()` 有界等待匹配 PUBACK 和正常 MQTT DISCONNECT/TLS 释放 → `Update.begin()`。MQTT 未配置、未 begin 或底层已完全 disconnected 时，`pauseForOTA()` 直接进入 `PAUSED` 并允许 OTA，同时保留 `NOT_CONNECTED` 或原失败结果；这只表示无活动传输，不表示 shutdown 消息成功。CONNECTED、CONNECTING 或 transport 尚未释放且未完成受控下线时拒绝。失败路径先恢复 Watchdog 和 MQTT 连接许可，成功路径保持暂停并重启。
+OTA 推荐顺序为：认证后的空 body `POST /ota` 先调用业务 prepare 完成执行器安全停机；若存在活动会话则调用 `beginShutdown()` → `pauseForOTA()` 有界等待匹配 PUBACK 和正常 MQTT DISCONNECT/TLS 释放，返回 `READY` 后才向同路径建立 multipart 大文件上传请求并进入 `Update.begin()`。准备租约为 15 秒，未使用时由 `Esp8266BaseOTA::handle()` 恢复 MQTT 并通知业务 failure callback；这避免上传 TCP 与 MQTT TLS 同时争抢有限 pbuf。未做准备的旧客户端仍在首个固件块内兼容执行原流程。MQTT 未配置、未 begin 或底层已完全 disconnected 时，`pauseForOTA()` 直接进入 `PAUSED` 并允许 OTA，同时保留 `NOT_CONNECTED` 或原失败结果；这只表示无活动传输，不表示 shutdown 消息成功。CONNECTED、CONNECTING 或 transport 尚未释放且未完成受控下线时拒绝。失败路径先恢复 Watchdog 和 MQTT 连接许可，成功路径保持暂停并重启。
 
 ---
 

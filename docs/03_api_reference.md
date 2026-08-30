@@ -633,8 +633,9 @@ OTA 模块由 `Esp8266Base` 在内部初始化，应用代码通常无需直接�
 
 ```cpp
 static bool begin();
+static void handle();
 ```
-注册 POST /ota 上传处理。必须在 `Esp8266BaseWeb::begin()` 之后调用。
+`begin()` 注册 POST /ota 上传处理，必须在 `Esp8266BaseWeb::begin()` 之后调用；`handle()` 推进两阶段准备租约，由 `Esp8266Base::handle()` 自动调用。
 
 ```cpp
 static bool isInProgress();
@@ -652,18 +653,18 @@ static void setLifecycleCallbacks(Esp8266BaseOTAPrepareCallback prepare,
                                   Esp8266BaseOTASuccessCallback success = nullptr);
 ```
 
-回调均为可选固定函数指针。prepare 在首个固件块通过头检查后运行，可写入最长 63 字符的拒绝原因；返回 `false` 时 MQTT 不受影响且不启动 Update。通过后基础库自动暂停 MQTT/TLS，再调用 `Update.begin()`。failure 对每个失败请求最多调用一次；Watchdog 与 MQTT 重连许可在 failure 之前恢复。Config/FileLog flush 在 `Update.end(true)` 前执行，失败会中止 Update。success 仅在 Update 成功后调用，MQTT 保持关闭等待重启。
+回调均为可选固定函数指针。prepare 可由认证后的空 body `POST /ota` 独立触发，也可兼容地在首个固件块通过头检查后运行；可写入最长 63 字符的拒绝原因。独立准备成功后 MQTT/TLS 保持暂停 15 秒，后续 multipart 上传直接进入 `Update.begin()`；租约到期且上传未开始时先恢复 MQTT，再以 `PREPARE_TIMEOUT` 调用 failure。failure 对每个失败或准备超时最多调用一次；Watchdog 与 MQTT 重连许可在 failure 之前恢复。Config/FileLog flush 在 `Update.end(true)` 前执行，失败会中止 Update。success 仅在 Update 成功后调用，MQTT 保持关闭等待重启。
 
 ### OTA 行为
 
 1. GET /ota 页面使用 Web Basic Auth；页面内用 XMLHttpRequest 上传并显示进度
-2. POST /ota 在上传开始时强制验证 Basic Auth；未认证请求返回 `401 Unauthorized`
+2. 推荐先发送空 body `POST /ota`：认证、业务 prepare、retained shutdown/PUBACK 和 TLS 释放全部在无固件 body 的独立连接完成，返回 `READY` 后获得 15 秒上传租约；后续同路径 multipart POST 上传固件，旧客户端可跳过准备
 3. 页面提交前：内置 OTA 页用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验，失败时不发起上传并提示 `Invalid firmware: not an ESP8266 app image`
-4. 上传开始：启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，日志输出 `upload_started`
-5. 首个数据块：服务端做固件头检查，业务 prepare 通过后暂停 MQTT/TLS；`ota_pause` 在 TLS 释放判定后精确输出 `heap` 和最大连续块 `max` 的原始字节值，随后调用 `Update.begin(ESP.getFreeSketchSpace())`
+4. 上传开始：强制验证 Basic Auth；启用 `ESP8266BASE_USE_WATCHDOG=1` 时调用 `Esp8266BaseWatchdog::pause()`，日志输出 `upload_started`
+5. 首个数据块：服务端做固件头检查；已有准备租约时直接使用已释放的 MQTT/TLS，否则兼容执行原单请求 prepare/pause；随后调用 `Update.begin(ESP.getFreeSketchSpace())`
 6. 上传期间：分块写入固件，每块后 `yield()`，按 25% 阶梯输出 `upload_progress`，包含 `bytes`、`request_total`、`speed`、`elapsed`
 7. 上传完成：先检查 Config/FileLog flush，再调用 `Update.end(true)`；输出 `upload_finished`，启用 Watchdog 时 `resume()`，执行 success callback；成功响应最多等待 1500ms TCP ACK 后输出含 `response_delivered` 的 `upload_success`，再延迟 500ms 后 `ESP.restart()`
-8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息
+8. 上传失败或中止：启用 Watchdog 时 `resume()`，输出 `upload_failed` 或 `upload_aborted`，包含已上传字节、`elapsed`、`average_speed` 和可读失败原因，返回简短错误信息；未使用的准备租约由 `handle()` 自动恢复 MQTT
 
 OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZE_UNKNOWN`（该常量仅 ESP32 有效）。当前不计算 SHA256；页面预检和服务端 ESP8266 镜像头快速校验用于提前拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，接收是否成功由 `Update.write()` 和 `Update.end(true)` 的写入与镜像校验结果决定。浏览器进度条表示上传进度，不代表服务端已经接受固件。
 

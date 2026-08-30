@@ -165,6 +165,8 @@ MQTT 正常下线由业务调用 `Esp8266BaseMQTT::beginShutdown(topic, payload)
 
 MQTT_TERMINAL 的 OTA prepare callback 先完成执行器安全停机；存在活动 MQTT 会话时还要构造最终 availability 并调用 `beginShutdown()`。MQTT 未配置、未 begin 或 transport 已完全断开时可直接暂停并继续 OTA，但结果保持 `NOT_CONNECTED` 或原失败结果，不会伪装为 shutdown 成功；连接中或 transport 尚未释放仍会拒绝。完整代码见 `examples/mqtt_terminal`。
 
+命令行工具推荐先发送认证后的空 body `POST /ota`，让 MQTT retained shutdown、PUBACK 和 TLS 释放在固件 body 上传前完成；收到 `READY` 后应在 15 秒内向同路径发送 multipart 固件。未开始上传时设备会自动恢复 MQTT。直接上传仍保留兼容，但在小内存、TLS 在线和弱信号环境下不如两阶段流程稳定。
+
 ---
 
 ## 七、启用文件日志和配置审计

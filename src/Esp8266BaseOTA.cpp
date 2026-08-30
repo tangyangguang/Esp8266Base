@@ -31,6 +31,7 @@ uint32_t Esp8266BaseOTA::_startedMs = 0;
 uint32_t Esp8266BaseOTA::_uploadedBytes = 0;
 uint32_t Esp8266BaseOTA::_requestBytes = 0;
 uint8_t  Esp8266BaseOTA::_lastProgressPct = 0;
+bool Esp8266BaseOTA::_prepared = false;
 char Esp8266BaseOTA::_failureMessage[64] = "Upload failed";
 Esp8266BaseOTAPrepareCallback Esp8266BaseOTA::_prepareCallback = nullptr;
 Esp8266BaseOTAFailureCallback Esp8266BaseOTA::_failureCallback = nullptr;
@@ -38,6 +39,7 @@ Esp8266BaseOTASuccessCallback Esp8266BaseOTA::_successCallback = nullptr;
 
 static const uint8_t OTA_PROGRESS_STEP = 25;
 static const uint16_t OTA_RESPONSE_ACK_TIMEOUT_MS = 1500;
+static const uint32_t OTA_PREPARE_LEASE_MS = 15000UL;
 
 static uint32_t _elapsedMs(uint32_t startedMs) {
     return startedMs ? (uint32_t)(millis() - startedMs) : 0;
@@ -133,6 +135,13 @@ bool Esp8266BaseOTA::isInProgress() {
     return _inProgress;
 }
 
+void Esp8266BaseOTA::handle() {
+    if (_prepared && !_inProgress &&
+        static_cast<int32_t>(millis() - _requestBytes) >= 0) {
+        _expirePrepare();
+    }
+}
+
 void Esp8266BaseOTA::setLifecycleCallbacks(Esp8266BaseOTAPrepareCallback prepare,
                                            Esp8266BaseOTAFailureCallback failure,
                                            Esp8266BaseOTASuccessCallback success) {
@@ -159,13 +168,13 @@ void Esp8266BaseOTA::_resumeWatchdog() {
 #endif
 }
 
-void Esp8266BaseOTA::_resetRequestState() {
+void Esp8266BaseOTA::_resetRequestState(bool preservePrepared) {
     if (_updateStarted) {
         Update.end();
     }
     _resumeWatchdog();
 #if ESP8266BASE_USE_MQTT
-    Esp8266BaseMQTT::resumeAfterOTAFailure();
+    if (!preservePrepared) Esp8266BaseMQTT::resumeAfterOTAFailure();
 #endif
     _inProgress = false;
     _rejected = false;
@@ -179,8 +188,22 @@ void Esp8266BaseOTA::_resetRequestState() {
     _uploadedBytes = 0;
     _requestBytes = 0;
     _lastProgressPct = 0;
+    if (!preservePrepared) {
+        _prepared = false;
+    }
     strncpy(_failureMessage, "Upload failed", sizeof(_failureMessage) - 1);
     _failureMessage[sizeof(_failureMessage) - 1] = '\0';
+}
+
+void Esp8266BaseOTA::_expirePrepare() {
+    _prepared = false;
+    _requestBytes = 0;
+    _resumeWatchdog();
+#if ESP8266BASE_USE_MQTT
+    Esp8266BaseMQTT::resumeAfterOTAFailure();
+#endif
+    _notifyFailure(Esp8266BaseOTAFailure::PREPARE_TIMEOUT);
+    _failureNotified = false;
 }
 
 void Esp8266BaseOTA::_notifyFailure(Esp8266BaseOTAFailure failure) {
@@ -214,6 +237,8 @@ void Esp8266BaseOTA::_failUpload(uint16_t status, const char* message, bool abor
         _failureMessage[sizeof(_failureMessage) - 1] = '\0';
     }
     _inProgress = false;
+    _prepared = false;
+    _requestBytes = 0;
     if (abortUpdate && _updateStarted) {
         Update.end();
         _updateStarted = false;
@@ -229,6 +254,10 @@ void Esp8266BaseOTA::_failUpload(uint16_t status, const char* message, bool abor
 // 上传完成处理（HTTP 响应）
 // ----------------------------------------------------------------------------
 void Esp8266BaseOTA::_handleUploadComplete() {
+    if (_status == 200 && !_started && _uploadedBytes == 0) {
+        _handlePrepareRequest();
+        return;
+    }
     _inProgress = false;
     _resumeWatchdog();
 
@@ -289,6 +318,47 @@ void Esp8266BaseOTA::_handleUploadComplete() {
     }
 }
 
+void Esp8266BaseOTA::_handlePrepareRequest() {
+    _resetRequestState();
+    ESP8266WebServer& server = Esp8266BaseWeb::server();
+    if (!Esp8266BaseWeb::verifyAuth()) {
+        server.sendHeader("WWW-Authenticate", "Basic realm=\"ESP8266Base\"");
+        server.send(401, "text/plain", "Unauthorized");
+        return;
+    }
+
+    _pauseWatchdog();
+    _failureMessage[0] = '\0';
+    if (_prepareCallback && !_prepareCallback(_failureMessage, sizeof(_failureMessage))) {
+        _failureMessage[sizeof(_failureMessage) - 1] = '\0';
+        if (_failureMessage[0] == '\0') {
+            strncpy(_failureMessage, "OTA rejected by application", sizeof(_failureMessage) - 1);
+            _failureMessage[sizeof(_failureMessage) - 1] = '\0';
+        }
+        _failUpload(409, _failureMessage, false, Esp8266BaseOTAFailure::PREPARE_REJECTED);
+        server.send(409, "text/plain", _failureMessage);
+        _resetRequestState();
+        return;
+    }
+#if ESP8266BASE_USE_MQTT
+    if (!Esp8266BaseMQTT::pauseForOTA()) {
+        _failUpload(503, "MQTT/TLS did not stop for OTA", false,
+                    Esp8266BaseOTAFailure::MQTT_PAUSE_FAILED);
+        server.send(503, "text/plain", _failureMessage);
+        _resetRequestState();
+        return;
+    }
+#endif
+    _resumeWatchdog();
+    _prepared = true;
+    _requestBytes = millis() + OTA_PREPARE_LEASE_MS;
+    WiFiClient& client = server.client();
+    client.print(F("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                   "Content-Length: 5\r\nConnection: close\r\n\r\nREADY"));
+    client.flush();
+    client.stop();
+}
+
 // ----------------------------------------------------------------------------
 // 数据块处理（每块调用一次）
 // ----------------------------------------------------------------------------
@@ -296,7 +366,11 @@ void Esp8266BaseOTA::_handleUploadChunk() {
     HTTPUpload& upload = Esp8266BaseWeb::server().upload();
 
     if (upload.status == UPLOAD_FILE_START) {
-        _resetRequestState();
+        if (_prepared && static_cast<int32_t>(millis() - _requestBytes) >= 0) {
+            _expirePrepare();
+        }
+        const bool usePrepared = _prepared;
+        _resetRequestState(usePrepared);
         if (!Esp8266BaseWeb::verifyAuth()) {
             _failUpload(401, "Unauthorized", false, Esp8266BaseOTAFailure::UNAUTHORIZED);
             ESP8266BASE_LOG_W("OTA ", "upload_rejected reason=unauthorized");
@@ -330,7 +404,8 @@ void Esp8266BaseOTA::_handleUploadChunk() {
                 return;
             }
             _failureMessage[0] = '\0';
-            if (_prepareCallback && !_prepareCallback(_failureMessage, sizeof(_failureMessage))) {
+            if (!_prepared && _prepareCallback &&
+                !_prepareCallback(_failureMessage, sizeof(_failureMessage))) {
                 _failureMessage[sizeof(_failureMessage) - 1] = '\0';
                 if (_failureMessage[0] == '\0') {
                     strncpy(_failureMessage, "OTA rejected by application", sizeof(_failureMessage) - 1);
@@ -342,13 +417,14 @@ void Esp8266BaseOTA::_handleUploadChunk() {
                 return;
             }
 #if ESP8266BASE_USE_MQTT
-            if (!Esp8266BaseMQTT::pauseForOTA()) {
+            if (!_prepared && !Esp8266BaseMQTT::pauseForOTA()) {
                 _failUpload(503, "MQTT/TLS did not stop for OTA", false,
                             Esp8266BaseOTAFailure::MQTT_PAUSE_FAILED);
                 ESP8266BASE_LOG_E("OTA ", "upload_rejected reason=mqtt_pause_failed");
                 return;
             }
 #endif
+            _prepared = false;
             if (!Update.begin(ESP.getFreeSketchSpace())) {
                 _failUpload(500, "Update failed: begin failed", false,
                             Esp8266BaseOTAFailure::UPDATE_BEGIN_FAILED);

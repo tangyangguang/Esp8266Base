@@ -43,7 +43,7 @@
 | Esp8266BaseWiFi | <= 384B | 状态/计时器及恢复计数(22B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B) |
 | Esp8266BaseWeb | <= 1.20KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + auth/device/home/hostname/firmware/title/labels/active request + 4B 表单令牌；页面临时缓冲在栈上 |
 | Esp8266BaseWeb（MQTT_TERMINAL 0+0 路由） | <= 640B | ESP8266WebServer + auth/device/hostname/firmware/active request + 4B 表单令牌；应用数组和完整导航状态均排除 |
-| Esp8266BaseOTA | <= 160B | 上传状态/计时 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
+| Esp8266BaseOTA | <= 160B | 上传状态/计时 + 两阶段准备租约状态 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
 | Esp8266BaseFilesystem | <= 1B 自有状态 | LittleFS 挂载生命周期；文件系统实现的动态成本属于 Core |
 | Esp8266BaseMQTT | <= 2.4KB | 两个 664B 左右固定出站槽、约 424B RX 状态/窗口、固定配置/回调、`WiFiClientSecure` 对象和 96B TLS 错误文本；不含动态 TLS/证书 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 |

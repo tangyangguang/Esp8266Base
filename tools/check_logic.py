@@ -776,7 +776,7 @@ def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     for failure in ["UNAUTHORIZED", "INVALID_FIRMWARE", "PREPARE_REJECTED",
                     "UPDATE_BEGIN_FAILED", "UPDATE_WRITE_FAILED", "UPDATE_END_FAILED",
                     "UPLOAD_ABORTED", "NO_FIRMWARE_DATA", "CONFIG_FLUSH_FAILED",
-                    "FILELOG_FLUSH_FAILED", "MQTT_PAUSE_FAILED"]:
+                    "FILELOG_FLUSH_FAILED", "MQTT_PAUSE_FAILED", "PREPARE_TIMEOUT"]:
         require_token(ota_h, failure, f"OTA failure reason {failure}")
     require_token(ota_cpp, "pre_reboot_config_flush_failed", "OTA config flush failure diagnostic")
     require_token(ota_cpp, "action=abort_update", "OTA flush failure aborts update")
@@ -817,6 +817,12 @@ def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     require_token(ota_cpp, "OTA_RESPONSE_ACK_TIMEOUT_MS = 1500",
                   "OTA success response bounded ACK wait")
     require_token(ota_cpp, "response_delivered=%s", "OTA response delivery diagnostic")
+    require_token(ota_cpp, "_status == 200 && !_started && _uploadedBytes == 0",
+                  "OTA empty POST prepare dispatch")
+    require_token(ota_cpp, 'Content-Length: 5\\r\\nConnection: close\\r\\n\\r\\nREADY',
+                  "OTA prepare readiness response")
+    require_token(ota_cpp, "OTA_PREPARE_LEASE_MS = 15000UL", "OTA bounded prepare lease")
+    require_token(base_cpp, "Esp8266BaseOTA::handle();", "OTA prepare lease main-loop handling")
 
     for token in [".tmp", ".bak", "verify_failed", "backup_rename_failed",
                   "commit_rename_failed", "LittleFS.rename(bak, path)"]:

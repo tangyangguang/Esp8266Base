@@ -223,6 +223,7 @@ http://<device-ip>/ota
 
 - `GET /ota` 需要 Basic Auth。
 - `POST /ota` 也需要 Basic Auth。
+- 推荐命令行客户端先发送空 body `POST /ota`；它在独立小请求中完成业务 guard、retained shutdown/PUBACK 和 TLS 释放，返回 `READY` 后提供 15 秒上传租约，随后再向同路径发送 multipart 固件。租约未使用会自动恢复 MQTT 并通知业务 failure callback。
 - `ESP8266BASE_USE_OTA=0` 时不会注册 `/ota` 页面、System 页面 OTA 入口或上传 POST 路由，避免上传表单可见但 POST `/ota` 返回 404。
 - 上传页面先用 `FileReader` 读取前 16 字节做 ESP8266 app bin 快速校验；校验失败时不发起上传，直接提示 `Invalid firmware: not an ESP8266 app image`。
 - 上传页面使用 XMLHttpRequest 显示百分比和字节数；进度条表示浏览器上传进度，不代表服务端已经接受固件。
@@ -230,7 +231,7 @@ http://<device-ip>/ota
 - OTA 上传期间暂停 Watchdog，上传完成后恢复。
 - 服务端首个数据块也会做同一类 ESP8266 固件头快速校验，作为 curl 或绕过页面上传时的兜底；它用于拒绝明显错误平台、压缩包或明显非 ESP8266 app 镜像，校验通过后才调用 `Update.begin(ESP.getFreeSketchSpace())` 并写入 Flash。
 - 头检查通过后先调用可选业务 prepare callback；MQTT_TERMINAL 业务必须完成执行器安全停机，有活动会话时还要构造最终 availability 并调用 `beginShutdown()`。prepare 拒绝时 OTA 不开始写入。
-- prepare 通过后，活动会话必须有界完成 retained QoS1/PUBACK 和正常断开。MQTT 未配置、未 begin 或 transport 已完全断开时直接暂停并继续，但 shutdown 结果不伪装为成功；连接中或 transport 尚未释放则拒绝。
+- 两阶段客户端在大文件上传前先完成 prepare 和活动会话的 retained QoS1/PUBACK/正常断开，避免上传 TCP 与 MQTT TLS 在小 pbuf 池内争抢。旧客户端仍可在首个固件块内兼容执行同一流程。MQTT 未配置、未 begin 或 transport 已完全断开时直接暂停并继续，但 shutdown 结果不伪装为成功；连接中或 transport 尚未释放则拒绝。
 - 每个失败、拒绝或中止的上传请求最多调用一次可选 failure callback；Watchdog 和 MQTT 重连许可会先恢复，再调用业务 failure callback。
 - 基础库在 `Update.end(true)` 前检查配置和文件日志 flush；失败会中止 Update、返回 500 并恢复通信许可。成功时 MQTT 保持关闭，可选 success callback 只用于最终业务安全关闭，随后返回 2xx 并重启。
 - 成功后最多等待 1500ms 确认响应已被 TCP ACK，再关闭连接并重启；日志的 `response_delivered` 用于区分响应已送达和弱网下结果待确认。
