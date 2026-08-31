@@ -57,8 +57,10 @@ config_ap_started ssid=ESP8266-Config-18E7 ip=192.168.4.1 channel=6
 有 `eb_wifi_ssid` 时设备进入 STA 连接：
 
 ```text
-station_connecting ssid=IOTHOME password=... password_length=11 keep_config_ap=no status=WL_DISCONNECTED status_code=6
+station_connecting ssid=IOTHOME password=[redacted] password_length=11 keep_config_ap=no status=WL_DISCONNECTED status_code=6
 ```
+
+WiFi 密码只记录长度，正文始终输出 `[redacted]`；保存、加载与 Web 配网日志遵循同一规则。
 
 如果连接失败，设备不会自动打开 AP，而是持续重连。这是家庭设备的自恢复策略，不是连接失败兜底缺失：家庭场景更常见的是路由器重启、故障或上游 WiFi 暂时不可用，而不是用户修改了 SSID 或密码。保持 STA 重试后，路由器恢复时设备可以无需人工干预自动回连；如果超时切到 AP，设备会退出正常 STA 恢复路径，路由器恢复后反而不能自动回到原网络。
 

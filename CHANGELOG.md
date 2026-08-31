@@ -40,6 +40,7 @@
 
 - WiFi 有凭证但连续连接失败达到 6 次时执行有界 `WIFI_OFF → WIFI_STA` radio 恢复并重新启动 STA/DHCP，修复路由器晚启动或重启后普通 `disconnect + begin` 可能长期停在 ESP8266 SDK station 卡态的问题；不重启 MCU、不清除配置、不进入 AP。
 - 主动 UDP NTP 不再丢弃 transmit timestamp 的 32 位小数并把系统时间截断到整秒；现在结合 server receive/transmit 和本地单调 RTT 估算响应到达时 UTC，避免基础库人为引入接近 1 秒的量化误差。
+- WiFi 与 Web 认证日志不再输出明文密码，也不再在密码不匹配日志中输出候选值或期望值；保留非敏感的来源、长度和结果字段，密码正文统一为 `[redacted]`。
 
 ### 新增
 
@@ -47,9 +48,14 @@
 - `Esp8266BaseNTP::hasMeasuredUncertainty()`、`lastSyncRttMs()` 和 `estimatedUncertaintyMs()` 暴露主动 NTP 的 RTT/误差估计；系统 SNTP 无测量证据时明确不可用，业务不得伪造亚秒精度。
 - `ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES` 的可配置上限从 512B 扩展到 768B；默认仍为 512B。超过 512B 时固定出站槽拆成 512B head 与最多 256B tail 并顺序写出，不新增动态 packet，也不改变 BearSSL 4096/1024 缓冲。
 
+### 优化
+
+- 日志新增 `log_P()` 与 `ESP8266BASE_LOG_{D,I,W,E}_P`；格式串保留在 PROGMEM，供日志较多且 RAM 紧张的 ESP8266 业务模块使用，日志级别、输出 hook 和 128B 栈缓冲行为不变。
+
 ### 行为变化 / 使用建议
 
 - 业务只有在封闭协议单包确实超过 512B 且完成静态 RAM 与真机堆验证后才应提高出站上限；每增加 1B 会按 `ESP8266BASE_MQTT_TX_SLOTS` 增加固定 RAM，其他项目的默认构建不受影响。
+- `_P` 日志宏的 `fmt` 必须是字符串字面量；运行时格式串继续使用原日志宏。
 
 ## 2026-08-28
 

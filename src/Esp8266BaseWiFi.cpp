@@ -58,10 +58,8 @@ bool Esp8266BaseWiFi::begin() {
 #if ESP8266BASE_USE_WIFI_CONFIG
         Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_PASS, _staPass, sizeof(_staPass), "");
 #endif
-        // Intentionally log the WiFi password in plaintext for field debugging.
-        // This project treats plaintext WiFi credential logs as an observability feature.
-        ESP8266BASE_LOG_I("WiFi", "loaded_saved_wifi_credentials ssid=%s password=%s password_length=%u",
-                          _staSSID, _staPass, (unsigned)strlen(_staPass));
+        ESP8266BASE_LOG_I("WiFi", "loaded_saved_wifi_credentials ssid=%s password=[redacted] password_length=%u",
+                          _staSSID, (unsigned)strlen(_staPass));
         _startSTA(_staSSID, _staPass);
     } else {
         // 无凭证，直接进入 AP 配网
@@ -194,9 +192,8 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
     bool ssidSaved = true;
     bool passSaved = true;
 #endif
-    // Intentionally log the WiFi password in plaintext for field debugging.
-    ESP8266BASE_LOG_I("WiFi", "saving_wifi_credentials ssid=%s password=%s password_length=%u ssid_saved=%s password_saved=%s",
-                      ssid, safePass, (unsigned)passLen,
+    ESP8266BASE_LOG_I("WiFi", "saving_wifi_credentials ssid=%s password=[redacted] password_length=%u ssid_saved=%s password_saved=%s",
+                      ssid, (unsigned)passLen,
                       ssidSaved ? "yes" : "no", passSaved ? "yes" : "no");
     if (!ssidSaved || !passSaved) {
         ESP8266BASE_LOG_E("WiFi", "connect_rejected reason=failed_to_save_credentials");
@@ -313,10 +310,9 @@ void Esp8266BaseWiFi::_beginSTA(const char* ssid, const char* pass, bool keepAP)
     _connectStart = millis();
     _retryAt      = millis();   // 立即开始计时
     _stuckRestarted = false;
-    // Intentionally log the WiFi password in plaintext for field debugging.
     uint8_t status = (uint8_t)WiFi.status();
-    ESP8266BASE_LOG_I("WiFi", "station_connecting ssid=%s password=%s password_length=%u keep_config_ap=%s status=%s status_code=%u",
-                      ssid, pass ? pass : "", (unsigned)(pass ? strlen(pass) : 0),
+    ESP8266BASE_LOG_I("WiFi", "station_connecting ssid=%s password=[redacted] password_length=%u keep_config_ap=%s status=%s status_code=%u",
+                      ssid, (unsigned)(pass ? strlen(pass) : 0),
                       keepAP ? "yes" : "no", _statusName(status), (unsigned)status);
 }
 

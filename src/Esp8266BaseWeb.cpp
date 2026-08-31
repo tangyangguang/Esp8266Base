@@ -880,9 +880,8 @@ void Esp8266BaseWeb::_loadPersistedAuth() {
         strncpy(_authPass, pass, sizeof(_authPass) - 1);
         _authPass[sizeof(_authPass) - 1] = '\0';
     }
-    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s password=%s pass_source=%s password_length=%u",
-                      _authUser, _authPass,
-                      (passFound && pass[0]) ? "persisted" : "default",
+    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s password=[redacted] pass_source=%s password_length=%u",
+                      _authUser, (passFound && pass[0]) ? "persisted" : "default",
                       (unsigned)strlen(_authPass));
 }
 
@@ -1265,9 +1264,8 @@ void Esp8266BaseWeb::_handleWiFiPost() {
         return;
     }
 
-    // Intentionally log the WiFi password in plaintext for field debugging.
-    ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=%s password_length=%u",
-                      ssidArg.c_str(), passArg.c_str(), (unsigned)passArg.length());
+    ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=[redacted] password_length=%u",
+                      ssidArg.c_str(), (unsigned)passArg.length());
     if (Esp8266BaseWiFi::connect(ssidArg.c_str(), passArg.c_str())) {
         _redirect("/wifi?saved=1");
     } else {
@@ -1332,22 +1330,20 @@ void Esp8266BaseWeb::_handleAuthPost() {
     strncpy(confirm, confirmArg.c_str(), sizeof(confirm) - 1);
 
     if (strcmp(current, _authPass) != 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=current_password_mismatch current=%s expected=%s",
-                          current, _authPass);
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=current_password_mismatch current=[redacted] expected=[redacted]");
         _redirect("/auth?error=current");
         return;
     }
     if (strcmp(newPass, confirm) != 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=mismatch new=%s confirm=%s",
-                          newPass, confirm);
+        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=mismatch new=[redacted] confirm=[redacted]");
         _redirect("/auth?error=mismatch");
         return;
     }
 
 #if ESP8266BASE_USE_WEB_AUTH_CONFIG
     if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WEB_PASS, newPass)) {
-        ESP8266BASE_LOG_E("Web ", "web_password_update_failed password=%s password_length=%u",
-                          newPass, (unsigned)strlen(newPass));
+        ESP8266BASE_LOG_E("Web ", "web_password_update_failed password=[redacted] password_length=%u",
+                          (unsigned)strlen(newPass));
         _redirect("/auth?error=save_failed");
         return;
     }
@@ -1355,8 +1351,8 @@ void Esp8266BaseWeb::_handleAuthPost() {
 
     strncpy(_authPass, newPass, sizeof(_authPass) - 1);
     _authPass[sizeof(_authPass) - 1] = '\0';
-    ESP8266BASE_LOG_I("Web ", "web_password_updated password=%s password_length=%u result=success",
-                      _authPass, (unsigned)strlen(_authPass));
+    ESP8266BASE_LOG_I("Web ", "web_password_updated password=[redacted] password_length=%u result=success",
+                      (unsigned)strlen(_authPass));
     _redirect("/auth?saved=1");
 }
 

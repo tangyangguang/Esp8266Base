@@ -30,7 +30,7 @@
 重点日志：
 
 ```text
-loaded_saved_wifi_credentials ssid=... password=... password_length=...
+loaded_saved_wifi_credentials ssid=... password=[redacted] password_length=...
 station_connect_timeout ssid=... status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
 station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
 station_radio_reset_begin failures=6 total_attempts=9 status=WL_DISCONNECTED status_code=7

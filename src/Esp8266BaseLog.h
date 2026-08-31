@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <stdarg.h>
 
 // ----------------------------------------------------------------------------
 // Esp8266BaseLog — 轻量日志
@@ -59,6 +60,8 @@ public:
 
     // 内部：带等级、tag、printf 格式的输出（宏最终调用此函数）
     static void log(uint8_t level, const char* tag, const char* fmt, ...);
+    // 与 log() 相同，但格式串必须位于 PROGMEM（通常通过 PSTR() 传入）。
+    static void log_P(uint8_t level, const char* tag, PGM_P fmt, ...);
 
 private:
     friend class Esp8266BaseFileLog;
@@ -74,6 +77,11 @@ private:
     static const char* _bootReasonDesc(const char* bootReason);
     static const char* _timestamp(char* buf, size_t len);
     static void _setInternalHook(Esp8266BaseLogHookFn fn);
+    static void _logv(uint8_t level,
+                      const char* tag,
+                      const char* fmt,
+                      va_list args,
+                      bool formatInProgramMemory);
 };
 
 // ----------------------------------------------------------------------------
@@ -107,4 +115,30 @@ private:
       Esp8266BaseLog::log(3, tag, fmt, ##__VA_ARGS__)
 #else
   #define ESP8266BASE_LOG_E(tag, fmt, ...) do {} while(0)
+#endif
+
+// Flash 格式串版本：fmt 必须是字符串字面量。适合日志较多、RAM 紧张的业务模块。
+#if ESP8266BASE_LOG_LEVEL <= 0
+  #define ESP8266BASE_LOG_D_P(tag, fmt, ...) \
+      Esp8266BaseLog::log_P(0, tag, PSTR(fmt), ##__VA_ARGS__)
+#else
+  #define ESP8266BASE_LOG_D_P(tag, fmt, ...) do {} while(0)
+#endif
+#if ESP8266BASE_LOG_LEVEL <= 1
+  #define ESP8266BASE_LOG_I_P(tag, fmt, ...) \
+      Esp8266BaseLog::log_P(1, tag, PSTR(fmt), ##__VA_ARGS__)
+#else
+  #define ESP8266BASE_LOG_I_P(tag, fmt, ...) do {} while(0)
+#endif
+#if ESP8266BASE_LOG_LEVEL <= 2
+  #define ESP8266BASE_LOG_W_P(tag, fmt, ...) \
+      Esp8266BaseLog::log_P(2, tag, PSTR(fmt), ##__VA_ARGS__)
+#else
+  #define ESP8266BASE_LOG_W_P(tag, fmt, ...) do {} while(0)
+#endif
+#if ESP8266BASE_LOG_LEVEL <= 3
+  #define ESP8266BASE_LOG_E_P(tag, fmt, ...) \
+      Esp8266BaseLog::log_P(3, tag, PSTR(fmt), ##__VA_ARGS__)
+#else
+  #define ESP8266BASE_LOG_E_P(tag, fmt, ...) do {} while(0)
 #endif

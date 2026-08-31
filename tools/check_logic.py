@@ -201,6 +201,9 @@ def test_wifi_retry_rules() -> None:
         fail("WiFi retry deadline must remain correct across millis wrap")
     require_token(wifi_cpp, "reason=ssid_too_long", "WiFi SSID length validation")
     require_token(wifi_cpp, "reason=password_too_long", "WiFi password length validation")
+    require_token(wifi_cpp, "password=[redacted]", "WiFi password log redaction")
+    if "password=%s" in wifi_cpp:
+        fail("WiFi logs must never interpolate plaintext passwords")
     require_token(wifi_cpp, "max=32", "WiFi SSID length limit log")
     require_token(wifi_cpp, "max=63", "WiFi password length limit log")
     require_token(web_cpp, "ssidArg.length() > 32", "Web WiFi raw SSID length validation")
@@ -377,6 +380,10 @@ def test_web_auth_contract() -> None:
             fail(f"missing Web Auth contract token: {token}")
     if "ssidArg.trim()" in web_cpp or "passArg.trim()" in web_cpp:
         fail("WiFi credentials must preserve leading and trailing spaces")
+    require_token(web_cpp, "password=[redacted]", "Web credential log redaction")
+    forbidden_credential_logs = ["password=%s", "current=%s expected=%s", "new=%s confirm=%s"]
+    if any(token in web_cpp for token in forbidden_credential_logs):
+        fail("Web logs must never interpolate plaintext passwords")
     for handler in ["_handleWiFiPost", "_handleAuthPost"]:
         start = web_cpp.index(f"void Esp8266BaseWeb::{handler}()")
         end = web_cpp.index("\n}", start)

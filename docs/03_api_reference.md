@@ -133,10 +133,15 @@ ESP8266BASE_LOG_D(tag, fmt, ...)   // DEBUG
 ESP8266BASE_LOG_I(tag, fmt, ...)   // INFO
 ESP8266BASE_LOG_W(tag, fmt, ...)   // WARN
 ESP8266BASE_LOG_E(tag, fmt, ...)   // ERROR
+
+ESP8266BASE_LOG_D_P(tag, fmt, ...) // fmt 字面量保留在 PROGMEM
+ESP8266BASE_LOG_I_P(tag, fmt, ...)
+ESP8266BASE_LOG_W_P(tag, fmt, ...)
+ESP8266BASE_LOG_E_P(tag, fmt, ...)
 ```
 
 `tag`：最长 12 字符，输出固定 4 字符宽度。  
-`fmt`：printf 格式字符串，内部栈缓冲 128B，超长截断。  
+`fmt`：printf 格式字符串，内部栈缓冲 128B，超长截断。普通宏允许运行时格式串；`_P` 宏的 `fmt` 必须是字符串字面量，并通过 `log_P()` / `vsnprintf_P()` 直接从 Flash 读取，以降低静态 RAM。
 低于当前等级的宏在编译期完全消除，零运行时开销。
 
 ### 日志格式

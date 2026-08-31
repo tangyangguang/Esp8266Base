@@ -130,17 +130,36 @@ void Esp8266BaseLog::_setInternalHook(Esp8266BaseLogHookFn fn) {
 }
 
 void Esp8266BaseLog::log(uint8_t level, const char* tag, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    _logv(level, tag, fmt, args, false);
+    va_end(args);
+}
+
+void Esp8266BaseLog::log_P(uint8_t level, const char* tag, PGM_P fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    _logv(level, tag, reinterpret_cast<const char*>(fmt), args, true);
+    va_end(args);
+}
+
+void Esp8266BaseLog::_logv(uint8_t level,
+                           const char* tag,
+                           const char* fmt,
+                           va_list args,
+                           bool formatInProgramMemory) {
     if (level < _runtimeLevel || level >= 4) return;
 
     bool serialEnabled = (level >= _serialLevel);
     if (!serialEnabled && !_hook && !_internalHook) return;
 
-    // 消息内容格式化（128B 栈缓冲）
+    // 消息内容格式化（128B 栈缓冲）；业务可选择将只读格式串留在 Flash。
     char msg[LOG_BUF_SIZE];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, args);
-    va_end(args);
+    if (formatInProgramMemory) {
+        vsnprintf_P(msg, sizeof(msg), reinterpret_cast<PGM_P>(fmt), args);
+    } else {
+        vsnprintf(msg, sizeof(msg), fmt, args);
+    }
 
     // tag 固定输出 4 字符宽（不足补空格，超出截断）
     char tagBuf[5];
