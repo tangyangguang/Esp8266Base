@@ -127,10 +127,7 @@ public:
     // 近端摘要：RAM 缓存（上次下刷累计）+ 未下刷环内记录合并；不访问 Flash。
     // 供 /health、/switch 高频只读场景使用，避免每次请求扫描档案文件。
     static bool cachedSummary(Esp8266BaseJournalSummary& out);
-    // 尾部记录缓存（最近若干条，含 boot 分隔伪记录）：页面默认视图免 Flash 扫描。
-    // 返回 true 表示全部来自缓存；offset 超过缓存深度返回 false（调用方回退 dumpTail）。
-    static bool cachedDump(uint32_t offsetRecords, uint32_t maxRecords, RecordVisitor visitor,
-                           void* ctx);
+
 
     // 把单条记录格式化为 ≤80 字符文本行（页面/raw 共用）
     static void formatRecord(uint32_t t, uint8_t kind, uint8_t flags, int16_t p1, uint16_t p2,

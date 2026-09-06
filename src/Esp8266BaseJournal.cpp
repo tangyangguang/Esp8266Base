@@ -65,10 +65,6 @@ uint32_t g_bootUptimeStartMs = 0;
 char g_slotPath[24];
 uint8_t g_payload[ESP8266BASE_JOURNAL_MAX_BATCH_BYTES];
 Esp8266BaseJournalSummary g_summaryCache;   // 自本 boot 起已下刷记录的累计摘要（RAM 缓存）
-constexpr uint16_t TAIL_CACHE = 40;           // 尾部原始记录缓存条数（12B/条 + 伪记录）
-uint8_t g_tailCache[TAIL_CACHE][ENTRY_BYTES];
-uint16_t g_tailHead = 0;
-uint16_t g_tailCount = 0;
 uint16_t g_offsetRing[OFFSET_RING];   // 批起始偏移（文件内；类型/长度在导出时回读批头）
 uint16_t g_offsetCount = 0;           // 有效批数（<= OFFSET_RING）
 uint16_t g_offsetStart = 0;           // 环形起点（最旧）
@@ -90,26 +86,12 @@ void Esp8266BaseJournal::_slotName(uint32_t generation, char* out, size_t outLen
              (unsigned)(generation % ESP8266BASE_JOURNAL_SLOT_COUNT));
 }
 
-static void tailPush(uint8_t k, uint8_t f, int16_t p1, uint16_t p2, uint16_t p3) {
-    uint8_t* slot = g_tailCache[g_tailHead];
-    const uint32_t now = millis();
-    memcpy(slot, &now, 4);
-    slot[4] = k;
-    slot[5] = f;
-    memcpy(slot + 6, &p1, 2);
-    memcpy(slot + 8, &p2, 2);
-    memcpy(slot + 10, &p3, 2);
-    g_tailHead = (g_tailHead + 1) % TAIL_CACHE;
-    if (g_tailCount < TAIL_CACHE) ++g_tailCount;
-}
-
 // ----------------------------------------------------------------------------
 // RAM 环
 // ----------------------------------------------------------------------------
 void Esp8266BaseJournal::_pushEntry(uint8_t kind, uint8_t flags, int16_t p1,
                                     uint16_t p2, uint16_t p3) {
     if (!g_ready) return;
-    tailPush(kind, flags, p1, p2, p3);
     JournalEntry& e = g_ring[g_ringHead];
     e.t = millis();
     e.k = kind;
@@ -591,35 +573,6 @@ bool Esp8266BaseJournal::cachedSummary(Esp8266BaseJournalSummary& out) {
     if (!g_ready) return false;
     out = g_summaryCache;
     mergeRingInto(out);
-    return true;
-}
-
-bool Esp8266BaseJournal::cachedDump(uint32_t offsetRecords, uint32_t maxRecords,
-                                    RecordVisitor visitor, void* ctx) {
-    if (!g_ready || !visitor) return false;
-    if (offsetRecords >= g_tailCount) return false;  // 超出缓存深度，回退 Flash
-    uint32_t emitted = 0;
-    const uint16_t start = (g_tailHead + TAIL_CACHE - g_tailCount) % TAIL_CACHE;
-    for (uint16_t i = 0; i < g_tailCount && emitted < maxRecords; ++i) {
-        const uint16_t idx = (start + g_tailCount - 1 - i) % TAIL_CACHE;  // 新→旧
-        if (offsetRecords > 0) { --offsetRecords; continue; }
-        const uint8_t* p = g_tailCache[idx];
-        uint32_t t = 0;
-        uint8_t kind = p[4], flags = p[5];
-        int16_t p1;
-        uint16_t p2, p3;
-        memcpy(&t, p, 4);
-        memcpy(&p1, p + 6, 2);
-        memcpy(&p2, p + 8, 2);
-        memcpy(&p3, p + 10, 2);
-        if (kind == 0xFF) {
-            if (!visitor(0, 0xFF, 0, 0, 0, 0,
-                         (uint32_t)p2 | ((uint32_t)p3 << 16), flags, ctx)) return true;
-        } else {
-            if (!visitor(t, kind, flags, p1, p2, p3, 0, 0, ctx)) return true;
-        }
-        ++emitted;
-    }
     return true;
 }
 

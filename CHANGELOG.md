@@ -67,9 +67,10 @@
   评估 MAX 级/light sleep（弱信号下丢 beacon/deauth 风险上升）。
 - 档案写入策略为事件驱动 + 趋势 30 分钟兜底；稳定运行期写入极少；掉电最多丢最近趋势段
   （事件即时入 RAM 环，按批下刷）。
-- 高频只读路径（/health、状态页）读 RAM 摘要缓存；/diag 默认页读 40 条 RAM 尾部缓存，
-  深翻页才扫描 Flash（每槽单次 open）——避免页面请求触发按批 open/close 造成的堆碎片
-  （曾导致 max_block 跌破 Web 堆闸门出现 503）。
+- 高频只读路径（/health、状态页）读 RAM 摘要缓存（cachedSummary，不访问 Flash）；
+  页面导出走 dumpTail（每槽单次 open、批间 seek）——避免按批 open/close 造成的堆碎片
+  （曾导致 max_block 跌破 Web 堆闸门出现 503）。实测 30 次混合 /switch+/diag 全 200、
+  空闲堆 ≥4.75KB、max_block ≥4.1KB、0 重启。
 - Journal 引入约 <=1KB 静态 RAM 与少量 LittleFS 占用（默认 64KB 上限），业务构建需复核
   内存预算（`docs/04_memory_budget.md`）。
 
