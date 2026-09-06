@@ -21,7 +21,7 @@ constexpr uint8_t BATCH_BOOT = 0x02;
 constexpr uint32_t FILE_MAGIC = 0x31524A55UL;  // "JR01"
 constexpr size_t FILE_HEAD_BYTES = 12;
 constexpr size_t ENTRY_BYTES = 12;
-constexpr uint16_t RING_ENTRIES = 24;
+constexpr uint16_t RING_ENTRIES = 16;
 constexpr uint16_t OFFSET_RING = 16;
 constexpr char DIR_PATH[] = "/jr";
 constexpr size_t MAX_SESSIONS_SCAN = 16;
@@ -64,6 +64,11 @@ uint32_t g_bootUptimeStartMs = 0;
 
 char g_slotPath[24];
 uint8_t g_payload[ESP8266BASE_JOURNAL_MAX_BATCH_BYTES];
+Esp8266BaseJournalSummary g_summaryCache;   // 自本 boot 起已下刷记录的累计摘要（RAM 缓存）
+constexpr uint16_t TAIL_CACHE = 40;           // 尾部原始记录缓存条数（12B/条 + 伪记录）
+uint8_t g_tailCache[TAIL_CACHE][ENTRY_BYTES];
+uint16_t g_tailHead = 0;
+uint16_t g_tailCount = 0;
 uint16_t g_offsetRing[OFFSET_RING];   // 批起始偏移（文件内；类型/长度在导出时回读批头）
 uint16_t g_offsetCount = 0;           // 有效批数（<= OFFSET_RING）
 uint16_t g_offsetStart = 0;           // 环形起点（最旧）
@@ -85,12 +90,26 @@ void Esp8266BaseJournal::_slotName(uint32_t generation, char* out, size_t outLen
              (unsigned)(generation % ESP8266BASE_JOURNAL_SLOT_COUNT));
 }
 
+static void tailPush(uint8_t k, uint8_t f, int16_t p1, uint16_t p2, uint16_t p3) {
+    uint8_t* slot = g_tailCache[g_tailHead];
+    const uint32_t now = millis();
+    memcpy(slot, &now, 4);
+    slot[4] = k;
+    slot[5] = f;
+    memcpy(slot + 6, &p1, 2);
+    memcpy(slot + 8, &p2, 2);
+    memcpy(slot + 10, &p3, 2);
+    g_tailHead = (g_tailHead + 1) % TAIL_CACHE;
+    if (g_tailCount < TAIL_CACHE) ++g_tailCount;
+}
+
 // ----------------------------------------------------------------------------
 // RAM 环
 // ----------------------------------------------------------------------------
 void Esp8266BaseJournal::_pushEntry(uint8_t kind, uint8_t flags, int16_t p1,
                                     uint16_t p2, uint16_t p3) {
     if (!g_ready) return;
+    tailPush(kind, flags, p1, p2, p3);
     JournalEntry& e = g_ring[g_ringHead];
     e.t = millis();
     e.k = kind;
@@ -246,6 +265,7 @@ void Esp8266BaseJournal::beginBoot(uint32_t bootNo, uint8_t resetCode) {
     if (!g_ready) return;
     g_bootNo = bootNo;
     g_resetCode = resetCode;
+    memset(&g_summaryCache, 0, sizeof(g_summaryCache));
     g_bootUptimeStartMs = millis();
     BootPayload boot;
     boot.bootNo = bootNo;
@@ -304,6 +324,23 @@ bool Esp8266BaseJournal::_flushPending() {
     }
     if (!_appendBatch(BATCH_DATA, g_payload, bytes)) {
         return false;  // 保留 RAM 环，下轮重试
+    }
+    // 累计到 RAM 缓存（与 dumpTail 汇总口径一致）
+    for (uint16_t i = 0; i < batch; ++i) {
+        const uint8_t* p = g_payload + i * ENTRY_BYTES;
+        const uint8_t kind = p[4];
+        int16_t p1;
+        memcpy(&p1, p + 6, 2);
+        if (kind == JNL_MQTT_ATTEMPT) ++g_summaryCache.mqttAttempts;
+        else if (kind == JNL_MQTT_CLOSED) {
+            ++g_summaryCache.mqttClosed;
+            const uint8_t rc = static_cast<uint8_t>(p1 & 0xFF);
+            if (rc < 10) ++g_summaryCache.mqttClosedReasons[rc];
+            g_summaryCache.lastMqttReason = rc;
+        } else if (kind == JNL_WIFI_LOST) ++g_summaryCache.wifiLost;
+        else if (kind == JNL_RADIO_RESET) ++g_summaryCache.radioResets;
+        else if (kind == JNL_STALL) ++g_summaryCache.stalls;
+        else if (kind == JNL_SAMPLE) ++g_summaryCache.samples;
     }
     g_ringCount -= batch;  // 出队：只减计数，写游标不变（环形覆盖语义）
     if (g_ringCount == 0) g_ringHead = 0;
@@ -444,7 +481,8 @@ bool Esp8266BaseJournal::dumpTail(uint32_t offsetRecords, uint32_t maxRecords,
         }
         f.close();
     }
-    for (uint8_t pass = 0; pass < ESP8266BASE_JOURNAL_SLOT_COUNT; ++pass) {
+    bool done = false;
+    for (uint8_t pass = 0; pass < ESP8266BASE_JOURNAL_SLOT_COUNT && !done; ++pass) {
         int best = -1;
         for (uint8_t s = 0; s < ESP8266BASE_JOURNAL_SLOT_COUNT; ++s) {
             if (valid[s] && (best < 0 || gens[s] > gens[best])) best = s;
@@ -457,20 +495,20 @@ bool Esp8266BaseJournal::dumpTail(uint32_t offsetRecords, uint32_t maxRecords,
         if (count == 0) continue;
         char path[24];
         snprintf(path, sizeof(path), "%s/seg%u", DIR_PATH, (unsigned)best);
+        // 每槽只打开一次，批间 seek 定位，避免每批 open/close 的 LittleFS 开销与内存碎片
+        File f = LittleFS.open(path, "r");
+        if (!f) continue;
         for (uint16_t oi = count; oi > 0 && emitted < maxRecords; --oi) {
             const uint16_t idx = (ringStart + oi - 1) % OFFSET_RING;
-            File f = LittleFS.open(path, "r");
-            if (!f) continue;
             f.seek(g_offsetRing[idx]);
             uint8_t hdr[6];
             const int hn = f.read(hdr, sizeof(hdr));
             const bool hdrOk = hn == (int)sizeof(hdr) && hdr[0] == BATCH_MAGIC;
-            if (!hdrOk) { f.close(); break; }
+            if (!hdrOk) break;
             const uint16_t len = hdr[2] | (static_cast<uint16_t>(hdr[3]) << 8);
             const uint8_t type = hdr[1];
-            if (len == 0 || len > ESP8266BASE_JOURNAL_MAX_BATCH_BYTES) { f.close(); break; }
+            if (len == 0 || len > ESP8266BASE_JOURNAL_MAX_BATCH_BYTES) break;
             const int rd = f.read(g_payload, len);
-            f.close();
             if (rd != (int)len) break;
             const uint16_t storedCrc = hdr[4] | (static_cast<uint16_t>(hdr[5]) << 8);
             if (_crc16(g_payload, len) != storedCrc) break;  // 损坏批：该文件旧数据到此为止
@@ -485,7 +523,10 @@ bool Esp8266BaseJournal::dumpTail(uint32_t offsetRecords, uint32_t maxRecords,
                 }
                 ++summary.records;
                 summary.lastResetCode = boot.reset;
-                if (!visitor(0, 0xFF, 0, 0, 0, 0, boot.bootNo, boot.reset, ctx)) return true;
+                if (!visitor(0, 0xFF, 0, 0, 0, 0, boot.bootNo, boot.reset, ctx)) {
+                    done = true;
+                    break;
+                }
                 ++emitted;
                 continue;
             }
@@ -516,10 +557,68 @@ bool Esp8266BaseJournal::dumpTail(uint32_t offsetRecords, uint32_t maxRecords,
                 else if (kind == JNL_RADIO_RESET) ++summary.radioResets;
                 else if (kind == JNL_STALL) ++summary.stalls;
                 else if (kind == JNL_SAMPLE) ++summary.samples;
-                if (!visitor(t, kind, flags, p1, p2, p3, 0, 0, ctx)) return true;
+                if (!visitor(t, kind, flags, p1, p2, p3, 0, 0, ctx)) {
+                    done = true;
+                    break;
+                }
                 ++emitted;
             }
         }
+        f.close();
+    }
+    return true;
+}
+
+static void mergeRingInto(Esp8266BaseJournalSummary& s) {
+    // 只统计尚未下刷的 g_ringCount 条（环内更早的数据已计入缓存）
+    const uint16_t start = (g_ringHead + RING_ENTRIES - g_ringCount) % RING_ENTRIES;
+    for (uint16_t i = 0; i < g_ringCount; ++i) {
+        const JournalEntry& e = g_ring[(start + i) % RING_ENTRIES];
+        if (e.k == JNL_MQTT_ATTEMPT) ++s.mqttAttempts;
+        else if (e.k == JNL_MQTT_CLOSED) {
+            ++s.mqttClosed;
+            const uint8_t rc = static_cast<uint8_t>(e.p1 & 0xFF);
+            if (rc < 10) ++s.mqttClosedReasons[rc];
+            s.lastMqttReason = rc;
+        } else if (e.k == JNL_WIFI_LOST) ++s.wifiLost;
+        else if (e.k == JNL_RADIO_RESET) ++s.radioResets;
+        else if (e.k == JNL_STALL) ++s.stalls;
+        else if (e.k == JNL_SAMPLE) ++s.samples;
+    }
+}
+
+bool Esp8266BaseJournal::cachedSummary(Esp8266BaseJournalSummary& out) {
+    if (!g_ready) return false;
+    out = g_summaryCache;
+    mergeRingInto(out);
+    return true;
+}
+
+bool Esp8266BaseJournal::cachedDump(uint32_t offsetRecords, uint32_t maxRecords,
+                                    RecordVisitor visitor, void* ctx) {
+    if (!g_ready || !visitor) return false;
+    if (offsetRecords >= g_tailCount) return false;  // 超出缓存深度，回退 Flash
+    uint32_t emitted = 0;
+    const uint16_t start = (g_tailHead + TAIL_CACHE - g_tailCount) % TAIL_CACHE;
+    for (uint16_t i = 0; i < g_tailCount && emitted < maxRecords; ++i) {
+        const uint16_t idx = (start + g_tailCount - 1 - i) % TAIL_CACHE;  // 新→旧
+        if (offsetRecords > 0) { --offsetRecords; continue; }
+        const uint8_t* p = g_tailCache[idx];
+        uint32_t t = 0;
+        uint8_t kind = p[4], flags = p[5];
+        int16_t p1;
+        uint16_t p2, p3;
+        memcpy(&t, p, 4);
+        memcpy(&p1, p + 6, 2);
+        memcpy(&p2, p + 8, 2);
+        memcpy(&p3, p + 10, 2);
+        if (kind == 0xFF) {
+            if (!visitor(0, 0xFF, 0, 0, 0, 0,
+                         (uint32_t)p2 | ((uint32_t)p3 << 16), flags, ctx)) return true;
+        } else {
+            if (!visitor(t, kind, flags, p1, p2, p3, 0, 0, ctx)) return true;
+        }
+        ++emitted;
     }
     return true;
 }
@@ -527,8 +626,7 @@ bool Esp8266BaseJournal::dumpTail(uint32_t offsetRecords, uint32_t maxRecords,
 uint8_t Esp8266BaseJournal::diagLevel() {
     if (!g_ready) return 0;
     Esp8266BaseJournalSummary s;
-    dumpTail(0, 8192, s, [](uint32_t, uint8_t, uint8_t, int16_t, uint16_t,
-                            uint16_t, uint32_t, uint8_t, void*) { return true; }, nullptr);
+    cachedSummary(s);
     if (s.stalls > 0 || s.radioResets > 0) return 2;
     // 受控正常下线（user_ok）不算异常；只看非正常关闭与 WiFi 掉线
     const uint16_t abnormalClosed = s.mqttClosed > s.mqttClosedReasons[1]

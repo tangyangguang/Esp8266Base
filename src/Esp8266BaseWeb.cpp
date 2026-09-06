@@ -1741,10 +1741,7 @@ void Esp8266BaseWeb::_handleHealth() {
     char diagBrief[48] = "ok";
     {
         Esp8266BaseJournalSummary jsum;
-        Esp8266BaseJournal::dumpTail(0, 256, jsum,
-                                     [](uint32_t, uint8_t, uint8_t, int16_t, uint16_t,
-                                        uint16_t, uint32_t, uint8_t, void*) { return true; },
-                                     nullptr);
+        Esp8266BaseJournal::cachedSummary(jsum);
         if (jsum.stalls > 0) {
             snprintf(diagBrief, sizeof(diagBrief), "stall=%u", (unsigned)jsum.stalls);
         } else if (jsum.mqttClosed > jsum.mqttClosedReasons[1]) {
