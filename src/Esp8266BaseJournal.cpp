@@ -70,7 +70,7 @@ uint16_t g_offsetCount = 0;           // 有效批数（<= OFFSET_RING）
 uint16_t g_offsetStart = 0;           // 环形起点（最旧）
 }  // namespace
 
-uint16_t Esp8266BaseJournal::_crc16(const uint8_t* data, uint16_t len) {
+static uint16_t crc16Bytes(const uint8_t* data, uint16_t len) {
     uint16_t crc = 0xFFFF;
     for (uint16_t i = 0; i < len; ++i) {
         crc ^= data[i];
@@ -79,6 +79,10 @@ uint16_t Esp8266BaseJournal::_crc16(const uint8_t* data, uint16_t len) {
         }
     }
     return crc;
+}
+
+uint16_t Esp8266BaseJournal::_crc16(const uint8_t* data, uint16_t len) {
+    return crc16Bytes(data, len);
 }
 
 void Esp8266BaseJournal::_slotName(uint32_t generation, char* out, size_t outLen) {
@@ -181,6 +185,29 @@ bool Esp8266BaseJournal::_appendBatch(uint8_t type, const uint8_t* payload, uint
     return true;
 }
 
+// 校验槽文件尾部完整性：从文件头之后顺序解析所有批，任何半截/损坏即视为坏尾
+static bool slotTailValid(const char* path) {
+    File f = LittleFS.open(path, "r");
+    if (!f) return false;
+    f.seek(FILE_HEAD_BYTES);
+    bool ok = true;
+    uint8_t hdr[6];
+    while (f.available() > 0) {
+        if (f.available() < (int)sizeof(hdr)) { ok = false; break; }   // 半截批头
+        if (f.read(hdr, sizeof(hdr)) != (int)sizeof(hdr)) { ok = false; break; }
+        if (hdr[0] != BATCH_MAGIC) { ok = false; break; }
+        const uint16_t len = hdr[2] | (static_cast<uint16_t>(hdr[3]) << 8);
+        if (len == 0 || len > ESP8266BASE_JOURNAL_MAX_BATCH_BYTES) { ok = false; break; }
+        if (f.available() < (int)len) { ok = false; break; }           // 半截 payload
+        const int rd = f.read(g_payload, len);
+        if (rd != (int)len) { ok = false; break; }
+        const uint16_t crc = hdr[4] | (static_cast<uint16_t>(hdr[5]) << 8);
+        if (crc16Bytes(g_payload, len) != crc) { ok = false; break; }
+    }
+    f.close();
+    return ok;
+}
+
 // ----------------------------------------------------------------------------
 // 启动定位
 // ----------------------------------------------------------------------------
@@ -222,6 +249,17 @@ bool Esp8266BaseJournal::begin() {
     }
     g_currentGeneration = found ? bestGen : 0;
     _slotName(g_currentGeneration, g_slotPath, sizeof(g_slotPath));
+    if (found && !slotTailValid(g_slotPath)) {
+        // 断电写一半留下的坏尾：继续追加会让读侧在该槽中断（后续记录不可见）。
+        // 轮转一个新槽，坏槽整体作废（内容为活跃写入槽，多为最近记录）。
+        ++g_stats.eraseEvents;
+        ESP8266BASE_LOG_W("Jrnl", "slot_tail_corrupt gen=%lu action=rotate",
+                          (unsigned long)g_currentGeneration);
+        LittleFS.remove(g_slotPath);
+        ++g_currentGeneration;
+        _slotName(g_currentGeneration, g_slotPath, sizeof(g_slotPath));
+        found = false;
+    }
     if (!found) {
         File f = LittleFS.open(g_slotPath, "w");
         if (f) {
@@ -570,6 +608,7 @@ static void mergeRingInto(Esp8266BaseJournalSummary& s) {
 }
 
 bool Esp8266BaseJournal::cachedSummary(Esp8266BaseJournalSummary& out) {
+    memset(&out, 0, sizeof(out));  // 未就绪也清零，避免调用方读到栈上未初始化值
     if (!g_ready) return false;
     out = g_summaryCache;
     mergeRingInto(out);
