@@ -34,6 +34,42 @@
 
 没有内容的小节可以省略。
 
+## 2026-09-06
+
+### 新增
+
+- `Esp8266BaseJournal`：断线现场诊断档案（编译开关 `ESP8266BASE_USE_JOURNAL`，默认在
+  Config+MQTT 组合下启用）。事件（WiFi 状态迁移、MQTT 连接尝试/成功/关闭原因、radio 复位、
+  停滞）与 1 分钟趋势采样（rssi/heap/loop lag）写入 LittleFS 环形槽
+  （默认 8 槽 × 8KB = 64KB，宏 `ESP8266BASE_JOURNAL_SLOT_COUNT/BYTES` 可配），
+  满则覆盖最旧；每个 boot 一条会话头（bootNo/reset）；批 CRC、坏批自愈；
+  提供只读会话列表/尾部导出/统计与 `diagLevel` 判定。RAM 增量 <= ~1KB。
+- `/health`（MQTT terminal 形态）新增 `diagLevel`（ok/attention/error）与 `diagBrief`
+  字段；WiFi/MQTT/停滞事件自动入档案。
+- `Esp8266BaseWatchdog::cycleStart()/account()`：轮内停滞检测新语义（见修复）。
+
+### 修复
+
+- **应用看门狗接线失效（关键）**：旧实现每个子系统前后都 `feed()`，唯一检查点紧随最后一次
+  feed，测量的是微秒级间隔——任何子系统“停顿后返回”或“永不返回”的停滞都无法触发重启，
+  主循环一旦卡在内部 yield 的等待里，软狗与应用看门狗同时失效，只能断电恢复。
+  现改为：主循环轮首 `cycleStart()`，轮末 `handle()` 测整轮；NTP/Web/MQTT 等合法长操作段
+  结束后用 `account(maxMs, startedAtMs)` 把实际耗时计入已覆盖（超上限部分按未覆盖计），
+  未覆盖时间超过基础超时（默认 2.5s）即重启。`feed()` 保留为兼容 API。
+  注意：`handle()` 检查点在主循环内，对“永不返回”的停滞仍无法自行触发——该类停滞的兜底
+  由业务侧独立监护（os_timer）或人工断电承担（见项目方案）。
+
+### 行为变化 / 使用建议
+
+- WiFi 睡眠策略显式化：`Esp8266BaseWiFi::begin()` 默认显式设置 modem-sleep MIN 级
+  （每 DTIM 醒一次收 beacon，稳定优先）；此前依赖 SDK 隐性默认。需要零省电时定义
+  `ESP8266BASE_WIFI_NO_SLEEP=1`（弱信号排障/低延迟场景），需要更深度睡眠的项目请自行
+  评估 MAX 级/light sleep（弱信号下丢 beacon/deauth 风险上升）。
+- 档案写入策略为事件驱动 + 趋势 30 分钟兜底；稳定运行期写入极少；掉电最多丢最近趋势段
+  （事件即时入 RAM 环，按批下刷）。
+- Journal 引入约 <=1KB 静态 RAM 与少量 LittleFS 占用（默认 64KB 上限），业务构建需复核
+  内存预算（`docs/04_memory_budget.md`）。
+
 ## 2026-09-01
 
 ### 新增

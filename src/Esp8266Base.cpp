@@ -1,4 +1,7 @@
 #include "Esp8266Base.h"
+#if ESP8266BASE_USE_JOURNAL
+#include "Esp8266BaseJournal.h"
+#endif
 #include <user_interface.h>
 
 #if ESP8266BASE_USE_CONFIG
@@ -163,9 +166,19 @@ bool Esp8266Base::begin() {
     }
 #endif
 
+    // 4.5 Journal — 断线现场诊断档案（依赖已挂载的 LittleFS）
+#if ESP8266BASE_USE_JOURNAL
+    if (!Esp8266BaseJournal::begin()) {
+        ok = false;  // 档案不可用不阻断业务
+    }
+#endif
+
     _resolveHostname();
 
     _bootCount = _loadAndIncrementBootCount();
+#if ESP8266BASE_USE_JOURNAL
+    Esp8266BaseJournal::beginBoot(_bootCount, static_cast<uint8_t>(resetReason()));
+#endif
 
     Esp8266BaseLog::beginBootSession(
         _fwName,
@@ -217,6 +230,10 @@ bool Esp8266Base::begin() {
 // handle — 每轮 loop 调用
 // ----------------------------------------------------------------------------
 void Esp8266Base::handle() {
+#if ESP8266BASE_USE_WATCHDOG
+    // 轮首开始测量本轮；子系统前的 feed 不再掩盖停滞（见 Esp8266BaseWatchdog）。
+    Esp8266BaseWatchdog::cycleStart();
+#endif
     // 1. Config deferred 刷新
 #if ESP8266BASE_USE_CONFIG
     Esp8266BaseConfig::handle();
@@ -227,6 +244,11 @@ void Esp8266Base::handle() {
 
     // 2. WiFi 状态机
     Esp8266BaseWiFi::handle();
+
+    // 2.5 Journal — 趋势采样与批下刷（每轮轻量检查）
+#if ESP8266BASE_USE_JOURNAL
+    Esp8266BaseJournal::handle();
+#endif
 
     // 3. WiFi 连接后触发 NTP / mDNS；WiFi 掉线后重置 mDNS 标志以便重连后重启
 #if ESP8266BASE_USE_NTP || ESP8266BASE_USE_MDNS
@@ -250,15 +272,15 @@ void Esp8266Base::handle() {
     }
 #endif
 
-    // 4. NTP handle（同步状态检查，每 5s 一次）
+    // 4. NTP handle（同步状态检查，每 5s 一次；DNS/等待有界，给 8s 记账上限）
 #if ESP8266BASE_USE_NTP
     if (_ntpWasTriggered) {
 #if ESP8266BASE_USE_WATCHDOG
-        Esp8266BaseWatchdog::feed();
+        const uint32_t _wdtNtpMs = millis();
 #endif
         Esp8266BaseNTP::handle();
 #if ESP8266BASE_USE_WATCHDOG
-        Esp8266BaseWatchdog::feed();
+        Esp8266BaseWatchdog::account(8000, _wdtNtpMs);
 #endif
     }
 #endif
@@ -266,13 +288,7 @@ void Esp8266Base::handle() {
     // 5. mDNS handle（MDNS.update()）
 #if ESP8266BASE_USE_MDNS
     if (_mdnsWasStarted) {
-#if ESP8266BASE_USE_WATCHDOG
-        Esp8266BaseWatchdog::feed();
-#endif
         Esp8266BaseMDNS::handle();
-#if ESP8266BASE_USE_WATCHDOG
-        Esp8266BaseWatchdog::feed();
-#endif
     }
 #endif
 
@@ -280,15 +296,14 @@ void Esp8266Base::handle() {
     // 6. Web handle（server.handleClient()）
     // Web must run before MQTT: a secure DNS/TCP/TLS connect attempt can block
     // for seconds on ESP8266, while local control must remain responsive.
-    // Feed around Web I/O so slow clients do not trip the library watchdog.
-    // Do not pause/resume here: handle() runs every loop and Debug logs would flood serial.
+    // 慢客户端读/写有界，给 5s 记账上限；不 pause/resume（每轮调用会刷日志）。
 #if ESP8266BASE_USE_WEB
 #if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::feed();
+    const uint32_t _wdtWebMs = millis();
 #endif
     Esp8266BaseWeb::handle();
 #if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::feed();
+    Esp8266BaseWatchdog::account(5000, _wdtWebMs);
 #endif
 #endif
 
@@ -298,17 +313,19 @@ void Esp8266Base::handle() {
 #endif
 
     // 8. MQTT handle：NTP 本轮推进后再检查时间门控。
+    // 同步 DNS/TCP/TLS 建连与写超时上界 ~10s，给 15s 记账上限（见看门狗语义）。
 #if ESP8266BASE_USE_MQTT
 #if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::feed();
+    const uint32_t _wdtMqttMs = millis();
 #endif
     Esp8266BaseMQTT::handle();
 #if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::feed();
+    Esp8266BaseWatchdog::account(15000, _wdtMqttMs);
 #endif
 #endif
 
-    // 9. Watchdog handle — 最后检查，再喂狗，确保本轮所有模块都已执行且未超时
+    // 9. Watchdog handle — 轮末检查整轮耗时（基础超时 + 已声明宽限），
+    // 超预算视为停滞并重启；正常轮内不触发。
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::handle();
     Esp8266BaseWatchdog::feed();

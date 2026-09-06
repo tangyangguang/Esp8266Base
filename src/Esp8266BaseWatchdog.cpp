@@ -45,12 +45,14 @@ static bool _clearWdtRtcState() {
 // ----------------------------------------------------------------------------
 // 静态成员定义
 // ----------------------------------------------------------------------------
-bool     Esp8266BaseWatchdog::_running     = false;
-bool     Esp8266BaseWatchdog::_paused      = false;
-bool     Esp8266BaseWatchdog::_wasWdtReset = false;
-uint32_t Esp8266BaseWatchdog::_timeoutMs   = ESP8266BASE_WDT_TIMEOUT_MS;
-uint32_t Esp8266BaseWatchdog::_lastFeedMs  = 0;
-uint32_t Esp8266BaseWatchdog::_resetCount  = 0;
+bool     Esp8266BaseWatchdog::_running       = false;
+bool     Esp8266BaseWatchdog::_paused        = false;
+bool     Esp8266BaseWatchdog::_wasWdtReset   = false;
+uint32_t Esp8266BaseWatchdog::_timeoutMs     = ESP8266BASE_WDT_TIMEOUT_MS;
+uint32_t Esp8266BaseWatchdog::_lastFeedMs    = 0;
+uint32_t Esp8266BaseWatchdog::_cycleStartMs  = 0;
+uint32_t Esp8266BaseWatchdog::_coveredMs     = 0;
+uint32_t Esp8266BaseWatchdog::_resetCount    = 0;
 
 // ----------------------------------------------------------------------------
 // begin
@@ -103,26 +105,41 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
 }
 
 // ----------------------------------------------------------------------------
-// handle — 每轮检查
+// cycleStart / account / handle — 轮内停滞检测
 // ----------------------------------------------------------------------------
+void Esp8266BaseWatchdog::cycleStart() {
+    _cycleStartMs = millis();
+    _coveredMs = 0;
+}
+
+void Esp8266BaseWatchdog::account(uint32_t maxBlockMs, uint32_t startedAtMs) {
+    uint32_t elapsed = millis() - startedAtMs;
+    if (elapsed > maxBlockMs) elapsed = maxBlockMs;  // 超出上限部分按未覆盖处理
+    _coveredMs += elapsed;
+    if (_coveredMs > 0xFFFF0000UL) _coveredMs = 0xFFFF0000UL;  // 封顶防溢出
+}
+
 void Esp8266BaseWatchdog::handle() {
     if (!_running || _paused) return;
 
-    uint32_t elapsed = millis() - _lastFeedMs;
-    if (elapsed >= _timeoutMs) {
-        // 超时路径避免写 LittleFS，防止在系统已卡住时二次阻塞。
-        if (_resetCount < 0xFFFFFFFFUL) {
-            _resetCount++;
-        }
-        _writeWdtRtcState(_resetCount);
+    const uint32_t elapsed = millis() - _cycleStartMs;
+    const uint32_t uncovered = elapsed > _coveredMs ? elapsed - _coveredMs : 0;
+    if (uncovered < _timeoutMs) return;
 
-        ESP8266BASE_LOG_E("WDT ", "watchdog_timeout elapsed=%ums reset_count=%u action=restart",
-                          (unsigned)elapsed, (unsigned)_resetCount);
-
-        // 给串口缓冲区时间输出
-        delay(50);
-        ESP.restart();
+    // 超时路径避免写 LittleFS，防止在系统已卡住时二次阻塞。
+    if (_resetCount < 0xFFFFFFFFUL) {
+        _resetCount++;
     }
+    _writeWdtRtcState(_resetCount);
+
+    ESP8266BASE_LOG_E("WDT ", "watchdog_timeout uncovered=%lums elapsed=%lums covered=%lums timeout=%lums reset_count=%u action=restart",
+                      (unsigned long)uncovered, (unsigned long)elapsed,
+                      (unsigned long)_coveredMs, (unsigned long)_timeoutMs,
+                      (unsigned)_resetCount);
+
+    // 给串口缓冲区时间输出
+    delay(50);
+    ESP.restart();
 }
 
 // ----------------------------------------------------------------------------

@@ -2,6 +2,9 @@
 #if ESP8266BASE_USE_WIFI_CONFIG
 #include "Esp8266BaseConfig.h"
 #endif
+#if ESP8266BASE_USE_JOURNAL
+#include "Esp8266BaseJournal.h"
+#endif
 #include "Esp8266BaseLog.h"
 #include <ESP8266WiFi.h>
 
@@ -39,6 +42,17 @@ bool Esp8266BaseWiFi::begin() {
     WiFi.persistent(false);
     WiFi.setAutoConnect(false);
     WiFi.setAutoReconnect(false);
+#if ESP8266BASE_WIFI_NO_SLEEP
+    // 显式关闭 modem sleep（电台常开）：零省电，用于弱信号排障或低延迟场景。
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);
+    ESP8266BASE_LOG_I("WiFi", "sleep_policy=none reason=explicit_no_sleep");
+#else
+    // 显式 modem-sleep MIN 级（setSleepMode 第二参 0 => 最小睡眠级）：
+    // 每个 DTIM 醒一次收 beacon，省电与稳定性平衡，不依赖 SDK 隐性默认；
+    // 不启用 MAX 级（按 listen interval 长睡会放大弱信号丢 beacon/deauth 风险）。
+    WiFi.setSleepMode(WIFI_MODEM_SLEEP);
+    ESP8266BASE_LOG_I("WiFi", "sleep_policy=modem_sleep_min level=min_dtim_wake");
+#endif
     ESP8266BASE_LOG_I("WiFi", "wifi_retry_policy connect_timeout=%lus sta_settle=%ums stuck_disconnected=%lus fast_retry=%lus fast_count=%u slow_retry=%lus radio_reset_failures=%u radio_settle=%ums",
                       (unsigned long)(ESP8266BASE_WIFI_CONNECT_TIMEOUT / 1000UL),
                       (unsigned)ESP8266BASE_WIFI_STA_SETTLE_MS,
@@ -138,6 +152,9 @@ void Esp8266BaseWiFi::handle() {
         case Esp8266BaseWiFiState::CONNECTED: {
             uint8_t status = (uint8_t)WiFi.status();
             if (status != WL_CONNECTED) {
+#if ESP8266BASE_USE_JOURNAL
+                Esp8266BaseJournal::record(JNL_WIFI_LOST, static_cast<uint8_t>(status), 0, 0, 0);
+#endif
                 ESP8266BASE_LOG_W("WiFi",
                                   "station_connection_lost status=%s status_code=%u last_ip=%s rssi=%d reconnecting_with_saved_credentials",
                                   _statusName(status), (unsigned)status, _ip, (int)WiFi.RSSI());
@@ -345,6 +362,9 @@ void Esp8266BaseWiFi::_resetRadioAndStartSTA() {
         _radioResetCount++;
     }
     _failuresSinceRadioReset = 0;
+#if ESP8266BASE_USE_JOURNAL
+    Esp8266BaseJournal::record(JNL_RADIO_RESET, 0, static_cast<int16_t>(_radioResetCount), 0, 0);
+#endif
     ESP8266BASE_LOG_W("WiFi",
                       "station_radio_reset_complete reset_count=%u off=%s sta=%s action=reconnect",
                       (unsigned)_radioResetCount,
@@ -375,6 +395,9 @@ void Esp8266BaseWiFi::_startAP() {
 void Esp8266BaseWiFi::_handleConnected() {
     _updateIP();
     _state         = Esp8266BaseWiFiState::CONNECTED;
+#if ESP8266BASE_USE_JOURNAL
+    Esp8266BaseJournal::record(JNL_WIFI_UP, 0, static_cast<int16_t>(WiFi.RSSI()), 0, 0);
+#endif
     _retryCount    = 0;
     _stuckRestarted = false;
     _failuresSinceRadioReset = 0;

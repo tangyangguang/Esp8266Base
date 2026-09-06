@@ -1,4 +1,7 @@
 #include "Esp8266BaseOptions.h"
+#if ESP8266BASE_USE_JOURNAL
+#include "Esp8266BaseJournal.h"
+#endif
 #if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
 #include "Esp8266BaseLog.h"
@@ -1732,6 +1735,29 @@ void Esp8266BaseWeb::_handleHealth() {
     mqttConnected = Esp8266BaseMQTT::connected();
     mqttTlsError = Esp8266BaseMQTT::lastTlsErrorCode();
 #endif
+#if ESP8266BASE_USE_JOURNAL
+    const char* diagLevel = Esp8266BaseJournal::diagLevel() == 2 ? "error"
+                          : Esp8266BaseJournal::diagLevel() == 1 ? "attention" : "ok";
+    char diagBrief[48] = "ok";
+    {
+        Esp8266BaseJournalSummary jsum;
+        Esp8266BaseJournal::dumpTail(0, 256, jsum,
+                                     [](uint32_t, uint8_t, uint8_t, int16_t, uint16_t,
+                                        uint16_t, uint32_t, uint8_t, void*) { return true; },
+                                     nullptr);
+        if (jsum.stalls > 0) {
+            snprintf(diagBrief, sizeof(diagBrief), "stall=%u", (unsigned)jsum.stalls);
+        } else if (jsum.mqttClosed > 0) {
+            snprintf(diagBrief, sizeof(diagBrief), "mqtt_closed=%u last=%u",
+                     (unsigned)jsum.mqttClosed, (unsigned)jsum.lastMqttReason);
+        } else if (jsum.wifiLost > 0) {
+            snprintf(diagBrief, sizeof(diagBrief), "wifi_lost=%u", (unsigned)jsum.wifiLost);
+        }
+    }
+#else
+    const char* diagLevel = "";
+    const char* diagBrief = "";
+#endif
 
     // 分块输出固定 JSON。SSID 按产品诊断契约公开；不包含 broker、clientId、
     // 用户名、密码或证书。
@@ -1761,9 +1787,11 @@ void Esp8266BaseWeb::_handleHealth() {
     client.write((const uint8_t*)json, strlen(json));
     snprintf(json, sizeof(json),
              "\"mqttAttempt\":%lu,\"mqttLastReason\":\"%s\",\"mqttTlsError\":%d,"
-             "\"lastWdtReset\":%s,\"otaInProgress\":%s}",
+             "\"lastWdtReset\":%s,\"otaInProgress\":%s,"
+             "\"diagLevel\":\"%s\",\"diagBrief\":\"%s\"}",
              (unsigned long)mqttAttempt, mqttReason, mqttTlsError,
-             lastWdtReset ? "true" : "false", otaInProgress ? "true" : "false");
+             lastWdtReset ? "true" : "false", otaInProgress ? "true" : "false",
+             diagLevel, diagBrief);
     client.write((const uint8_t*)json, strlen(json));
     client.flush();
     client.stop();

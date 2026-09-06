@@ -835,13 +835,28 @@ void collectAndSleep() {
 ```cpp
 static bool begin(uint32_t timeoutMs = ESP8266BASE_WDT_TIMEOUT_MS);
 ```
-初始化，设置超时时间（范围 1000–3000ms，超出自动截断）。读取上次 WDT 重启记录。
+初始化，设置基础超时时间（范围 1000–3000ms，超出自动截断）。读取上次 WDT 重启记录。
+
+```cpp
+static void cycleStart();
+```
+主循环每轮入口调用（`Esp8266Base::handle()` 已自动调用）：从此刻测量本轮耗时。
+
+```cpp
+static void account(uint32_t maxBlockMs, uint32_t startedAtMs);
+```
+在某段“合法但可能较久”的阻塞子系统结束后调用（NTP/Web/MQTT 段已由 `Esp8266Base::handle()`
+自动接入）：把该段实际耗时计入本轮已覆盖（超过 maxBlockMs 的部分按未覆盖计）。
+业务自有的长阻塞段（如大文件 IO）也应套用：记录段起点并随后调用本函数。
 
 ```cpp
 static void handle();
 static void feed();
 ```
-`handle()` 检查主循环活性，超时时写入重启记录后执行 `ESP.restart()`。`feed()` 重置计时器。两者均由 `Esp8266Base::handle()` 自动调用，顺序为先检查、再在本轮完成后喂狗。长阻塞操作中需手动调用 `feed()`。
+`handle()` 在主循环轮末检查：本轮“未覆盖”时间（整轮耗时 - 已覆盖段耗时）超过基础超时即
+视为停滞，写 RTC 标记并 `ESP.restart()`。`feed()` 为兼容保留（不再用于停滞判定）。
+两者均由 `Esp8266Base::handle()` 自动调用。注意：检查点在主循环内，对“永不返回”的停滞
+无法自行触发，此类场景需业务侧独立监护。
 
 ```cpp
 static void pause();
@@ -950,3 +965,36 @@ void loop() {
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
 | `ESP8266BASE_SLEEP_MAX_DEEP_SEC` | `3600` | deepSleep 最大秒数上限 |
+
+## 13. Esp8266BaseJournal — 断线现场诊断档案
+
+头文件：`Esp8266BaseJournal.h`；编译开关 `ESP8266BASE_USE_JOURNAL`
+（默认在 Config+MQTT 组合下启用）。
+
+事件（WiFi 状态迁移、MQTT 连接尝试/成功/关闭原因、radio 复位、停滞）与 1 分钟趋势采样
+（rssi/heap/loop lag）先入 RAM 环（28×12B），按“事件积批（≤10s 限频）/ 趋势 30 分钟兜底”
+下刷到 LittleFS 环形槽（默认 8 槽 × 8KB = 64KB，`ESP8266BASE_JOURNAL_SLOT_COUNT` /
+`ESP8266BASE_JOURNAL_SLOT_BYTES` 可配），满则覆盖最旧、无时间 TTL；每个 boot 一条会话头
+（bootNo/reset/代次）。批带 CRC16，读侧坏批截断自愈；OTA 不擦档案。
+
+### 函数
+
+```cpp
+static bool begin();
+static void beginBoot(uint32_t bootNo, uint8_t resetCode);
+static void handle();
+static void record(uint8_t kind, uint8_t flags, int16_t p1, uint16_t p2, uint16_t p3);
+static void recordNow(...);            // 记录并立即下刷
+static bool getStats(Esp8266BaseJournalStats& stats);
+static uint16_t listSessions(Esp8266BaseJournalSession* out, uint16_t maxCount);
+static bool dumpTail(uint32_t offsetRecords, uint32_t maxRecords,
+                     Esp8266BaseJournalSummary& summary,
+                     RecordVisitor visitor, void* ctx);
+static uint8_t diagLevel();            // 0=ok 1=attention 2=error
+static void formatRecord(...);         // ≤80 字符文本行（页面/raw 共用）
+```
+
+- 读取 API 全部有界、无堆分配；翻页用 `offsetRecords` 逐页拉取；
+- `dumpTail` 从新到旧导出，boot 边界以 `kind==0xFF` 伪记录（携带 bootNo/reset）表达；
+- 掉电语义：事件按批即时落盘（限频 ≤10s），趋势最多丢最近一个兜底间隔（≤30 分钟）；
+- RAM 增量 <= ~1KB（28×12B 环 + 偏移环 32×5B + 240B 批缓冲）；写入/擦除计数见 stats。

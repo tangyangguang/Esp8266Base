@@ -42,6 +42,15 @@
 #define ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT 6 // 连续失败达到该次数后完整重置 WiFi radio
 #endif
 
+// WiFi 睡眠策略：默认 modem-sleep MIN 级（显式设置，见 begin()）。
+// 需要完全关闭省电（弱信号排障/低延迟场景）时定义 ESP8266BASE_WIFI_NO_SLEEP=1。
+#ifndef ESP8266BASE_WIFI_NO_SLEEP
+#define ESP8266BASE_WIFI_NO_SLEEP 0
+#endif
+
+static_assert(ESP8266BASE_WIFI_NO_SLEEP == 0 || ESP8266BASE_WIFI_NO_SLEEP == 1,
+              "ESP8266BASE_WIFI_NO_SLEEP must be 0 or 1");
+
 #ifndef ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS
 #define ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS 100 // ms：WIFI_OFF 后的稳定等待
 #endif

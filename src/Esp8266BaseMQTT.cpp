@@ -5,6 +5,9 @@
 #if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
 #endif
+#if ESP8266BASE_USE_JOURNAL
+#include "Esp8266BaseJournal.h"
+#endif
 #include "Esp8266BaseLog.h"
 #include "Esp8266BaseNTP.h"
 #include "Esp8266BaseWiFi.h"
@@ -268,6 +271,10 @@ void Esp8266BaseMQTT::handle() {
     }
 #endif
     if (_attemptCount < 0xffffffffUL) ++_attemptCount;
+#if ESP8266BASE_USE_JOURNAL
+    Esp8266BaseJournal::record(JNL_MQTT_ATTEMPT, 0,
+                               static_cast<int16_t>(_attemptCount & 0x7FFFU), 0, 0);
+#endif
     ESP8266BASE_LOG_I("MQTT", "connect_attempt attempt=%lu host=%s port=%u free_heap=%u max_block=%u",
         static_cast<unsigned long>(_attemptCount), _host, static_cast<unsigned>(_port),
         static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxFreeBlockSize()));
@@ -766,6 +773,14 @@ void Esp8266BaseMQTT::_closeTransport(Esp8266BaseMQTTDisconnectReason reason,
     const bool wasConnected = mqttConnected;
     const size_t discarded = _cleanSession ? outbox.size() : 0;
     _captureTlsError();
+#if ESP8266BASE_USE_JOURNAL
+    {
+        const uint8_t rc = static_cast<uint8_t>(reason);
+        const int tls = lastTlsCode;
+        Esp8266BaseJournal::record(JNL_MQTT_CLOSED, 0, static_cast<int16_t>(rc),
+                                   tls == 0 ? 0xFFFFU : static_cast<uint16_t>(tls), 0);
+    }
+#endif
     client.stop();
     transportOpen = false;
     mqttConnected = false;
@@ -784,6 +799,9 @@ void Esp8266BaseMQTT::_closeTransport(Esp8266BaseMQTTDisconnectReason reason,
 void Esp8266BaseMQTT::_onConnect(bool sessionPresent) {
     if (_shutdownActive) return;
     mqttConnected = true;
+#if ESP8266BASE_USE_JOURNAL
+    Esp8266BaseJournal::record(JNL_MQTT_UP, 0, 0, 0, 0);
+#endif
     _consecutiveTransportFailures = 0;
     _state = Esp8266BaseMQTTState::CONNECTED;
     _lastReason = Esp8266BaseMQTTDisconnectReason::NONE;
