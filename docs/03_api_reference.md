@@ -997,4 +997,4 @@ static void formatRecord(...);         // ≤80 字符文本行（页面/raw 共
 - 读取 API 全部有界、无堆分配；翻页用 `offsetRecords` 逐页拉取；
 - `dumpTail` 从新到旧导出，boot 边界以 `kind==0xFF` 伪记录（携带 bootNo/reset）表达；
 - 掉电语义：事件按批即时落盘（限频 ≤10s），趋势最多丢最近一个兜底间隔（≤30 分钟）；
-- RAM 增量 <= ~1KB（28×12B 环 + 偏移环 32×5B + 240B 批缓冲）；写入/擦除计数见 stats。
+- RAM 增量 <= ~0.5KB（24×12B 事件环 + 偏移环 16×2B + 96B 批缓冲）；写入/擦除计数见 stats。

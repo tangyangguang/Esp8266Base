@@ -21,8 +21,8 @@ constexpr uint8_t BATCH_BOOT = 0x02;
 constexpr uint32_t FILE_MAGIC = 0x31524A55UL;  // "JR01"
 constexpr size_t FILE_HEAD_BYTES = 12;
 constexpr size_t ENTRY_BYTES = 12;
-constexpr uint16_t RING_ENTRIES = 28;
-constexpr uint16_t OFFSET_RING = 32;
+constexpr uint16_t RING_ENTRIES = 24;
+constexpr uint16_t OFFSET_RING = 16;
 constexpr char DIR_PATH[] = "/jr";
 constexpr size_t MAX_SESSIONS_SCAN = 16;
 
@@ -64,9 +64,7 @@ uint32_t g_bootUptimeStartMs = 0;
 
 char g_slotPath[24];
 uint8_t g_payload[ESP8266BASE_JOURNAL_MAX_BATCH_BYTES];
-uint16_t g_offsetRing[OFFSET_RING];   // 批起始偏移（文件内）
-uint8_t  g_typeRing[OFFSET_RING];     // 批类型
-uint16_t g_lenRing[OFFSET_RING];      // 批 payload 长度
+uint16_t g_offsetRing[OFFSET_RING];   // 批起始偏移（文件内；类型/长度在导出时回读批头）
 uint16_t g_offsetCount = 0;           // 有效批数（<= OFFSET_RING）
 uint16_t g_offsetStart = 0;           // 环形起点（最旧）
 }  // namespace
@@ -340,13 +338,9 @@ static uint16_t scanSlotBatches(uint8_t slot, uint16_t& ringStart) {
         if (!f.seek(batchStart + sizeof(hdr) + len)) break;
         if (count < OFFSET_RING) {
             g_offsetRing[count] = static_cast<uint16_t>(batchStart);
-            g_typeRing[count] = hdr[1];
-            g_lenRing[count] = len;
             ++count;
         } else {
             g_offsetRing[ringStart] = static_cast<uint16_t>(batchStart);
-            g_typeRing[ringStart] = hdr[1];
-            g_lenRing[ringStart] = len;
             ringStart = (ringStart + 1) % OFFSET_RING;
         }
     }
@@ -388,14 +382,19 @@ uint16_t Esp8266BaseJournal::listSessions(Esp8266BaseJournalSession* out, uint16
         uint16_t ringStart = 0;
         const uint16_t count = scanSlotBatches(static_cast<uint8_t>(best), ringStart);
         // 按文件内从新到旧找 bootinfo
+        char path[24];
+        snprintf(path, sizeof(path), "%s/seg%u", DIR_PATH, (unsigned)best);
         for (uint16_t oi = count; oi > 0; --oi) {
             const uint16_t idx = (ringStart + oi - 1) % OFFSET_RING;
-            if (g_typeRing[idx] != BATCH_BOOT) continue;
-            // 读该批 payload 前 12B
-            char path[24];
-            snprintf(path, sizeof(path), "%s/seg%u", DIR_PATH, (unsigned)best);
             File f = LittleFS.open(path, "r");
             if (!f) continue;
+            f.seek(g_offsetRing[idx]);
+            uint8_t hdr[6];
+            if (f.read(hdr, sizeof(hdr)) != (int)sizeof(hdr) || hdr[0] != BATCH_MAGIC ||
+                hdr[1] != BATCH_BOOT) {
+                f.close();
+                continue;
+            }
             f.seek(g_offsetRing[idx] + 6);
             uint8_t payload[12];
             const int n = f.read(payload, sizeof(payload));
@@ -460,20 +459,22 @@ bool Esp8266BaseJournal::dumpTail(uint32_t offsetRecords, uint32_t maxRecords,
         snprintf(path, sizeof(path), "%s/seg%u", DIR_PATH, (unsigned)best);
         for (uint16_t oi = count; oi > 0 && emitted < maxRecords; --oi) {
             const uint16_t idx = (ringStart + oi - 1) % OFFSET_RING;
-            const uint16_t len = g_lenRing[idx];
-            if (len == 0 || len > ESP8266BASE_JOURNAL_MAX_BATCH_BYTES) break;
             File f = LittleFS.open(path, "r");
             if (!f) continue;
             f.seek(g_offsetRing[idx]);
             uint8_t hdr[6];
             const int hn = f.read(hdr, sizeof(hdr));
-            const int rd = (hn == (int)sizeof(hdr) && hdr[0] == BATCH_MAGIC && hdr[1] == g_typeRing[idx])
-                ? f.read(g_payload, len) : 0;
+            const bool hdrOk = hn == (int)sizeof(hdr) && hdr[0] == BATCH_MAGIC;
+            if (!hdrOk) { f.close(); break; }
+            const uint16_t len = hdr[2] | (static_cast<uint16_t>(hdr[3]) << 8);
+            const uint8_t type = hdr[1];
+            if (len == 0 || len > ESP8266BASE_JOURNAL_MAX_BATCH_BYTES) { f.close(); break; }
+            const int rd = f.read(g_payload, len);
             f.close();
             if (rd != (int)len) break;
             const uint16_t storedCrc = hdr[4] | (static_cast<uint16_t>(hdr[5]) << 8);
             if (_crc16(g_payload, len) != storedCrc) break;  // 损坏批：该文件旧数据到此为止
-            if (g_typeRing[idx] == BATCH_BOOT) {
+            if (type == BATCH_BOOT) {
                 BootPayload boot;
                 memcpy(&boot.bootNo, g_payload, 4);
                 memcpy(&boot.generation, g_payload + 4, 4);
@@ -529,7 +530,10 @@ uint8_t Esp8266BaseJournal::diagLevel() {
     dumpTail(0, 8192, s, [](uint32_t, uint8_t, uint8_t, int16_t, uint16_t,
                             uint16_t, uint32_t, uint8_t, void*) { return true; }, nullptr);
     if (s.stalls > 0 || s.radioResets > 0) return 2;
-    if (s.mqttClosed > 0 || s.wifiLost > 0 || s.mqttAttempts > 1) return 1;
+    // 受控正常下线（user_ok）不算异常；只看非正常关闭与 WiFi 掉线
+    const uint16_t abnormalClosed = s.mqttClosed > s.mqttClosedReasons[1]
+        ? s.mqttClosed - s.mqttClosedReasons[1] : 0;
+    if (abnormalClosed > 0 || s.wifiLost > 0) return 1;
     return 0;
 }
 

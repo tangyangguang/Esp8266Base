@@ -1747,9 +1747,10 @@ void Esp8266BaseWeb::_handleHealth() {
                                      nullptr);
         if (jsum.stalls > 0) {
             snprintf(diagBrief, sizeof(diagBrief), "stall=%u", (unsigned)jsum.stalls);
-        } else if (jsum.mqttClosed > 0) {
+        } else if (jsum.mqttClosed > jsum.mqttClosedReasons[1]) {
             snprintf(diagBrief, sizeof(diagBrief), "mqtt_closed=%u last=%u",
-                     (unsigned)jsum.mqttClosed, (unsigned)jsum.lastMqttReason);
+                     (unsigned)(jsum.mqttClosed - jsum.mqttClosedReasons[1]),
+                     (unsigned)jsum.lastMqttReason);
         } else if (jsum.wifiLost > 0) {
             snprintf(diagBrief, sizeof(diagBrief), "wifi_lost=%u", (unsigned)jsum.wifiLost);
         }
