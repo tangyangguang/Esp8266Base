@@ -141,6 +141,8 @@ Esp8266BaseMQTTDisconnectReason Esp8266BaseMQTT::_lastReason = Esp8266BaseMQTTDi
 uint32_t Esp8266BaseMQTT::_attemptCount = 0;
 uint32_t Esp8266BaseMQTT::_retryAt = 0;
 uint32_t Esp8266BaseMQTT::_retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
+uint32_t Esp8266BaseMQTT::_lastWifiRecoveryAt = 0;
+uint8_t Esp8266BaseMQTT::_consecutiveTransportFailures = 0;
 Esp8266BaseMQTTShutdownResult Esp8266BaseMQTT::_shutdownResult = Esp8266BaseMQTTShutdownResult::NONE;
 uint16_t Esp8266BaseMQTT::_shutdownPacketId = 0;
 uint32_t Esp8266BaseMQTT::_shutdownDeadline = 0;
@@ -271,6 +273,23 @@ void Esp8266BaseMQTT::handle() {
         static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxFreeBlockSize()));
     if (!_connectTransport()) {
         _lastReason = Esp8266BaseMQTTDisconnectReason::TCP_DISCONNECTED;
+        if (_consecutiveTransportFailures < 0xFFU) ++_consecutiveTransportFailures;
+        const uint32_t now = millis();
+        const bool recoveryDue = _lastWifiRecoveryAt == 0U ||
+            static_cast<uint32_t>(now - _lastWifiRecoveryAt) >=
+                ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS;
+        if (ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT > 0 &&
+            _consecutiveTransportFailures >= ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT &&
+            recoveryDue && Esp8266BaseWiFi::recoverStation()) {
+            ESP8266BASE_LOG_W("MQTT",
+                              "transport_failures_triggered_wifi_recovery failures=%u cooldown_ms=%lu",
+                              (unsigned)_consecutiveTransportFailures,
+                              (unsigned long)ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS);
+            _consecutiveTransportFailures = 0;
+            _lastWifiRecoveryAt = now;
+            _state = Esp8266BaseMQTTState::WAITING_WIFI;
+            return;
+        }
         _scheduleRetry();
     }
 }
@@ -765,6 +784,7 @@ void Esp8266BaseMQTT::_closeTransport(Esp8266BaseMQTTDisconnectReason reason,
 void Esp8266BaseMQTT::_onConnect(bool sessionPresent) {
     if (_shutdownActive) return;
     mqttConnected = true;
+    _consecutiveTransportFailures = 0;
     _state = Esp8266BaseMQTTState::CONNECTED;
     _lastReason = Esp8266BaseMQTTDisconnectReason::NONE;
     ESP8266BASE_LOG_I("MQTT", "connected session_present=%s free_heap=%u max_block=%u",

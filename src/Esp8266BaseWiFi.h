@@ -94,6 +94,9 @@ public:
     // 本次启动累计发起 STA 连接次数 / 完整 WiFi radio 重置次数
     static uint16_t attemptCount();
     static uint8_t radioResetCount();
+    // 当 SDK 仍报告 WL_CONNECTED、但上层传输持续失败时，完整重置 STA radio。
+    // 不重启 MCU、不改凭据、不进入 AP；无保存凭据或 AP 配网中返回 false。
+    static bool recoverStation();
 
     // AP 模式的 SSID（格式：ESP8266-Config-XXXX）
     static const char* apSSID();

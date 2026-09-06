@@ -34,6 +34,17 @@
 
 没有内容的小节可以省略。
 
+## 2026-09-01
+
+### 新增
+
+- `Esp8266Base::bootCount()`、`resetReason()` 与 `resetReasonName()` 暴露本次启动的原始复位证据；`power-on-or-external-reset` 仅表示 SDK 类别，业务不得据此直接断言停电。
+- `Esp8266BaseWiFi::recoverStation()` 允许上层在 SDK 仍报 `WL_CONNECTED`、但传输持续失败时请求完整 radio 恢复；不重启 MCU、不改凭据、不进入 AP。
+
+### 修复
+
+- MQTT 在连续 6 次 DNS/TCP/TLS 建连失败后、且距上次上层恢复至少 15 分钟时请求一次 WiFi radio 恢复，补齐 `WL_CONNECTED` 假在线绕过原 WiFi 状态机的自愈路径。TLS 缓冲仍为 4096/1024，lwIP、Web 与本地业务行为不变。
+
 ## 2026-08-30
 
 ### 修复

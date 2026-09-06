@@ -50,9 +50,12 @@ static void setFirmwareInfo(const char* name, const char* version);
 
 ```cpp
 static const char* hostname();
+static uint32_t bootCount();
+static Esp8266BaseResetReason resetReason();
+static const char* resetReasonName();
 static bool isValidHostname(const char* hostname);
 ```
-`hostname()` 查询启动时解析出的最终 hostname。默认值来自 `ESP8266BASE_DEFAULT_HOSTNAME`，合法持久化值 `eb_hostname` 会覆盖默认值。`isValidHostname()` 使用库统一规则校验：1-32 位，只允许小写字母、数字和短横线，不能以短横线开头或结尾，不允许 `.` 或 `.local`。
+`hostname()` 查询启动时解析出的最终 hostname。`bootCount()` 返回本次启动已写前比较持久化的累计启动次数（配置不可用时为 0）。`resetReason()`/`resetReasonName()` 直接投影 SDK 原始复位类别为 `power-on-or-external-reset`、`software-restart`、`watchdog-reset`、`exception`、`deep-sleep-wake` 或 `unknown`；上电/外部复位类别不能单独证明停电。默认 hostname 来自 `ESP8266BASE_DEFAULT_HOSTNAME`，合法持久化值 `eb_hostname` 会覆盖默认值。`isValidHostname()` 使用库统一规则校验：1-32 位，只允许小写字母、数字和短横线，不能以短横线开头或结尾，不允许 `.` 或 `.local`。
 
 ```cpp
 static const char* firmwareName();
@@ -363,9 +366,10 @@ static void macAddressTo(char* out, size_t len);
 static Esp8266BaseWiFiState state();
 static uint16_t attemptCount();
 static uint8_t radioResetCount();
+static bool recoverStation();
 static const char* apSSID();
 ```
-状态查询。`ip()` 未连接时返回空字符串。`ssid()` 返回当前内存缓存中的 STA SSID。`rssi()` 仅连接后有效，未连接时返回 0。`macAddressTo()` 输出 STA MAC 地址。`attemptCount()` 与 `radioResetCount()` 返回本次启动累计 STA 连接次数和 WiFi radio 完整重置次数，计数饱和后不回绕。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
+状态查询。`ip()` 未连接时返回空字符串。`ssid()` 返回当前内存缓存中的 STA SSID。`rssi()` 仅连接后有效，未连接时返回 0。`macAddressTo()` 输出 STA MAC 地址。`attemptCount()` 与 `radioResetCount()` 返回本次启动累计 STA 连接次数和 WiFi radio 完整重置次数，计数饱和后不回绕。`recoverStation()` 供上层在 SDK 仍报 `WL_CONNECTED`、但传输连续失败时请求完整 radio 恢复；它不重启 MCU、不改凭据、不进入 AP。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
 
 ### 默认参数
 
@@ -597,7 +601,7 @@ static void resumeAfterShutdown();
 
 出站默认两个固定槽位，优先级为 `CRITICAL/EVIDENCE/STATE`，同优先级保持 FIFO；任意时刻只有一个 QoS1 包在途，匹配 PUBACK 后才发送下一包。业务按相同优先级顺序提交 runtime、overview 时，overview 必须等待 runtime 的 PUBACK。默认边界是 128B topic、512B 出站 payload、256B RX 分块和 768B 单个入站 payload，均可在允许范围内由构建期宏调整。出站 payload 可配置 64～768B；配置超过 512B 时，每个固定槽位由 512B head 和最多 256B tail 组成，发送时顺序写出，不创建大于 512B 的单个静态数组或额外完整 packet。
 
-`requestReconnect()` 用于业务握手失败后的受控重试；下一轮 `handle()` 才释放传输。CONNACK 不视为应用 ready，也不重置退避，所以连续失败使用 2s→4s→8s→16s→32s→60s。业务完成订阅及初始握手后必须调用 `markConnectionReady()`，它只在已连接、未暂停且无待处理重连时成功，并把后续普通断线恢复为初始 2s。重复重连请求幂等；两个 API 都不会等待网络或暴露第三方 MQTT 类型。
+`requestReconnect()` 用于业务握手失败后的受控重试；下一轮 `handle()` 才释放传输。CONNACK 不视为应用 ready，也不重置退避，所以连续失败使用 2s→4s→8s→16s→32s→60s。业务完成订阅及初始握手后必须调用 `markConnectionReady()`，它只在已连接、未暂停且无待处理重连时成功，并把后续普通断线恢复为初始 2s。重复重连请求幂等；两个 API 都不会等待网络或暴露第三方 MQTT 类型。若 WiFi SDK 持续报告已连接、但 DNS/TCP/TLS 连续 6 次失败，MQTT 最多每 15 分钟调用一次 `recoverStation()`，用于退出 SDK 假在线；Broker 自身不可达期间可能产生一次无害 radio 恢复，但不会重启 MCU 或改变本地业务。
 
 `setConnectAttemptsEnabled(false)` 只禁止后续 DNS/TCP/TLS 新建连接，不主动断开已建立会话，也不停止该会话的 MQTT `loop()` 和收发；恢复为 `true` 后按既有退避时间继续。适用于执行器运行期间避免同步建连阻塞本地截止逻辑，不改变 Topic、消息、QoS 或认证契约。`connectAttemptsEnabled()` 返回当前门禁值。
 
@@ -913,6 +917,8 @@ void loop() {
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译通用 TLS MQTT 模块；要求 NTP |
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 初始退避 ms |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 退避上限 ms |
+| `ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT` | `6` | WiFi 假在线时触发 radio 恢复的连续传输失败次数 |
+| `ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS` | `900000` | 上层触发 WiFi radio 恢复的最小间隔 ms |
 | `ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS` | `5000` | 受控下线 PUBACK/正常断开单阶段超时 ms |
 | `ESP8266BASE_MQTT_TX_SLOTS` | `2` | 固定出站槽位，范围 1-4 |
 | `ESP8266BASE_MQTT_MAX_TOPIC_BYTES` | `128` | MQTT topic 上限 |

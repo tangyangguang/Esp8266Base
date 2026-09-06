@@ -27,6 +27,14 @@ namespace BearSSL { class X509List; }
 #define ESP8266BASE_MQTT_CONNECT_TIMEOUT_MS 10000UL
 #endif
 
+#ifndef ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT
+#define ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT 6
+#endif
+
+#ifndef ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS
+#define ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS 900000UL
+#endif
+
 #if ESP8266BASE_MQTT_RETRY_INITIAL_MS < 1000UL
 #error "ESP8266BASE_MQTT_RETRY_INITIAL_MS must be at least 1000"
 #endif
@@ -35,6 +43,9 @@ namespace BearSSL { class X509List; }
 #endif
 #if ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS == 0 || ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS > 0x7FFFFFFFUL
 #error "ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS must be between 1 and 2147483647"
+#endif
+#if ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT > 255
+#error "ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT must fit uint8_t"
 #endif
 
 enum class Esp8266BaseMQTTState : uint8_t {
@@ -203,6 +214,8 @@ private:
     static uint32_t _attemptCount;
     static uint32_t _retryAt;
     static uint32_t _retryDelay;
+    static uint32_t _lastWifiRecoveryAt;
+    static uint8_t _consecutiveTransportFailures;
     static Esp8266BaseMQTTShutdownResult _shutdownResult;
     static uint16_t _shutdownPacketId;
     static uint32_t _shutdownDeadline;

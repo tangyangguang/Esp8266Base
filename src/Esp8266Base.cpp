@@ -1,4 +1,5 @@
 #include "Esp8266Base.h"
+#include <user_interface.h>
 
 #if ESP8266BASE_USE_CONFIG
 static uint32_t _loadBootCount(const char* invalidAction) {
@@ -60,6 +61,7 @@ static uint32_t _loadAndIncrementBootCount() {
 char Esp8266Base::_fwName[24]    = "esp8266base";
 char Esp8266Base::_fwVersion[16] = "1.0.0";
 char Esp8266Base::_hostname[33]  = "esp8266base";
+uint32_t Esp8266Base::_bootCount = 0;
 
 #if ESP8266BASE_USE_NTP
 bool Esp8266Base::_ntpWasTriggered = false;
@@ -163,8 +165,7 @@ bool Esp8266Base::begin() {
 
     _resolveHostname();
 
-    uint32_t bootCount = 0;
-    bootCount = _loadAndIncrementBootCount();
+    _bootCount = _loadAndIncrementBootCount();
 
     Esp8266BaseLog::beginBootSession(
         _fwName,
@@ -174,7 +175,7 @@ bool Esp8266Base::begin() {
 #else
         "unknown",
 #endif
-        bootCount,
+        _bootCount,
         ESP.getFreeHeap()
     );
 
@@ -188,7 +189,7 @@ bool Esp8266Base::begin() {
 
     // 7. Web — 注册内置路由（OTA 路由由 OTA 模块在此后注册）
 #if ESP8266BASE_USE_WEB
-    Esp8266BaseWeb::setSystemInfo(_hostname, _fwName, _fwVersion, bootCount);
+    Esp8266BaseWeb::setSystemInfo(_hostname, _fwName, _fwVersion, _bootCount);
     Esp8266BaseWeb::begin();
 #endif
 
@@ -396,3 +397,42 @@ void Esp8266Base::logDiagnostics() {
 const char* Esp8266Base::firmwareName()    { return _fwName; }
 const char* Esp8266Base::firmwareVersion() { return _fwVersion; }
 const char* Esp8266Base::hostname()        { return _hostname; }
+uint32_t Esp8266Base::bootCount()          { return _bootCount; }
+
+Esp8266BaseResetReason Esp8266Base::resetReason() {
+    const rst_info* info = ESP.getResetInfoPtr();
+    if (!info) return Esp8266BaseResetReason::UNKNOWN;
+    switch (info->reason) {
+        case REASON_DEFAULT_RST:
+        case REASON_EXT_SYS_RST:
+            return Esp8266BaseResetReason::POWER_ON_OR_EXTERNAL_RESET;
+        case REASON_SOFT_RESTART:
+            return Esp8266BaseResetReason::SOFTWARE_RESTART;
+        case REASON_WDT_RST:
+        case REASON_SOFT_WDT_RST:
+            return Esp8266BaseResetReason::WATCHDOG_RESET;
+        case REASON_EXCEPTION_RST:
+            return Esp8266BaseResetReason::EXCEPTION;
+        case REASON_DEEP_SLEEP_AWAKE:
+            return Esp8266BaseResetReason::DEEP_SLEEP_WAKE;
+        default:
+            return Esp8266BaseResetReason::UNKNOWN;
+    }
+}
+
+const char* Esp8266Base::resetReasonName() {
+    switch (resetReason()) {
+        case Esp8266BaseResetReason::POWER_ON_OR_EXTERNAL_RESET:
+            return "power-on-or-external-reset";
+        case Esp8266BaseResetReason::SOFTWARE_RESTART:
+            return "software-restart";
+        case Esp8266BaseResetReason::WATCHDOG_RESET:
+            return "watchdog-reset";
+        case Esp8266BaseResetReason::EXCEPTION:
+            return "exception";
+        case Esp8266BaseResetReason::DEEP_SLEEP_WAKE:
+            return "deep-sleep-wake";
+        default:
+            return "unknown";
+    }
+}

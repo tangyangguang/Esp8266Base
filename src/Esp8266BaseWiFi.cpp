@@ -280,6 +280,14 @@ uint8_t Esp8266BaseWiFi::radioResetCount() {
     return _radioResetCount;
 }
 
+bool Esp8266BaseWiFi::recoverStation() {
+    if (_staSSID[0] == '\0' || _state == Esp8266BaseWiFiState::AP_CONFIG) return false;
+    _ip[0] = '\0';
+    ESP8266BASE_LOG_W("WiFi", "station_recovery_requested source=upper_transport action=radio_reset");
+    _resetRadioAndStartSTA();
+    return true;
+}
+
 const char* Esp8266BaseWiFi::apSSID() {
     return _apSSID;
 }

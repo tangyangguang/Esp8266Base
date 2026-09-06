@@ -38,6 +38,15 @@
 #include "Esp8266BaseWatchdog.h"
 #endif
 
+enum class Esp8266BaseResetReason : uint8_t {
+    POWER_ON_OR_EXTERNAL_RESET = 0,
+    SOFTWARE_RESTART,
+    WATCHDOG_RESET,
+    EXCEPTION,
+    DEEP_SLEEP_WAKE,
+    UNKNOWN
+};
+
 // ----------------------------------------------------------------------------
 // Esp8266Base — 主入口
 //
@@ -71,12 +80,16 @@ public:
     static const char* firmwareName();
     static const char* firmwareVersion();
     static const char* hostname();
+    static uint32_t bootCount();
+    static Esp8266BaseResetReason resetReason();
+    static const char* resetReasonName();
     static bool isValidHostname(const char* hostname);
 
 private:
     static char _fwName[24];     // 24B
     static char _fwVersion[16];  // 16B
     static char _hostname[33];   // 33B
+    static uint32_t _bootCount;  // 4B
 
     static void _resolveHostname();
 
