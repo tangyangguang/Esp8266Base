@@ -46,6 +46,17 @@
 // 拒绝本身几乎不消耗堆。
 // 阈值口径：从该点起一个轻量请求还要吃 解析(~1KB)+鉴权(~0.5KB)+响应在途
 // (~1KB) ≈ 2.5KB，加 ~2KB 安全底 → ~4.5KB。阈值越高越保守（低堆时拒绝更多）。
+// WiFiServer accepts peers in SDK/system context before the HTTP heap hook can
+// run, and each pending ClientContext uses operator new. Bound pending peers
+// so low-heap bursts cannot grow to the Core default of five and throw OOM
+// before the pre-parse 503 guard gets control.
+#ifndef ESP8266BASE_WEB_TCP_BACKLOG
+#define ESP8266BASE_WEB_TCP_BACKLOG 1U
+#endif
+#if ESP8266BASE_WEB_TCP_BACKLOG < 1U || ESP8266BASE_WEB_TCP_BACKLOG > 2U
+#error "ESP8266BASE_WEB_TCP_BACKLOG must be 1 or 2"
+#endif
+
 #ifndef ESP8266BASE_WEB_HEAP_GATE_FREE_BYTES
 #define ESP8266BASE_WEB_HEAP_GATE_FREE_BYTES 4608U
 #endif

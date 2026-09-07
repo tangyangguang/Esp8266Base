@@ -529,7 +529,7 @@ Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
 系统首页用 Connection、Runtime、Firmware、Time 四组展示状态。Connection 显示 `Hostname/WiFi/SSID/IP/RSSI(dBm)/STA MAC`；Runtime 显示 `Free heap/Max block/Restart count`，其中 `Restart count` 来自 `eb_boot_count`，deep sleep 唤醒不递增；启用 Watchdog 时显示 `WDT resets`，值为 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数，启用 Sleep 时显示 `Wake reason` 英文状态和简短中文说明；Time 显示 `Uptime/NTP/Now/Boot time`；Firmware 显示 `Firmware/Version/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap/Max block` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`FOOTER_COMPACT` 在窄屏下会把入口按钮和状态信息分成两行并左对齐，避免状态行换行后靠右。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
 
-`/wifi` GET 会回显已保存 SSID/密码，密码默认隐藏，可手动切换显示。WiFi 凭证保留合法的首尾空格。`/wifi` 和 `/auth` 的 GET 表单携带每次启动随机令牌，POST 必须同时通过 Basic Auth 与令牌校验。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
+`/wifi` GET 只回显已保存 SSID，密码输入始终为空且不会把已保存密码写入 HTML；重新保存时必须重输密码（开放网络保持为空）。WiFi 凭证保留合法的首尾空格。`/wifi` 和 `/auth` 的 GET 表单携带每次启动随机令牌，POST 必须同时通过 Basic Auth 与令牌校验。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
 `addPage()` / `addApi()` 必须在 `Esp8266Base::begin()` 后调用；过早调用会返回 `false` 并输出 WARN 日志。
 
 ### 使用示例
@@ -578,8 +578,10 @@ static uint16_t publish(const char* topic, uint8_t qos, bool retain,
 static uint16_t publish(const char* topic, uint8_t qos, bool retain,
                         const char* payload);
 static uint16_t subscribe(const char* topic, uint8_t qos);
-static bool requestReconnect();
+static bool requestReconnect(bool recoveryFailure = false);
 static bool markConnectionReady();
+static bool recoveryReport(uint32_t afterSerial,
+                           Esp8266BaseMQTTRecoveryReport& report);
 static void setConnectAttemptsEnabled(bool enabled);
 static bool connectAttemptsEnabled();
 static size_t queuedPackets();
@@ -601,7 +603,7 @@ static void resumeAfterShutdown();
 
 出站默认两个固定槽位，优先级为 `CRITICAL/EVIDENCE/STATE`，同优先级保持 FIFO；任意时刻只有一个 QoS1 包在途，匹配 PUBACK 后才发送下一包。业务按相同优先级顺序提交 runtime、overview 时，overview 必须等待 runtime 的 PUBACK。默认边界是 128B topic、512B 出站 payload、256B RX 分块和 768B 单个入站 payload，均可在允许范围内由构建期宏调整。出站 payload 可配置 64～768B；配置超过 512B 时，每个固定槽位由 512B head 和最多 256B tail 组成，发送时顺序写出，不创建大于 512B 的单个静态数组或额外完整 packet。
 
-`requestReconnect()` 用于业务握手失败后的受控重试；下一轮 `handle()` 才释放传输。CONNACK 不视为应用 ready，也不重置退避，所以连续失败使用 2s→4s→8s→16s→32s→60s。业务完成订阅及初始握手后必须调用 `markConnectionReady()`，它只在已连接、未暂停且无待处理重连时成功，并把后续普通断线恢复为初始 2s。重复重连请求幂等；两个 API 都不会等待网络或暴露第三方 MQTT 类型。若 WiFi SDK 持续报告已连接、但 DNS/TCP/TLS 连续 6 次失败，MQTT 最多每 15 分钟调用一次 `recoverStation()`，用于退出 SDK 假在线；Broker 自身不可达期间可能产生一次无害 radio 恢复，但不会重启 MCU 或改变本地业务。
+`requestReconnect(true)` 用于把应用订阅/readiness 失败计入恢复周期，并在下一轮 `handle()` 释放传输；维护或受控生命周期重连使用默认 `false`。CONNACK 不视为应用 ready，只有 `markConnectionReady()` 清除连续恢复计数并恢复初始 2s 退避，同时生成固定大小的最近恢复快照。业务以已消费 serial 调用 `recoveryReport()`，可只持久化一次 duration/failureCycles/radioResetCount，不需要在基础库中注册动态回调。可恢复失败累计 6 次、且距上次恢复至少 15 分钟时调用 `recoverStation()` 退出 SDK 假在线；持续 30 分钟并经历至少 2 次 radio reset 后，通过 Watchdog 请求受 guard 与预算约束的 MCU 恢复。协议、身份、凭据、ACL 和 X509 校验错误不进入 radio/MCU 重启阶梯。
 
 `setConnectAttemptsEnabled(false)` 只禁止后续 DNS/TCP/TLS 新建连接，不主动断开已建立会话，也不停止该会话的 MQTT `loop()` 和收发；恢复为 `true` 后按既有退避时间继续。适用于执行器运行期间避免同步建连阻塞本地截止逻辑，不改变 Topic、消息、QoS 或认证契约。`connectAttemptsEnabled()` 返回当前门禁值。
 
@@ -833,6 +835,8 @@ void collectAndSleep() {
 ### 函数
 
 ```cpp
+static void setSafetyCallbacks(Esp8266BaseEmergencyStopCallback emergencyStop,
+                               Esp8266BaseRestartGuardCallback restartGuard);
 static bool begin(uint32_t timeoutMs = ESP8266BASE_WDT_TIMEOUT_MS);
 ```
 初始化，设置基础超时时间（范围 1000–3000ms，超出自动截断）。读取上次 WDT 重启记录。
@@ -853,10 +857,7 @@ static void account(uint32_t maxBlockMs, uint32_t startedAtMs);
 static void handle();
 static void feed();
 ```
-`handle()` 在主循环轮末检查：本轮“未覆盖”时间（整轮耗时 - 已覆盖段耗时）超过基础超时即
-视为停滞，写 RTC 标记并 `ESP.restart()`。`feed()` 为兼容保留（不再用于停滞判定）。
-两者均由 `Esp8266Base::handle()` 自动调用。注意：检查点在主循环内，对“永不返回”的停滞
-无法自行触发，此类场景需业务侧独立监护。
+`handle()` 在主循环轮末检查返回后的“未覆盖”超时；`feed()` 只保留时间证据。基础库另用每秒 SDK timer 检查 heartbeat，默认 90 秒无推进即捕获持续 `yield()` 但不返回的冻结。执行器必须在 `begin()` 前注册无分配 `emergencyStop` 和普通网络重启 `restartGuard`；异步路径先安全关闭、写 RTC，再按预算调用 `system_restart()`。
 
 ```cpp
 static void pause();
@@ -865,11 +866,21 @@ static void resume();
 暂停/恢复看门狗检查。OTA 上传期间自动调用，长阻塞操作前也应调用。
 
 ```cpp
+static void setApplicationReady(bool ready);
+static Esp8266BaseRestartDecision requestRestart(Esp8266BaseRecoveryCause cause);
+static bool restartDecisionReport(uint32_t afterSerial,
+                                  Esp8266BaseRestartDecisionReport& report);
 static bool wasWatchdogReset();
 static uint32_t resetCount();
 static void clearResetCount();
+static Esp8266BaseRecoveryCause lastRecoveryCause();
+static Esp8266BaseWatchdogPhase lastStallPhase();
+static bool lastRecoveryWasDenied();
+static Esp8266BaseRestartDecision lastRecoveryDecision();
+static uint8_t consecutiveRecoveryRestarts();
+static uint8_t recoveryRestartsInWindow();
 ```
-WDT 重启累计次数查询与清零。超时路径先写 RTC 标记并重启，下一次正常启动阶段补写 Config key `eb_wdt_count`。
+WDT 重启累计次数查询与清零。超时路径先写 RTC 标记并重启，下一次正常启动阶段补写 Config key `eb_wdt_count`。`setApplicationReady()` 由 MQTT readiness 自动驱动，稳定 30 分钟后打断连续重启链；可信 UTC 的 24 小时次数独立保留。`restartDecisionReport()` 以 serial 暴露最近一次被 guard、冷却或预算拒绝的固定快照，供业务形成持久诊断。
 
 ### 默认配置
 
@@ -947,6 +958,7 @@ void loop() {
 | `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大注册数 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大注册数 |
+| `ESP8266BASE_WEB_TCP_BACKLOG` | `1` | TCP listener 待处理 peer 上限；范围 1～2，保护 HTTP hook 前的堆 |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
 | `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` | Basic Auth 编译期默认密码 |
 | `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化 |
@@ -971,11 +983,7 @@ void loop() {
 头文件：`Esp8266BaseJournal.h`；编译开关 `ESP8266BASE_USE_JOURNAL`
 （默认在 Config+MQTT 组合下启用）。
 
-事件（WiFi 状态迁移、MQTT 连接尝试/成功/关闭原因、radio 复位、停滞）与 1 分钟趋势采样
-（rssi/heap/loop lag）先入 RAM 环（28×12B），按“事件积批（≤10s 限频）/ 趋势 30 分钟兜底”
-下刷到 LittleFS 环形槽（默认 8 槽 × 8KB = 64KB，`ESP8266BASE_JOURNAL_SLOT_COUNT` /
-`ESP8266BASE_JOURNAL_SLOT_BYTES` 可配），满则覆盖最旧、无时间 TTL；每个 boot 一条会话头
-（bootNo/reset/代次）。批带 CRC16，读侧坏批截断自愈；OTA 不擦档案。
+JR02 使用固定 16B CRC 记录写入 LittleFS 环形槽（默认 8 槽 × 8KB = 64KB）。旧实验格式启动时直接删除，不迁移。事件进入 8 条 RAM 环并在 10 秒内下刷；RSSI/heap/loop lag 每分钟只在 RAM 聚合，每 30 分钟形成一条趋势记录。heap 以 64B 单位保存，文本视图用 `heap_min~7.31KiB` 形式保留两位近似精度，`~` 明确表示量化值而非逐字节现场值。每个 boot 和槽轮转写入会话边界。固定记录允许读侧反向 seek 全部保留内容，不再依赖有界批偏移环；活动槽坏尾被保留并轮转到新槽。
 
 ### 函数
 
@@ -995,9 +1003,8 @@ static void formatRecord(...);         // ≤80 字符文本行（页面/raw 共
 ```
 
 - 读取 API 全部有界、无堆分配；翻页用 `offsetRecords` 逐页拉取；
-- 高频只读路径（/health、状态页）走 RAM 摘要缓存（cachedSummary，不访问 Flash）；
-  页面导出走 dumpTail（每槽单次 open、批间 seek，避免按批 open/close 造成堆碎片）；
-- `dumpTail` 从新到旧导出，boot 边界以 `kind==0xFF` 伪记录（携带 bootNo/reset）表达；
-- 掉电语义：事件按批即时落盘（限频 ≤10s），趋势最多丢最近一个兜底间隔（≤30 分钟）；
-- RAM 增量 <= ~0.4KB（16×12B 事件环 + 偏移环 16×2B + 96B 批缓冲）；
-  写入/擦除计数见 stats。
+- 高频 `/health`/状态页只读 RAM `cachedSummary`，不访问 Flash；
+- `dumpTail` 每槽只 open 一次并对固定记录反向 seek，扫描全部完整记录；
+- `kind==0xFF` 是携带 bootNo/reset 的会话边界；
+- 事件最多丢最后 10 秒 RAM 队列，趋势最多丢当前 30 分钟聚合；
+- 静态增量约 0.3KB；写入、擦除、I/O 错误和队列丢弃见 stats。

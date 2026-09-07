@@ -45,11 +45,11 @@
 | Esp8266BaseWeb（MQTT_TERMINAL 0+0 路由） | <= 640B | ESP8266WebServer + auth/device/hostname/firmware/active request + 4B 表单令牌；应用数组和完整导航状态均排除 |
 | Esp8266BaseOTA | <= 160B | 上传状态/计时 + 两阶段准备租约状态 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
 | Esp8266BaseFilesystem | <= 1B 自有状态 | LittleFS 挂载生命周期；文件系统实现的动态成本属于 Core |
-| Esp8266BaseMQTT | 默认 <= 2.4KB；768B 出站上限时 <= 2.9KB | 默认两个约 664B 固定出站槽；每槽 payload 可从 512B 增到最多 768B，超出部分放入独立 <=256B tail；另有约 429B RX 状态/窗口、固定配置/回调、假在线恢复计数/冷却、`WiFiClientSecure` 对象和 96B TLS 错误文本；不含动态 TLS/证书 |
+| Esp8266BaseMQTT | 默认 <= 2.4KB；768B 出站上限时 <= 2.9KB | 默认两个约 664B 固定出站槽；每槽 payload 可从 512B 增到最多 768B，超出部分放入独立 <=256B tail；另有约 429B RX 状态/窗口、固定配置/回调、假在线恢复计数/冷却、14B 最近恢复快照、`WiFiClientSecure` 对象和 80B TLS 错误文本；不含动态 TLS/证书 |
 | Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 + 7B RTT/误差证据 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
-| Esp8266BaseWatchdog | <= 96B DRAM + 12B RTC | timeout(4B) + 计时器(8B) + pause(1B) + count(4B)；RTC user memory word 64-66 保存 WDT 超时标记 |
+| Esp8266BaseWatchdog | <= 144B DRAM + 28B RTC | SDK timer + heartbeat/阶段 + timeout/pause/count + application-ready 计时 + 两套预算 + 最近拒绝快照 + 两个安全函数指针；RTC user memory word 64-70 保存恢复原因、预算与校验 |
 | **核心裁剪目标（自有）** | **< 1.25KB** | Log + Config + WiFi + Sleep + Watchdog + 默认 FileLog，不含 Web/OTA/NTP/mDNS 和 Arduino SDK 内部开销 |
 | **全模块默认目标（自有）** | **<= 2.9KB** | Web/OTA/NTP/mDNS/Sleep/Watchdog 全开，默认 ERROR FileLog，无 INFO 缓存 |
 | **全模块 INFO FileLog 目标（自有）** | **<= 3.4KB** | 全模块默认目标 + INFO 文件日志缓存，缓存上限仍为单个静态缓冲 512B |
@@ -58,7 +58,7 @@
 
 | 地址 word | 字节数 | 用途 |
 |---:|---:|---|
-| 64-66 | 12B | Watchdog 超时标记，包含 magic、count、checksum |
+| 64-70 | 28B | 恢复标记，包含 magic、WDT count、连续预算、原因/阶段/拒绝原因、可信 24 小时窗口和 checksum |
 
 业务代码如需使用 RTC user memory，必须避开库保留区域。
 
@@ -79,6 +79,10 @@
 这些数值来自本次 PlatformIO 链接结果，只能证明静态 RAM/Flash 趋势。未连接、连接尝试、TLS 已连接和断开后的 free heap/max block 只能在真机测量。重构前同工具链 `mqtt_terminal` 为 45,916B RAM / 512,237B Flash；固定传输版本在保留 Config 的正式组合中减少 1,560B RAM / 10,098B Flash。无文件系统组合相对基线减少 3,952B RAM / 42,390B Flash，但 WiFi 凭据、Web Auth 与业务配置仅在 RAM 中保存，重启即丢失，因此只适合确实无持久化需求的固件。
 
 正式 `MQTT_TERMINAL` 不使用 `espMqttClient`、`EMC_MIN_FREE_MEMORY`、动态 outbox、packet `malloc/new`、`std::function` 或 `std::list`。MQTT 默认边界为 2 个出站槽、128B topic、512B 出站 payload、256B RX 窗口和 768B 入站 payload；出站可在 64～768B 内按封闭业务协议配置，每增加 1B 会按槽位数增加固定 RAM。超过 512B 时每槽使用独立的 512B head 和最多 256B tail，任何单个静态数组仍不超过 512B；仅一个 QoS1 包在途。BearSSL 仍显式保持 4096B RX / 1024B TX。仍会动态分配的第三方边界是 DNS/TCP、BearSSL 证书和 TLS 会话、ESP8266WebServer 的路由/请求参数与 multipart OTA、启用时的 LittleFS/Core；这些峰值和碎片必须真机记录。
+
+Journal 的常规趋势与事件下刷会在 Web 最后活跃后的 3 秒安静窗口再执行，避免 LittleFS `File` 临时分配与 TLS 在线的 Web 响应峰值重叠。固定 RAM ring 在此期间保留待写记录；ring 已满时常规记录宁可明确增加 drop 计数，也不在 Web 压力窗口强行打开文件。同步恢复路径显式调用的 `recordNow()` 仍可在重启前强制持久化；独立异步 heartbeat 回调不得调用它或访问 LittleFS。
+
+Web listener 默认 `ESP8266BASE_WEB_TCP_BACKLOG=1`。这是堆闸门的前置保护：ESP8266 Core 的 `WiFiServer::_accept()` 在 SDK context、HTTP hook 运行前即以 `new ClientContext` 接收 peer，低堆时默认 backlog 5 会先抛 OOM，hook 无法补救。backlog 1 只允许一个已 accept peer，其余并发留在 TCP backlog，由单线程 Web handler 依次消费；允许配置 1～2，但扩大值必须以目标固件 TLS 在线并发测试证明不会越过运行时堆红线。基础库先调用 WebServer `close()` 初始化请求状态与 Authorization header 收集，再以自定义 backlog 启动底层 listener，不能省略此前置步骤。预解析 hook 对已接收客户端启用 `WiFiClient` sync 写，每次响应写入等待 ACK 且不保留临时 TCP 发送副本，避免流式页面在通过闸门后与 MQTT/TLS、另一个已接收 peer 叠加发送堆；这是低堆稳定性约束，不得在未完成目标固件并发压测时关闭。
 
 | MQTT_TERMINAL 真机场景 | Free heap | Max block | 状态 |
 |---|---:|---:|---|

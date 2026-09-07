@@ -148,6 +148,7 @@ build_flags =
 | `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面最大数量 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 最大数量 |
+| `ESP8266BASE_WEB_TCP_BACKLOG` | `1` | TCP listener 待处理 peer 上限；范围 1～2 |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
 | `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` | Basic Auth 编译期默认密码 |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8） |

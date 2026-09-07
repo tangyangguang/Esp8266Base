@@ -25,7 +25,7 @@ NTP 和 mDNS 不在 `begin()` 中启动，而是在 `handle()` 中检测到 WiFi
 | `eb_wifi_ssid` | STA SSID |
 | `eb_wifi_pass` | STA 密码 |
 
-WiFi 密码会在日志中明文输出，并带 `password_length`，用于现场观察和调试。
+WiFi 密码正文始终脱敏为 `[redacted]`，日志只保留 `password_length` 和非敏感结果字段。
 
 `Esp8266BaseWiFi::connect()` 在保存前校验凭证长度：SSID 必须为 1-32 字节，密码必须为 0-63 字节。超限会拒绝保存并输出 `connect_rejected reason=ssid_too_long` 或 `reason=password_too_long`，避免 Config 保存值与实际连接缓存发生截断不一致。
 密码可以为空，用于连接开放 WiFi；内置 `/wifi` 配网页也允许空密码。
@@ -177,7 +177,9 @@ log_timestamp_mode=absolute_datetime
 
 SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定 `uint8_t` code 数组；publish acknowledgement 回调在 QoS1 PUBACK 后触发。`CAPACITY_EXHAUSTED`、`PACKET_TOO_LARGE`、`MAX_RETRIES`、`PROTOCOL_ERROR` 会记录并交给业务。自动测试覆盖固定队列、匹配 ACK、边界和 wrap-safe 时间比较，但不等于真实 broker ACL、SUBACK/PUBACK 或 TLS 握手验证。
 
-如果业务要求订阅确认后才算 ready，应在 SUBACK 不匹配、拒绝或其他应用握手失败时调用 `requestReconnect()`，成功完成订阅和初始证据后调用 `markConnectionReady()`。CONNACK 不重置退避；连续握手失败保持 2s→60s 有界指数退避。ready 后退避恢复初始值，之后普通断线从 2s 开始。异步 disconnect callback 与 `handle()` fallback 通过 `BACKOFF` 状态避免重复 schedule。
+如果业务要求订阅确认后才算 ready，应在 SUBACK 不匹配、拒绝或其他应用握手失败时调用 `requestReconnect(true)`，成功完成订阅和初始证据后调用 `markConnectionReady()`。只有 application-ready 才清除连续恢复计数；CONNACK 本身不能证明业务链路可用。连续握手失败保持 2s→60s 有界指数退避。ready 后退避恢复初始值，之后普通断线从 2s 开始。异步 disconnect callback 与 `handle()` fallback 通过 `BACKOFF` 状态避免重复 schedule。
+
+DNS/TCP/TLS I/O、CONNACK server-unavailable 和应用 readiness 等可恢复失败累计达到 6 次后，MQTT 会请求一次 WiFi `WIFI_OFF → WIFI_STA` radio reset，即使 SDK 仍报告 `WL_CONNECTED`。radio reset 最短间隔 15 分钟。失败持续 30 分钟且至少经历 2 次 radio reset 后，MQTT 通过 Watchdog 请求有预算的 MCU 恢复；业务 `restartGuard` 可在执行器运行时延期。协议、标识、凭据、ACL 和证书指纹等永久错误不触发 radio/MCU 重启。
 
 执行器运行期间可调用 `setConnectAttemptsEnabled(false)`，只暂停后续 DNS/TCP/TLS 新建连接；已经建立的 MQTT 会话仍保持并继续收发。运行结束恢复为 `true` 后沿既有退避时间继续。这个门禁用于避免同步建连阻塞本地截止，不修改 MQTT 协议、身份或 ACL。
 
@@ -193,7 +195,7 @@ SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定
 |---|---|
 | 进入 AP | `no_saved_wifi_credentials` |
 | 有凭证但没连上 | `station_connect_stuck_restarting`、`station_connect_stuck_retrying`、`station_connect_timeout`、`station_reconnect_scheduled` |
-| 密码错误 | 明文 password 日志、路由器认证日志 |
+| 密码错误 | `WL_CONNECT_FAILED`、路由器认证日志；设备日志不输出密码正文 |
 | mDNS 访问慢 | `mdns_started`、改用 IP 验证 |
 | NTP 不同步 | `ntp_sync_pending`、DNS/网关/UDP 123 |
 

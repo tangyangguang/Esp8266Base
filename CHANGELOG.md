@@ -34,6 +34,32 @@
 
 没有内容的小节可以省略。
 
+## 2026-09-07
+
+### 修复
+
+- Watchdog 增加独立 SDK `os_timer` heartbeat 监护，覆盖主循环卡在持续 `yield()` 的 SDK/lwIP/TLS 调用中、轮末检查永远无法执行的故障；执行器通过无分配安全回调先关闭输出，再按 RTC 预算受控重启。
+- MQTT 恢复计数延迟到 application-ready 才清除，并把 CONNACK 后的订阅/readiness 失败纳入恢复周期；连续可恢复失败触发 radio reset，长期失败在业务安全 guard 允许时请求有预算 MCU 重启。永久协议、凭据和 ACL 错误不进入重启阶梯。
+- Journal 直接采用不兼容的 JR02 固定记录格式，启动时删除旧实验格式；移除每槽只保留 16 个批偏移造成的历史遗漏，损坏活动槽保留并轮转，读侧可遍历全部完整记录。
+- Journal 将 1 分钟采样改为 RAM 中 30 分钟聚合，事件仍在 10 秒内下刷；修复事件下刷时间变量未更新导致趋势近似每分钟写 Flash的问题。
+- Journal 的常规趋势/事件下刷在 Web 最近活跃的 3 秒内延期，避免 LittleFS 临时堆与 TLS 在线 Web 响应峰值叠加；同步恢复重启前的 `recordNow()` 仍保持强制持久化，异步 heartbeat 回调仍不访问文件系统。
+- Journal 趋势文本不再把 `heap_min` 截断为整数 k；现在按既有 64B 存储精度以两位 `KiB` 近似值输出，并补齐 `samples`、`dBm`、`ms` 语义，不改变 JR02 记录、采样频率或 Flash 写入。
+- Web listener 默认 TCP backlog 收紧为 1：ESP8266 Core 在 HTTP 预解析 hook 之前、SDK context 中为每个待处理 peer 动态创建 `ClientContext`，限制 backlog 可阻止 TLS 低堆时并发连接先于堆闸门触发 `operator new` OOM。可用 `ESP8266BASE_WEB_TCP_BACKLOG` 配置为 1～2，扩大前必须完成目标机压测。自定义启动必须先调用 WebServer `close()`，否则不会初始化 Authorization header 收集。
+- Web 预解析 hook 对已接收客户端启用 `WiFiClient` sync 写：每次写入等 ACK 且不保留临时 TCP 发送副本，修复 MQTT/TLS 在线、另有 peer 等待时，流式页面仍可能在通过堆闸门后把空闲堆压低并触发 SDK `Exception (29)` 的问题；响应可能略慢，但不改变响应内容、闸门阈值、TLS 缓冲或 lwIP 池。
+- MQTT 最近 TLS 错误文本缓冲由 96B 收紧为 80B；仍保留有界诊断文本，不改变 BearSSL 4096/1024 缓冲、恢复分类或 API。
+- 修正静态检查中把密码脱敏文案当错误、逻辑检查把 `resetReasonName` 误识别成旧参数名的错误断言。
+- `/wifi` GET 不再读取或把已保存密码写回 HTML；重新保存网络时必须重输密码，避免浏览器页面和页面缓存暴露凭据。
+
+### 新增
+
+- MQTT 通过 `recoveryReport()` 暴露带稳定 serial 的最近恢复快照；Watchdog 通过 `restartDecisionReport()` 暴露最近一次 guard/冷却/预算拒绝，业务可用固定结构形成可靠诊断记录。
+- 重启预算拆为 60 分钟冷却、application-ready 稳定 30 分钟打断的连续 2 次约束，以及可信 UTC 下独立的 24 小时最多 2 次窗口；未知时间不伪造 24 小时判断。
+
+### 行为变化 / 使用建议
+
+- Watchdog RTC 保留范围由 word 64-66 扩展为 64-70（28B）。业务不得复用；旧 RTC 内容因结构与校验变化直接忽略，不迁移。
+- 使用执行器的项目应在 `Esp8266Base::begin()` 前调用 `setSafetyCallbacks()`；普通网络恢复受 restart guard 限制，真正 loop stall 始终先执行 emergency stop。
+
 ## 2026-09-06
 
 ### 新增
@@ -56,8 +82,7 @@
   现改为：主循环轮首 `cycleStart()`，轮末 `handle()` 测整轮；NTP/Web/MQTT 等合法长操作段
   结束后用 `account(maxMs, startedAtMs)` 把实际耗时计入已覆盖（超上限部分按未覆盖计），
   未覆盖时间超过基础超时（默认 2.5s）即重启。`feed()` 保留为兼容 API。
-  注意：`handle()` 检查点在主循环内，对“永不返回”的停滞仍无法自行触发——该类停滞的兜底
-  由业务侧独立监护（os_timer）或人工断电承担（见项目方案）。
+  `handle()` 检查点在主循环内，只负责返回后的超时；2026-09-07 起“永不返回”的停滞由基础库独立 SDK timer 监护。
 
 ### 行为变化 / 使用建议
 

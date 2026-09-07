@@ -1,140 +1,95 @@
-# Esp8266Base Sleep 与 Watchdog
+# Esp8266Base Sleep 与恢复监护
 
 > 版本：1.0.0  
 > 模块：`Esp8266BaseSleep` / `Esp8266BaseWatchdog`
 
----
+## 一、职责
 
-## 一、能力范围
+Sleep 负责识别启动/唤醒原因、modem sleep、deep sleep 和睡眠前配置下刷。
 
-Sleep 模块负责：
+Watchdog 负责两类监护：
 
-- 识别启动/唤醒原因
-- modem sleep
-- deep sleep
-- 进入睡眠前 flush 配置
+1. 主循环返回后的整轮超时诊断；
+2. 独立 SDK `os_timer` heartbeat 监护，用于发现调用持续 `yield()` 但永不返回的冻结。
 
-Watchdog 模块负责：
+所有恢复重启先执行安全回调、写 RTC 原因和阶段，并受统一预算限制。
 
-- 监控主循环是否持续运行
-- 超时时写入 RTC 标记并重启，避免在异常路径写 Flash
-- 重启后识别上一次是否 Watchdog 重启
-- 持久化 WDT reset count
+## 二、Sleep
 
----
-
-## 二、modem sleep
-
-modem sleep 由 ESP8266 SDK 管理 WiFi modem 低功耗。CPU 仍运行，`loop()` 和 Web 仍可工作。
-
-典型日志：
-
-```text
-modem_sleep_enabled mode=sdk_managed_wifi_modem_sleep
-```
-
-modem sleep 适合空闲降低功耗，但不会像 deep sleep 那样关闭 CPU。
-
----
-
-## 三、deep sleep
-
-deep sleep 会停止 CPU，Web 页面不会继续响应。ESP8266 定时唤醒需要 GPIO16 接 RST。
-
-进入 deep sleep 前库会 flush 配置：
+modem sleep 由 SDK 管理，CPU 和 `loop()` 仍运行。deep sleep 会停止 CPU，定时唤醒要求 GPIO16 连接 RST。进入 deep sleep 前库会 flush 配置：
 
 ```cpp
 Esp8266BaseConfig::flush();
 Esp8266BaseSleep::deepSleep(10);
 ```
 
-典型日志：
+没有 GPIO16→RST 时必须外部复位。
 
-```text
-deep_sleep_requested source=web duration=10s wake_requires=GPIO16_to_RST
-entering_deep_sleep duration=10s free_heap=38.0 KB
-```
+## 三、主循环监护
 
-如果没有 GPIO16→RST，设备进入 deep sleep 后不会按定时自动回来，需要外部复位。
-
----
-
-## 四、Watchdog 行为
-
-Watchdog 在 `Esp8266Base::handle()` 末尾检查并喂狗。业务代码必须避免长时间阻塞，或者在可控的长操作前 pause/resume。
-
-默认 timeout：
+默认整轮未覆盖时间阈值：
 
 ```ini
 -DESP8266BASE_WDT_TIMEOUT_MS=2500
 ```
 
-取值会 clamp 到 1000-3000ms。
+范围限制为 1000～3000ms。`Esp8266Base::handle()` 在轮首推进 heartbeat，并用阶段标记区分 Config、WiFi、Journal、NTP、Web、OTA 和 MQTT。NTP/Web/MQTT 的已知有界阻塞仍通过 `account()` 计入宽限；超过各自上限的部分视为异常。
 
----
+独立冻结阈值默认 90 秒：
 
-## 五、WDT 持久化 key
-
-| Key | 说明 |
-|---|---|
-| `eb_wdt_count` | WDT 重启累计次数，重启后的正常启动阶段补写 |
-
-超时时只写 RTC user memory 标记，不写 LittleFS：
-
-```text
-watchdog_timeout elapsed=4200ms reset_count=4 action=restart
+```ini
+-DESP8266BASE_WDT_STALL_TIMEOUT_MS=90000
 ```
 
-重启后在 Watchdog 初始化阶段补写 `eb_wdt_count`。只有 `eb_wdt_count` 写入成功后，才清除 RTC 标记；如果 Flash 暂时不可写，下一次启动会继续尝试补写。
+`os_timer` 每秒比较 heartbeat。主循环即使在 SDK/lwIP/TLS 内持续 `yield()`，heartbeat 不推进仍会被发现。不 yield 的永久循环继续由 ESP8266 SDK 软件/硬件 WDT 兜底。
 
-```text
-boot_after_watchdog_reset reset_count=4 source=rtc persist=success
-```
+## 四、安全回调
 
-库保留 RTC user memory 区域：
-
-| 地址 word | 字节数 | 用途 |
-|---:|---:|---|
-| 64-66 | 12B | Watchdog 超时标记：magic、count、checksum |
-
-业务代码如果直接调用 `system_rtc_mem_read/write`，不得复用上述区域。
-
----
-
-## 六、pause / resume
-
-OTA 上传期间库会自动 pause/resume Watchdog。认证拒绝、固件头拒绝、prepare 拒绝、受控 MQTT 下线失败、Update 失败和上传中止路径都会恢复 Watchdog；启用 MQTT 时恢复顺序为 Watchdog → MQTT 重连许可 → 业务 failure callback。OTA 成功仅在最终 retained QoS1 PUBACK 和正常 DISCONNECT 均完成后保持 MQTT 关闭并重启。业务项目如有明确长阻塞操作，也可以：
+执行器项目必须在 `Esp8266Base::begin()` 前注册：
 
 ```cpp
-Esp8266BaseWatchdog::pause();
-// long operation
-Esp8266BaseWatchdog::resume();
+Esp8266BaseWatchdog::setSafetyCallbacks(emergencyStop, restartGuard);
 ```
 
-`resume()` 会重置计时，避免暂停期间累计时间导致误触发。`ESP8266BASE_USE_WATCHDOG=0` 时，OTA 和 deep sleep 路径会跳过 Watchdog pause/resume。
+- `emergencyStop` 必须是无分配、无日志、无文件和无网络 I/O 的极短函数；冻结时优先把输出置于安全状态。
+- `restartGuard` 用于普通网络恢复重启。执行器正在运行时应返回 false；网络失联不得提前中止已接受任务。
+- 主循环冻结属于安全故障，会先执行 `emergencyStop`，不受普通网络运行门禁保护。
 
----
+异步回调不能调用 `delay()`、`yield()`、LittleFS、日志、MQTT、`String` 或动态分配。
 
-## 七、full_demo 参考
+## 五、恢复重启预算
 
-full_demo 展示：
+- 每次自动恢复重启后，60 分钟内不允许再次自动重启；
+- 连续自动恢复重启最多 2 次；application-ready（传输、必需订阅和初始证据均完成）稳定 30 分钟后只打断这条连续链；
+- UTC 可信时，滚动 24 小时窗口内最多 2 次；UTC 未知时只执行 60 分钟冷却与连续链约束；
+- 没有固件 pending 标记的上电/外部/维护启动视为人工介入并打断连续链，但 RTC 尚存时不抹掉可信 24 小时计数；断电导致 RTC 丢失不计为自动重启；
+- 预算耗尽时先保证输出安全，写入 denied RTC 证据，不形成重启风暴。
 
-- GPIO0 长按 1 秒清除全部 `/cfg_*` 配置并重启。
-- GPIO2 板载 LED 低电平亮。
-- 联网常亮、AP 慢闪、连接中快闪。
-- Web 触发 deep sleep 前有确认提示。
+网络长期失败由 MQTT 恢复阶梯调用：普通重连 → radio reset → 在业务 guard 允许时请求 MCU 重启。
 
-GPIO0 是 ESP8266 下载模式相关引脚，串口工具 RTS/DTR 或外部电路可能误拉低。调试时如看到连续 `button_long_press_detected`，先检查串口复位线和按键电路。
+## 六、RTC 与计数
 
----
+`eb_wdt_count` 保存由 loop stall 触发的累计恢复次数。异步监护回调只写 RTC user memory，不写 LittleFS 或 Config；下一次正常启动再补写 Flash。
 
-## 八、排查点
+库保留：
 
-| 现象 | 检查 |
-|---|---|
-| deep sleep 后无响应 | 是否 GPIO16 接 RST，是否需要外部复位 |
-| 频繁 WDT 重启 | 是否 loop 阻塞，Web handler 是否太慢，是否漏调用 `Esp8266Base::handle()` |
-| WDT count 不变 | Config 是否 ready，`eb_wdt_count` 是否被清除 |
-| OTA 期间 WDT | OTA pause/resume 日志，供电和 WiFi 稳定性 |
+| RTC word | 字节数 | 用途 |
+|---:|---:|---|
+| 64-70 | 28B | magic、WDT count、连续恢复次数、原因/阶段/拒绝原因、24 小时窗口起点与次数、checksum |
 
-更多排查见 `docs/10_troubleshooting.md`。
+业务不得复用 64～70。
+
+`lastRecoveryCause()`、`lastStallPhase()`、`lastRecoveryWasDenied()` 与 `lastRecoveryDecision()` 返回上次 RTC 胶囊；`consecutiveRecoveryRestarts()` 与 `recoveryRestartsInWindow()` 返回两套独立预算。它们与 SDK reset reason 是两套证据，不能互相替代。
+
+## 七、OTA
+
+OTA 上传期间库自动 `pause()`，所有失败路径必须 `resume()`。成功 OTA 在受控 MQTT shutdown 完成后保持暂停并由 OTA 流程重启。`resume()` 会推进 heartbeat，避免把暂停时间误判为冻结。
+
+## 八、验收
+
+- 注入普通慢调用：返回后能记录 phase 和 overrun；
+- 注入持续 `yield()` 的永久等待：90 秒内执行安全回调并重启；
+- 连续触发时分别验证 60 分钟冷却、30 分钟 application-ready 断链、可信 UTC 24 小时最多 2 次及未知时间分支；
+- 执行器运行时网络恢复重启被 guard 拒绝，但本地截止继续；
+- RTC 原因、SDK reset reason 和 Journal boot 记录能够关联；
+- OTA、Web、TLS 压测无误触发。

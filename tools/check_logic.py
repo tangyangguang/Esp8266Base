@@ -27,6 +27,12 @@ def format_bytes(value: int) -> str:
     return f"{v100 // 100}.{v100 % 100:02d} MB"
 
 
+def format_quantized_heap_kib(units: int) -> str:
+    heap_bytes = units << 6
+    centi_kib = (heap_bytes * 100 + 512) // 1024
+    return f"{centi_kib // 100}.{centi_kib % 100:02d}KiB"
+
+
 def file_buffer_size_for_mode(mode: int, explicit_size: int | None = None) -> int:
     if explicit_size is not None:
         if explicit_size > 512:
@@ -79,6 +85,11 @@ def require_token(text: str, token: str, label: str) -> None:
         fail(f"missing {label}: {token}")
 
 
+def forbid_token(text: str, token: str, label: str) -> None:
+    if token in text:
+        fail(f"forbidden {label}: {token}")
+
+
 def test_format_bytes() -> None:
     cases = {
         0: "0 B",
@@ -99,6 +110,15 @@ def test_format_bytes() -> None:
     util_h = read("src/Esp8266BaseUtil.h")
     if "(uint64_t)bytes" not in util_h:
         fail("formatBytes MB path must avoid uint32_t overflow")
+
+
+def test_journal_heap_precision() -> None:
+    assert_eq(format_quantized_heap_kib(112), "7.00KiB", "journal heap 7 KiB")
+    assert_eq(format_quantized_heap_kib(117), "7.31KiB", "journal heap 7.31 KiB")
+    assert_eq(format_quantized_heap_kib(127), "7.94KiB", "journal heap 7.94 KiB")
+    journal_cpp = read("src/Esp8266BaseJournal.cpp")
+    require_token(journal_cpp, "heap_min~%lu.%02luKiB", "quantized journal heap precision")
+    forbid_token(journal_cpp, "heap_min=%luk", "integer-truncated journal heap text")
 
 
 def test_log_file_buffer_rules() -> None:
@@ -312,7 +332,11 @@ def test_boot_session_log_contract() -> None:
         fail("boot session log must use the split lowercase format")
     if "reset_reason=%s" in log_cpp:
         fail("boot session log must not emit reset_reason")
-    if "const char* resetReason" in log_h or "const char* resetReason" in api:
+    legacy_parameter = re.compile(
+        r"beginBootSession\s*\([^)]*const\s+char\s*\*\s*resetReason",
+        re.S,
+    )
+    if legacy_parameter.search(log_h) or legacy_parameter.search(api):
         fail("beginBootSession parameter must be named bootReason")
 
     required = [
@@ -384,6 +408,11 @@ def test_web_auth_contract() -> None:
     forbidden_credential_logs = ["password=%s", "current=%s expected=%s", "new=%s confirm=%s"]
     if any(token in web_cpp for token in forbidden_credential_logs):
         fail("Web logs must never interpolate plaintext passwords")
+    wifi_get_start = web_cpp.index("void Esp8266BaseWeb::_handleWiFiGet()")
+    wifi_get_end = web_cpp.index("\n}", wifi_get_start)
+    if "ESP8266BASE_CFG_KEY_WIFI_PASS" in web_cpp[wifi_get_start:wifi_get_end]:
+        fail("WiFi GET must not load or echo the persisted password")
+
     for handler in ["_handleWiFiPost", "_handleAuthPost"]:
         start = web_cpp.index(f"void Esp8266BaseWeb::{handler}()")
         end = web_cpp.index("\n}", start)
@@ -397,16 +426,19 @@ def test_watchdog_and_ota_failure_contract() -> None:
     memory_doc = read("docs/04_memory_budget.md")
     ota_cpp = read("src/Esp8266BaseOTA.cpp")
 
-    require_token(watchdog_cpp, "system_rtc_mem_write", "Watchdog RTC timeout marker")
-    require_token(watchdog_cpp, "source=rtc", "Watchdog RTC recovery log")
-    require_token(watchdog_cpp, "if (countOk)", "Watchdog RTC clear after Config persistence")
-    require_token(watchdog_cpp, "rtc_clear=%s", "Watchdog RTC clear diagnostic")
+    require_token(watchdog_cpp, "system_rtc_mem_write", "Watchdog RTC recovery marker")
+    require_token(watchdog_cpp, "os_timer_setfn", "independent SDK timer monitor")
+    require_token(watchdog_cpp, "_emergencyStop", "independent emergency-stop callback")
+    require_token(watchdog_cpp, "system_restart()", "bounded recovery restart")
+    require_token(watchdog_cpp, "MARKER_DENIED", "restart-budget denial evidence")
     if "ESP8266BASE_CFG_KEY_WDT_PENDING" in watchdog_cpp:
         fail("Watchdog must not keep WDT pending compatibility key")
-    require_token(watchdog_doc, "超时时只写 RTC user memory 标记，不写 LittleFS", "Watchdog no-Flash timeout doc")
-    require_token(watchdog_doc, "64-66", "Watchdog RTC reserved words doc")
-    require_token(memory_doc, "96B DRAM + 12B RTC", "Watchdog RTC memory budget")
-    require_token(memory_doc, "RTC user memory word 64-66", "Watchdog RTC memory budget detail")
+    require_token(watchdog_doc, "异步监护回调只写 RTC user memory", "Watchdog no-Flash timeout doc")
+    require_token(watchdog_doc, "64-70", "Watchdog RTC reserved words doc")
+    require_token(memory_doc, "144B DRAM + 28B RTC", "Watchdog RTC memory budget")
+    require_token(memory_doc, "RTC user memory word 64-70", "Watchdog RTC memory budget detail")
+    require_token(watchdog_cpp, "ESP8266BASE_RECOVERY_HEALTHY_RESET_MS", "30-minute application-ready chain reset")
+    require_token(watchdog_cpp, "_restartsInWindow", "trusted 24-hour restart budget")
     if "Esp8266BaseConfig::setInt(ESP8266BASE_CFG_KEY_WDT_COUNT,   (int)_resetCount)" in watchdog_cpp:
         fail("Watchdog timeout branch must not write WDT count to LittleFS directly")
     require_token(ota_cpp, "Update.end();", "OTA write failure cleanup")
@@ -842,6 +874,7 @@ def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     mqtt_h = read("src/Esp8266BaseMQTT.h")
     mqtt_cpp = read("src/Esp8266BaseMQTT.cpp")
     fixed_h = read("src/Esp8266BaseMQTTFixed.h")
+    journal_cpp = read("src/Esp8266BaseJournal.cpp")
     web_cpp = read("src/Esp8266BaseWeb.cpp")
     ota_cpp = read("src/Esp8266BaseOTA.cpp")
     terminal_ini = read("examples/mqtt_terminal/platformio.ini")
@@ -864,6 +897,12 @@ def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:
                   "split outbound payload head")
     require_token(fixed_h, "payloadTail[PAYLOAD_TAIL_BYTES]",
                   "split outbound payload tail")
+    require_token(journal_cpp, "Esp8266BaseWeb::lastActivityMs()",
+                  "Journal/Web storage quiet-window source")
+    require_token(journal_cpp, "if (!storageFlushWindowAvailable(now)) return;",
+                  "routine Journal flush Web quiet-window gate")
+    require_token(journal_cpp, "if (g_ringCount == RING_ENTRIES) _flushPending();",
+                  "forced recovery Journal flush remains explicit")
     require_token(fixed_h, "#define ESP8266BASE_MQTT_RX_CHUNK_BYTES 256",
                   "streaming receive chunk")
     for token in ["CAPACITY_EXHAUSTED", "PACKET_TOO_LARGE", "PROTOCOL_ERROR"]:
@@ -999,7 +1038,8 @@ def test_public_default_tables() -> None:
     require_token(readme, 'ESP8266BASE_DEFAULT_HOSTNAME=\\"esp8266base-full\\"', "README hostname build flag")
     require_token(overview, 'ESP8266BASE_WEB_AUTH_PASS=\\"admin\\"', "overview build flag default")
     require_token(overview, 'ESP8266BASE_DEFAULT_HOSTNAME=\\"esp8266base-full\\"', "overview hostname build flag")
-    require_token(readme, "/wifi` GET 表单也会回显已保存密码", "README plaintext WiFi password echo")
+    require_token(readme, "HTTP 页面、`/health` 和 MQTT 诊断均不输出凭据", "README credential redaction boundary")
+    forbid_token(readme, "/wifi` GET 表单也会回显已保存密码", "README plaintext WiFi password echo")
     require_token(readme, "硬件运行时目标", "README free heap target scope")
     require_token(web_doc, "路径字符集", "Web route path charset table")
     require_token(web_doc, "函数返回 `false` 并输出 WARN 日志", "Web invalid route path behavior")
@@ -1135,6 +1175,16 @@ def test_web_home_contract() -> None:
     require_token(web_cpp, '\\"error\\":\\"unauthorized\\"', "hostname API unauthorized JSON body")
     require_token(web_doc, "未认证时返回 JSON 401", "Web JSON API auth policy")
     require_token(api, "未知路径认证通过后返回 404", "API doc 404 auth policy")
+    require_token(web_h, "#define ESP8266BASE_WEB_TCP_BACKLOG 1U",
+                  "bounded Web TCP backlog default")
+    require_token(web_cpp,
+                  "_server.close();  // resets request state and collects Authorization header\n"
+                  "    _server.getServer().begin(80, ESP8266BASE_WEB_TCP_BACKLOG);",
+                  "authenticated bounded Web TCP listener start")
+    if "_server.begin();" in web_cpp:
+        fail("Web must not use the Core default backlog before the heap gate")
+    require_token(web_cpp, "client->setSync(true);",
+                  "Web responses avoid temporary TCP send-copy heap")
     require_token(web_cpp, "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
                   "Web addPage diagnostic rejection")
     require_token(web_cpp, "addPage_rejected reason=web_not_running", "Web addPage before begin rejection")
@@ -1203,6 +1253,7 @@ def test_web_home_contract() -> None:
 
 def main() -> None:
     test_format_bytes()
+    test_journal_heap_precision()
     test_log_file_buffer_rules()
     test_wifi_retry_rules()
     test_ntp_manual_packet_validation()

@@ -195,6 +195,7 @@ build_flags =
 | `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面上限 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 上限 |
+| `ESP8266BASE_WEB_TCP_BACKLOG` | `1` | TCP listener 待处理 peer 上限；限制 HTTP hook 前的动态 `ClientContext` |
 | `ESP8266BASE_WEB_AUTH_USER` | `"admin"` | Basic Auth 编译期默认用户名 |
 | `ESP8266BASE_WEB_AUTH_PASS` | `"admin"` | Basic Auth 编译期默认密码 |
 | `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化；正式固件建议保持关闭 |
@@ -224,13 +225,13 @@ OTA 策略：`GET /ota` 页面、空 body `POST /ota` 两阶段准备和 multipa
 
 MQTT 连接配置必须在 `Esp8266Base::begin()` 前通过 `Esp8266BaseMQTT::configure()` 提供。host、clientId、用户名/密码和 LWT topic 会复制到固定缓冲；password 非空时 username 必须非空，LWT payload 非空时 willTopic 必须非空。`BearSSL::X509List` trust anchor 与可选 LWT payload 由业务长期持有并覆盖整个 MQTT 生命周期。配置可来自业务的私有构建配置或 `Esp8266BaseConfig`，库不新增 MQTT 持久化 key，也不接受不安全 TLS。不要把真实 broker 凭据写入仓库。
 
-MQTT Terminal 使用库内裁剪的 MQTT 3.1.1 同步 TLS 传输，不依赖 `espMqttClient`、异步 TCP、STL 容器或 `std::function`。出站默认只有两个固定槽位，每槽 topic 128B、payload 512B；业务可在完成静态 RAM 预算后把 payload 配置为 64～768B，超过 512B 的槽位内部拆成 512B head 和最多 256B tail，发送时顺序写出，不形成更大的临时 packet。任意构建同一时刻只发送一个 QoS1 包，精确匹配 PUBACK 后才推进下一包。入站用 256B 固定窗口分块回调，单包 payload 上限 768B。超出容量或槽位耗尽会同步返回 0 并报告 `PACKET_TOO_LARGE` / `CAPACITY_EXHAUSTED`，不会增长 heap 或静默丢弃。BearSSL RX/TX 仍固定为 4096/1024，证书校验不降级。第三方动态堆边界只剩 ESP8266 Core 的 DNS/TCP、BearSSL 证书与 TLS 会话，以及 `ESP8266WebServer` 活跃请求；正常 MQTT packet/outbox 不再调用通用 heap。同步 DNS/TCP/TLS connect 单次尝试仍可能阻塞到网络超时，外围门禁和有界退避不会忙循环。WiFi SDK 连续报告已连接但传输连续失败时，MQTT 以 6 次失败和 15 分钟冷却为界请求一次 radio 恢复；该路径不重启 MCU、不修改凭据、不进入 AP，也不改变设备本地业务状态。
+MQTT Terminal 使用库内裁剪的 MQTT 3.1.1 同步 TLS 传输，不依赖 `espMqttClient`、异步 TCP、STL 容器或 `std::function`。出站默认只有两个固定槽位，每槽 topic 128B、payload 512B；业务可在完成静态 RAM 预算后把 payload 配置为 64～768B，超过 512B 的槽位内部拆成 512B head 和最多 256B tail。BearSSL RX/TX 固定为 4096/1024。WiFi SDK 连续报告已连接但传输连续失败时，MQTT 以 6 次失败和 15 分钟冷却请求 radio 恢复；持续 30 分钟且至少两次 radio reset 后，通过 Watchdog 请求有预算且受业务安全 guard 约束的 MCU 恢复。永久协议、凭据、ACL 和证书错误不进入恢复重启阶梯。
 
 `cleanSession=true` 时，传输断开完成后基础库会在业务断线回调之前清空固定槽位；新连接不会重放旧连接周期的 QoS 消息。`cleanSession=false` 时仅保留未确认的 QoS1 PUBLISH，重连后置 DUP 重发；SUBSCRIBE 和 QoS0 不跨连接。发生清理时日志记录 `session_queue_discarded` 和包数，不输出载荷。
 
 连接回调之外还可注册 SUBACK、PUBACK 和 client error 回调。SUBACK return code `0x80` 表示 broker 拒绝订阅；TLS 失败会在 BearSSL transport 释放前保存 code/detail，`lastTlsErrorCode()`、`lastTlsErrorText()` 和断线日志可用于排障；`/health` 只输出错误码。每次新连接前会清除旧 TLS 错误。
 
-业务在订阅 readiness、初始证据排队等应用握手失败时调用 `Esp8266BaseMQTT::requestReconnect()`，完成握手后调用 `markConnectionReady()`。CONNACK 本身不重置退避，因此连续应用握手失败会沿用 2s、4s、8s、16s、32s、60s 上限；只有 readiness 成功才恢复 2s，使之后的普通断线从初始退避开始。两个 API 都不暴露第三方类型、同步等待或形成忙循环。
+业务在订阅 readiness、初始证据排队等应用握手失败时调用 `Esp8266BaseMQTT::requestReconnect(true)`，完成握手后调用 `markConnectionReady()`。CONNACK 不清除恢复计数；只有 readiness 成功才恢复初始退避并结束本次恢复事件。维护性重连使用默认 `requestReconnect(false)`。
 
 执行器需要保护本地截止时，可在运行期间调用 `Esp8266BaseMQTT::setConnectAttemptsEnabled(false)`。该门禁只阻止后续 DNS/TCP/TLS 新建连接，不拆除已经建立的 MQTT 会话，也不停止既有会话的 `loop()` 和收发；运行结束后业务必须重新启用。它不改变 Topic、消息、QoS、认证或重连退避契约。
 
@@ -238,7 +239,7 @@ MQTT Terminal 使用库内裁剪的 MQTT 3.1.1 同步 TLS 传输，不依赖 `es
 
 OTA 仍只使用 `Esp8266BaseOTA`。MQTT_TERMINAL 的业务 prepare callback 先完成执行器安全停机；有活动 MQTT 会话时构造最终 availability 并调用同一个 `beginShutdown()`，OTA 有界等待匹配 PUBACK 和正常断开后才调用 `Update.begin()`。MQTT 未配置、未 begin 或 transport 已完全断开时可直接进入 `PAUSED` 并继续 OTA，`shutdownResult()` 保持 `NOT_CONNECTED` 或原失败结果，绝不伪装 `SUCCESS`；CONNECTED、CONNECTING 或尚未释放的 transport 没有完成受控下线时仍拒绝。失败路径先恢复 Watchdog 和 MQTT 重连许可，再调用业务 failure callback；成功保持暂停、flush 配置/日志并重启。真实业务接法见 `examples/mqtt_terminal`。
 
-日志与回显策略：WiFi、Web Auth 和配置审计会有意输出明文值，并同时输出 `password_length` 等辅助字段；`/wifi` GET 表单也会回显已保存密码，页面默认隐藏，可手动显示。这是个人项目为了现场观察和调试保留的设计选择，不按缺陷处理；请只在可信串口/可信局域网环境中使用。
+日志与回显策略：WiFi 和 Web Auth 密码正文始终以 `[redacted]` 脱敏，只记录长度、来源和结果；HTTP 页面、`/health` 和 MQTT 诊断均不输出凭据。
 
 可选文件日志和配置审计：
 

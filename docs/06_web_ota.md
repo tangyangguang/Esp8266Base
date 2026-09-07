@@ -15,6 +15,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 |---|---:|---|
 | 应用页面 | 4 | `ESP8266BASE_WEB_MAX_APP_PAGES` |
 | 应用 API | 6 | `ESP8266BASE_WEB_MAX_APP_APIS` |
+| TCP backlog | 1 | `ESP8266BASE_WEB_TCP_BACKLOG`（范围 1～2） |
 | 路径长度 | 小于 24 字符 | 固定限制 |
 | 路径字符集 | 字母、数字、`/`、`-`、`_`、`.` | 固定限制 |
 
@@ -28,7 +29,7 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 |---|---|---|---|
 | `/` | GET | Basic Auth | 首页；可配置为跳转业务首页 |
 | `/esp8266base` | GET | Basic Auth | 基础库系统首页；融合模式下作为系统入口保留 |
-| `/wifi` | GET | Basic Auth | WiFi 配置页，回显 SSID/密码 |
+| `/wifi` | GET | Basic Auth | WiFi 配置页，只回显 SSID，密码必须重新输入且绝不写回 HTML |
 | `/wifi` | POST | Basic Auth | 保存 WiFi 凭证，密码可为空以连接开放网络，提交后 303 回 GET |
 | `/auth` | GET | Basic Auth | 修改 Web Basic Auth 密码 |
 | `/auth` | POST | Basic Auth | 校验当前密码并保存 `eb_web_pass`，提交后 303 回 GET |
@@ -54,6 +55,8 @@ ESP8266 Web 活跃时 free heap 有限，本库固定自定义路由上限：
 -DESP8266BASE_WEB_MAX_APP_PAGES=0
 -DESP8266BASE_WEB_MAX_APP_APIS=0
 ```
+
+默认 TCP backlog 为 1，只允许一个已 accept peer，其余并发在 TCP 层排队并由单线程 handler 依次消费。ESP8266 Core 会在 HTTP 预解析 hook 运行前为已 accept 的 peer 动态创建 `ClientContext`，因此 backlog 是堆闸门之前的保护层；配置范围为 1～2；扩大值必须完成 TLS 在线目标机压测。基础库会先调用 WebServer `close()` 初始化请求状态与 Authorization header 收集，再用该 backlog 启动 listener。预解析 hook 同时为已接收客户端启用 sync 写，响应写入会等待 ACK、不会保留临时 TCP 发送副本；相比异步拷贝发送可能略慢，但可避免 MQTT/TLS 在线并发下页面通过堆闸门后再耗尽发送堆。
 
 管理页面和危险操作都需要 Basic Auth；未知路径也会先要求 Basic Auth，认证通过后才返回 404。`/api/system/hostname` 是 JSON API，未认证时返回 JSON 401，不触发浏览器 Basic Auth 弹窗；调用方需要显式提供 `Authorization` header。`/health` 用于轻量状态探测，不要求认证。
 

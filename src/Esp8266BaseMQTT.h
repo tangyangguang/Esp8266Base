@@ -35,6 +35,14 @@ namespace BearSSL { class X509List; }
 #define ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS 900000UL
 #endif
 
+#ifndef ESP8266BASE_MQTT_MCU_RECOVERY_AFTER_MS
+#define ESP8266BASE_MQTT_MCU_RECOVERY_AFTER_MS 1800000UL
+#endif
+
+#ifndef ESP8266BASE_MQTT_MCU_RECOVERY_RADIO_RESETS
+#define ESP8266BASE_MQTT_MCU_RECOVERY_RADIO_RESETS 2
+#endif
+
 #if ESP8266BASE_MQTT_RETRY_INITIAL_MS < 1000UL
 #error "ESP8266BASE_MQTT_RETRY_INITIAL_MS must be at least 1000"
 #endif
@@ -128,6 +136,13 @@ typedef void (*Esp8266BaseMQTTPublishAckCallback)(uint16_t packetId);
 typedef void (*Esp8266BaseMQTTClientErrorCallback)(uint16_t packetId,
                                                    Esp8266BaseMQTTClientError error);
 
+struct Esp8266BaseMQTTRecoveryReport {
+    uint32_t serial = 0;
+    uint32_t durationSeconds = 0;
+    uint16_t failureCycles = 0;
+    uint8_t radioResetCount = 0;
+};
+
 class Esp8266BaseMQTT {
 public:
     // 必须在 Esp8266Base::begin() 前调用。短字符串复制到固定缓冲；trustAnchors
@@ -155,10 +170,14 @@ public:
     static uint16_t subscribe(const char* topic, uint8_t qos);
     // 非阻塞请求释放当前传输；下一轮 handle() 执行断开，随后沿用既有退避重连。
     // 未配置、未 begin 或受控下线暂停时返回 false；重复请求幂等返回 true。
-    static bool requestReconnect();
+    static bool requestReconnect(bool recoveryFailure = false);
     // 业务完成订阅/初始握手后确认本连接稳定，并把后续普通断线退避恢复为初始值。
     // 仅当前已连接、未暂停且没有待处理重连请求时成功。
     static bool markConnectionReady();
+    // 返回最近一次已恢复到 application-ready 的固定快照。afterSerial 等于
+    // 当前 serial 时返回 false；调用方可据此只持久化一次诊断记录。
+    static bool recoveryReport(uint32_t afterSerial,
+                               Esp8266BaseMQTTRecoveryReport& report);
     // 只控制后续 DNS/TCP/TLS 连接尝试。false 不拆除当前连接，也不停止当前
     // MQTT loop；适合执行器运行期间避免同步建连阻塞本地截止逻辑。
     static void setConnectAttemptsEnabled(bool enabled);
@@ -216,6 +235,12 @@ private:
     static uint32_t _retryDelay;
     static uint32_t _lastWifiRecoveryAt;
     static uint8_t _consecutiveTransportFailures;
+    static bool _recoveryActive;
+    static uint32_t _recoveryStartedAt;
+    static uint32_t _restartRetryAt;
+    static uint8_t _recoveryRadioResetBaseline;
+    static uint16_t _recoveryFailureCount;
+    static Esp8266BaseMQTTRecoveryReport _lastRecoveryReport;
     static Esp8266BaseMQTTShutdownResult _shutdownResult;
     static uint16_t _shutdownPacketId;
     static uint32_t _shutdownDeadline;
@@ -243,6 +268,9 @@ private:
 
     static void _scheduleRetry();
     static bool _isDue(uint32_t now, uint32_t due);
+    static bool _isRecoverable(Esp8266BaseMQTTDisconnectReason reason);
+    static void _noteRecoveryFailure(Esp8266BaseMQTTDisconnectReason reason);
+    static void _handleEscalatedRecovery(uint32_t now);
     static void _handleShutdown();
     static void _startGracefulDisconnect();
     static void _finishShutdown(Esp8266BaseMQTTShutdownResult result);

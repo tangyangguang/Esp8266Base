@@ -5,6 +5,9 @@
 #if ESP8266BASE_USE_WATCHDOG
 #include "Esp8266BaseWatchdog.h"
 #endif
+#if ESP8266BASE_USE_JOURNAL
+#include "Esp8266BaseJournal.h"
+#endif
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <sntp.h>
@@ -272,6 +275,12 @@ bool Esp8266BaseNTP::_isDue(uint32_t now, uint32_t due) {
 
 void Esp8266BaseNTP::_finishSync(time_t t) {
     _synced = true;
+#if ESP8266BASE_USE_JOURNAL
+    const uint32_t epoch = static_cast<uint32_t>(t);
+    Esp8266BaseJournal::record(JNL_NTP_SYNC, 0, 0,
+                               static_cast<uint16_t>(epoch),
+                               static_cast<uint16_t>(epoch >> 16U));
+#endif
     uint32_t uptimeMs = millis();
     time_t bootTime = t > (time_t)(uptimeMs / 1000UL)
         ? t - (time_t)(uptimeMs / 1000UL)

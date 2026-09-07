@@ -604,8 +604,15 @@ bool Esp8266BaseWeb::begin() {
 #endif
 
     _server.addHook(_heapGateHook);
-    _server.begin();
+    // ESP8266WebServer::begin() uses the Core default backlog of five. On this
+    // constrained target those peers allocate ClientContext in SDK context,
+    // before _heapGateHook can reject safely. Start the owned WiFiServer with
+    // the bounded backlog directly; WebServer routing/handling is unchanged.
+    _server.close();  // resets request state and collects Authorization header
+    _server.getServer().begin(80, ESP8266BASE_WEB_TCP_BACKLOG);
     _running = true;
+    ESP8266BASE_LOG_I_P("Web ", "web_listener backlog=%u",
+                      static_cast<unsigned>(ESP8266BASE_WEB_TCP_BACKLOG));
     ESP8266BASE_LOG_I("Web ", "web_server_started profile=%s auth_required=yes builtin_routes=%u app_pages_registered=%d/%d app_apis_registered=%d/%d",
 #if ESP8266BASE_PROFILE_MQTT_TERMINAL
                       "mqtt_terminal", 6U,
@@ -842,6 +849,13 @@ ESP8266WebServer::ClientFuture Esp8266BaseWeb::_heapGateHook(
     const String&, const String&, WiFiClient* client,
     ESP8266WebServer::ContentTypeFunction) {
     _lastActivityMs = millis();
+    if (client) {
+        // Web replies are small and latency-insensitive. Sync mode waits for each
+        // write to be acknowledged instead of retaining temporary TCP send-copy
+        // memory alongside MQTT/TLS and an accepted peer. This keeps the heap
+        // gate effective throughout streamed responses, not only at request start.
+        client->setSync(true);
+    }
     const uint32_t freeHeap = ESP.getFreeHeap();
     const uint32_t maxBlock = ESP.getMaxFreeBlockSize();
     if (freeHeap >= ESP8266BASE_WEB_HEAP_GATE_FREE_BYTES &&
@@ -852,7 +866,6 @@ ESP8266WebServer::ClientFuture Esp8266BaseWeb::_heapGateHook(
                       (unsigned)freeHeap, (unsigned)maxBlock);
     if (client) {
         // 预解析阶段：直接写最小响应后要求关闭连接，不进入请求头解析。
-        client->setNoDelay(true);
         client->print(F("HTTP/1.1 503 Service Unavailable\r\n"
                         "Content-Type: text/plain\r\n"
                         "Content-Length: 11\r\n"
@@ -1225,10 +1238,8 @@ void Esp8266BaseWeb::_handleWiFiGet() {
     }
 
     char ssid[64] = "";
-    char pass[64] = "";
 #if ESP8266BASE_USE_WIFI_CONFIG
     Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_SSID, ssid, sizeof(ssid), "");
-    Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_PASS, pass, sizeof(pass), "");
 #else
     strncpy(ssid, Esp8266BaseWiFi::ssid(), sizeof(ssid) - 1);
 #endif
@@ -1237,7 +1248,8 @@ void Esp8266BaseWeb::_handleWiFiGet() {
     sendContent_P(WEB_WIFI_FORM_SSID);
     _sendAttrEscaped(ssid);
     sendContent_P(WEB_WIFI_FORM_MID);
-    _sendAttrEscaped(pass);
+    // Never echo the persisted secret into HTML. Saving this form requires the
+    // operator to enter the password again (or leave it empty for an open AP).
     sendContent_P(WEB_WIFI_FORM_POST);
     sendFooter();
 }
@@ -1785,10 +1797,20 @@ void Esp8266BaseWeb::_handleHealth() {
     client.write((const uint8_t*)json, strlen(json));
     snprintf(json, sizeof(json),
              "\"mqttAttempt\":%lu,\"mqttLastReason\":\"%s\",\"mqttTlsError\":%d,"
-             "\"lastWdtReset\":%s,\"otaInProgress\":%s,"
-             "\"diagLevel\":\"%s\",\"diagBrief\":\"%s\"}",
+             "\"lastWdtReset\":%s,\"otaInProgress\":%s,",
              (unsigned long)mqttAttempt, mqttReason, mqttTlsError,
-             lastWdtReset ? "true" : "false", otaInProgress ? "true" : "false",
+             lastWdtReset ? "true" : "false", otaInProgress ? "true" : "false");
+    client.write((const uint8_t*)json, strlen(json));
+#if ESP8266BASE_USE_WATCHDOG
+    snprintf(json, sizeof(json),
+             "\"recoveryCause\":%u,\"recoveryPhase\":%u,\"recoveryBudget\":%u,",
+             (unsigned)Esp8266BaseWatchdog::lastRecoveryCause(),
+             (unsigned)Esp8266BaseWatchdog::lastStallPhase(),
+             (unsigned)Esp8266BaseWatchdog::consecutiveRecoveryRestarts());
+    client.write((const uint8_t*)json, strlen(json));
+#endif
+    snprintf(json, sizeof(json),
+             "\"diagLevel\":\"%s\",\"diagBrief\":\"%s\"}",
              diagLevel, diagBrief);
     client.write((const uint8_t*)json, strlen(json));
     client.flush();

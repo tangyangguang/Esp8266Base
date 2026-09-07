@@ -166,6 +166,12 @@ bool Esp8266Base::begin() {
     }
 #endif
 
+    // 4. Watchdog 先消费 RTC 故障胶囊，使随后创建的 boot 档案能关联
+    // 上一次受控恢复原因。独立监护到首个 cycleStart() 才正式武装。
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::begin();
+#endif
+
     // 4.5 Journal — 断线现场诊断档案（依赖已挂载的 LittleFS）
 #if ESP8266BASE_USE_JOURNAL
     if (!Esp8266BaseJournal::begin()) {
@@ -178,6 +184,14 @@ bool Esp8266Base::begin() {
     _bootCount = _loadAndIncrementBootCount();
 #if ESP8266BASE_USE_JOURNAL
     Esp8266BaseJournal::beginBoot(_bootCount, static_cast<uint8_t>(resetReason()));
+#if ESP8266BASE_USE_WATCHDOG
+    if (Esp8266BaseWatchdog::lastRecoveryCause() == Esp8266BaseRecoveryCause::LOOP_STALL) {
+        Esp8266BaseJournal::recordNow(
+            JNL_STALL,
+            static_cast<uint8_t>(Esp8266BaseWatchdog::lastStallPhase()),
+            static_cast<int16_t>(ESP8266BASE_WDT_STALL_TIMEOUT_MS / 1000UL), 0, 0);
+    }
+#endif
 #endif
 
     Esp8266BaseLog::beginBootSession(
@@ -194,11 +208,6 @@ bool Esp8266Base::begin() {
 
     // 5. WiFi — 读取凭证，启动状态机（非阻塞）
     Esp8266BaseWiFi::begin();
-
-    // 6. Watchdog — begin() 后启动，使循环受监控
-#if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::begin();
-#endif
 
     // 7. Web — 注册内置路由（OTA 路由由 OTA 模块在此后注册）
 #if ESP8266BASE_USE_WEB
@@ -235,6 +244,9 @@ void Esp8266Base::handle() {
     Esp8266BaseWatchdog::cycleStart();
 #endif
     // 1. Config deferred 刷新
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::CONFIG);
+#endif
 #if ESP8266BASE_USE_CONFIG
     Esp8266BaseConfig::handle();
 #endif
@@ -243,10 +255,16 @@ void Esp8266Base::handle() {
 #endif
 
     // 2. WiFi 状态机
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::WIFI);
+#endif
     Esp8266BaseWiFi::handle();
 
     // 2.5 Journal — 趋势采样与批下刷（每轮轻量检查）
 #if ESP8266BASE_USE_JOURNAL
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::JOURNAL);
+#endif
     Esp8266BaseJournal::handle();
 #endif
 
@@ -276,6 +294,7 @@ void Esp8266Base::handle() {
 #if ESP8266BASE_USE_NTP
     if (_ntpWasTriggered) {
 #if ESP8266BASE_USE_WATCHDOG
+        Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::NTP);
         const uint32_t _wdtNtpMs = millis();
 #endif
         Esp8266BaseNTP::handle();
@@ -288,6 +307,9 @@ void Esp8266Base::handle() {
     // 5. mDNS handle（MDNS.update()）
 #if ESP8266BASE_USE_MDNS
     if (_mdnsWasStarted) {
+#if ESP8266BASE_USE_WATCHDOG
+        Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::MDNS);
+#endif
         Esp8266BaseMDNS::handle();
     }
 #endif
@@ -299,6 +321,7 @@ void Esp8266Base::handle() {
     // 慢客户端读/写有界，给 5s 记账上限；不 pause/resume（每轮调用会刷日志）。
 #if ESP8266BASE_USE_WEB
 #if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::WEB);
     const uint32_t _wdtWebMs = millis();
 #endif
     Esp8266BaseWeb::handle();
@@ -309,6 +332,9 @@ void Esp8266Base::handle() {
 
     // 7. OTA 准备租约：两阶段上传未及时开始时恢复 MQTT。
 #if ESP8266BASE_USE_OTA
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::OTA);
+#endif
     Esp8266BaseOTA::handle();
 #endif
 
@@ -316,6 +342,7 @@ void Esp8266Base::handle() {
     // 同步 DNS/TCP/TLS 建连与写超时上界 ~10s，给 15s 记账上限（见看门狗语义）。
 #if ESP8266BASE_USE_MQTT
 #if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::MQTT);
     const uint32_t _wdtMqttMs = millis();
 #endif
     Esp8266BaseMQTT::handle();
@@ -327,6 +354,7 @@ void Esp8266Base::handle() {
     // 9. Watchdog handle — 轮末检查整轮耗时（基础超时 + 已声明宽限），
     // 超预算视为停滞并重启；正常轮内不触发。
 #if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::LOOP);
     Esp8266BaseWatchdog::handle();
     Esp8266BaseWatchdog::feed();
 #endif
