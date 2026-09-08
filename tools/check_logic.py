@@ -877,6 +877,21 @@ def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
 
 
 def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:
+    ota = read("src/Esp8266BaseOTA.cpp")
+    prepare = ota[ota.index("void Esp8266BaseOTA::_handlePrepareRequest()"):ota.index("void Esp8266BaseOTA::_handleUploadChunk()")]
+    upload = ota[ota.index("void Esp8266BaseOTA::_handleUploadChunk()"):]
+    if not prepare.index("_prepareCallback(") < prepare.index("RecordStore::prepareMaintenance()") < prepare.index("MQTT::pauseForOTA()"):
+        fail("Store checkpoint must follow accepted application preparation and precede MQTT pause")
+    if not upload.index("RecordStore::prepareMaintenance()") < upload.index("MQTT::pauseForOTA()") < upload.index("Update.begin("):
+        fail("Store must pause before transport shutdown and OTA writes")
+    for start, end in [("_expirePrepare()", "_notifyFailure("), ("_failUpload(", "_handleUploadComplete()")]:
+        first = ota.index("void Esp8266BaseOTA::" + start)
+        last = ota.index("void Esp8266BaseOTA::" + end, first)
+        require_token(ota[first:last], "RecordStore::resumeAfterMaintenance()", "Store failure recovery")
+    require_token(ota, "if (!preservePrepared) Esp8266BaseRecordStore::resumeAfterMaintenance();", "prepared upload keeps Store paused")
+    for module in ("Web", "Sleep"):
+        require_token(read("src/Esp8266Base" + module + ".cpp"), "RecordStore::prepareMaintenance()", "normal lifecycle checkpoint")
+
     actual_mqtt = read("src/Esp8266BaseMQTT.cpp")
     begin = actual_mqtt.index("void Esp8266BaseMQTT::_startGracefulDisconnect()")
     end = actual_mqtt.index("bool Esp8266BaseMQTT::_sendDisconnectPacket()", begin)

@@ -1,3 +1,4 @@
+#include "Esp8266BaseRecordStore.h"
 #include "Esp8266BaseOptions.h"
 #if ESP8266BASE_USE_JOURNAL
 #include "Esp8266BaseJournal.h"
@@ -1642,6 +1643,9 @@ void Esp8266BaseWeb::_handleRebootPost() {
     sendFooter();
     _server.client().stop();
     ESP8266BASE_LOG_I("Web ", "reboot_requested source=web");
+#if ESP8266BASE_USE_RECORD_STORE
+    Esp8266BaseRecordStore::prepareMaintenance();
+#endif
 #if ESP8266BASE_USE_CONFIG
     Esp8266BaseConfig::flush();
 #endif

@@ -1012,3 +1012,16 @@ static void formatRecord(...);         // ≤80 字符文本行（页面/raw 共
 ### 对时与发送边界
 
 NTP 在原有来源校验之外要求本次请求标识匹配，并在接收前执行 3 秒请求超时。`isSynced()` / `timestamp()` 不会把当前无效系统时钟当作已同步；`formatTo()` 格式化失败或缓冲不足返回 false。Web 流式发送补齐部分写入，失败关闭连接；每次 API 调用共用 30 秒发送预算，内置页面的 SDK 单次 write timeout 仍为 1500ms，不宣称整个请求可被抢占。详情见 [网络管理](08_networking.md)。
+
+
+## MQTT 每次连接前准备 LWT
+
+在 `begin()` 前调用 `bool Esp8266BaseMQTT::setPrepareCallback(Esp8266BaseMQTTPrepareCallback)`，nullptr 禁用；开始运行后注册返回false。回调签名 `bool callback(Esp8266BaseMQTTWill& will)`，视图字段为 topic、payload、length、qos、retain，初值是当前LWT。回调可更新全部视图；topic校验后复制至既有128B上限缓冲，payload由调用者借用至下次准备，不新增副本。保持原topic时不会因自拷贝而清空。
+
+调用时序：WiFi就绪 → 可信时间就绪 → 连接许可/退避和最近Web活动门控通过 → 准备回调一次 → 本次TLS/MQTT连接。包括初次连接和失败后的每次实际重试；建立的会话处理消息不会再次调用。拒绝或非法LWT返回 `PREPARE_REJECTED/prepare_rejected`，不发起传输，沿原退避再试，不增加连接尝试计数或radio失败计数。原先已存在的故障恢复状态不会被拒绝准备伪装为恢复成功。未注册时保持configure提供的LWT。
+
+topic最大128B、payload沿用MQTT原上限，QoS只能0/1，非零payload必须有topic与有效指针。回调在同loop同步执行，禁止递归调用MQTT方法、Flash写入或长阻塞；不得返回局部数组指针。它不提供平台身份算法、消息编码或业务重试策略。示例 `mqtt_terminal` 的attempt计数仅说明变长借用内容，不是平台connectionId。
+
+## 可选可靠 Record Store
+
+通过 `ESP8266BASE_USE_RECORD_STORE=1` 启用，Filesystem挂载后由应用显式begin。固定宽度/容量/世代、全部API、非事务故障语义、维护暂停、磁盘格式及恢复规则见 [通用可靠记录存储](13_record_store.md)。该模块不依赖Config、Journal、MQTT或平台。

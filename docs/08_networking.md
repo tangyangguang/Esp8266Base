@@ -210,3 +210,5 @@ DNS/TCP/TLS I/O、CONNACK server-unavailable 和应用 readiness 等可恢复失
 `isSynced()` 和 `timestamp()` 同时检查当前系统 UTC 有效性；校时后系统时钟回到无效范围时，MQTT 时间门控关闭并重新触发对时，日志回退运行毫秒，不继续宣称已同步。`formatTo()` 缓冲不足返回 false。
 
 MQTT 写入的现有超时预算覆盖持续部分进展，零写和部分写都让出调度；不会通过频繁小写入无限延长本次发送。Web `sendChunk` / `sendContent_P` 补齐部分写入，用 30 秒总预算限制每次 API 调用（内置页面的 SDK 单次 write 仍保留 1500ms timeout），失败关闭连接以防后续正文拼接成残缺响应。PROGMEM 字符串各分块共用本次调用的预算；这不是整个 HTTP 请求的硬上限，也不能抢占 SDK 内部的一次阻塞 write。TLS 缓冲仍为 4096/1024，固定 outbox 和恢复策略不变。
+
+每次实际连接尝试前可以注册LWT准备回调，WiFi/可信时间/退避/Web活动门控通过后执行；拒绝不发起TLS或累积radio失败，按原退避重试。平台每次连接身份应在上层此时生成，不能依赖断连回调猜测失败重试。具体生命周期见API参考。

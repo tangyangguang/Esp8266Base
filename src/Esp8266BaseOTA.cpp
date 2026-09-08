@@ -1,3 +1,4 @@
+#include "Esp8266BaseRecordStore.h"
 #include "Esp8266BaseOptions.h"
 #if ESP8266BASE_USE_OTA
 #include "Esp8266BaseOTA.h"
@@ -176,6 +177,9 @@ void Esp8266BaseOTA::_resetRequestState(bool preservePrepared) {
 #if ESP8266BASE_USE_MQTT
     if (!preservePrepared) Esp8266BaseMQTT::resumeAfterOTAFailure();
 #endif
+#if ESP8266BASE_USE_RECORD_STORE
+    if (!preservePrepared) Esp8266BaseRecordStore::resumeAfterMaintenance();
+#endif
     _inProgress = false;
     _rejected = false;
     _started = false;
@@ -201,6 +205,9 @@ void Esp8266BaseOTA::_expirePrepare() {
     _resumeWatchdog();
 #if ESP8266BASE_USE_MQTT
     Esp8266BaseMQTT::resumeAfterOTAFailure();
+#endif
+#if ESP8266BASE_USE_RECORD_STORE
+    Esp8266BaseRecordStore::resumeAfterMaintenance();
 #endif
     _notifyFailure(Esp8266BaseOTAFailure::PREPARE_TIMEOUT);
     _failureNotified = false;
@@ -246,6 +253,9 @@ void Esp8266BaseOTA::_failUpload(uint16_t status, const char* message, bool abor
     _resumeWatchdog();
 #if ESP8266BASE_USE_MQTT
     Esp8266BaseMQTT::resumeAfterOTAFailure();
+#endif
+#if ESP8266BASE_USE_RECORD_STORE
+    Esp8266BaseRecordStore::resumeAfterMaintenance();
 #endif
     _notifyFailure(failure);
 }
@@ -340,6 +350,9 @@ void Esp8266BaseOTA::_handlePrepareRequest() {
         _resetRequestState();
         return;
     }
+#if ESP8266BASE_USE_RECORD_STORE
+    Esp8266BaseRecordStore::prepareMaintenance();
+#endif
 #if ESP8266BASE_USE_MQTT
     if (!Esp8266BaseMQTT::pauseForOTA()) {
         _failUpload(503, "MQTT/TLS did not stop for OTA", false,
@@ -416,6 +429,9 @@ void Esp8266BaseOTA::_handleUploadChunk() {
                                   _failureMessage);
                 return;
             }
+#if ESP8266BASE_USE_RECORD_STORE
+            if (!_prepared) Esp8266BaseRecordStore::prepareMaintenance();
+#endif
 #if ESP8266BASE_USE_MQTT
             if (!_prepared && !Esp8266BaseMQTT::pauseForOTA()) {
                 _failUpload(503, "MQTT/TLS did not stop for OTA", false,

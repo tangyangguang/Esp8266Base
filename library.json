@@ -2,7 +2,17 @@
   "name": "Esp8266Base",
   "version": "1.0.0",
   "description": "Lightweight ESP8266 base library with optional TLS MQTT terminal lifecycle.",
-  "keywords": ["esp8266", "wifi", "mqtt", "tls", "ota", "littlefs", "watchdog", "ntp", "mdns"],
+  "keywords": [
+    "esp8266",
+    "wifi",
+    "mqtt",
+    "tls",
+    "ota",
+    "littlefs",
+    "watchdog",
+    "ntp",
+    "mdns"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/yourname/Esp8266Base"
@@ -14,7 +24,26 @@
   ],
   "license": "MIT",
   "homepage": "https://github.com/yourname/Esp8266Base",
-  "frameworks": ["arduino"],
-  "platforms": ["espressif8266"],
-  "headers": ["Esp8266Base.h"]
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "espressif8266"
+  ],
+  "headers": [
+    "Esp8266Base.h"
+  ],
+  "export": {
+    "include": [
+      "src/",
+      "docs/",
+      "examples/",
+      "partitions/",
+      "tools/",
+      "AGENTS.md",
+      "CHANGELOG.md",
+      "CONSUMERS.md",
+      "platformio.ini"
+    ]
+  }
 }

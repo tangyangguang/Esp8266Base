@@ -93,3 +93,5 @@ OTA 上传期间库自动 `pause()`，所有失败路径必须 `resume()`。成�
 - 执行器运行时网络恢复重启被 guard 拒绝，但本地截止继续；
 - RTC 原因、SDK reset reason 和 Journal boot 记录能够关联；
 - OTA、Web、TLS 压测无误触发。
+
+启用RecordStore时，正常deepSleep前保存释放检查点并暂停访问；失败不阻断安全休眠，恢复后允许幂等重放。看门狗/异常复位不新增Flash写入。应用直接调用ESP.restart/system_restart前应自行调用Store::prepareMaintenance，不能假设库能拦截任意复位。

@@ -403,6 +403,9 @@ static void handleBoardButton() {
         Esp8266BaseFileLog::flush();
 #endif
         delay(300);
+#if ESP8266BASE_USE_RECORD_STORE
+        Esp8266BaseRecordStore::prepareMaintenance();
+#endif
         ESP.restart();
     }
 }

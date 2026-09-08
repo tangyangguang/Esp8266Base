@@ -8,7 +8,7 @@
 
 ## 一、设计原则
 
-1. **RAM 优先**：任何设计决策以 RAM 余量为第一约束。
+1. **可靠性与资源可控**：保留网络、TLS和存储必要保护余量，优先消除重复工作，不为节省RAM削弱可靠性。
 2. **无深层继承**：不使用虚函数（`virtual`），不做复杂多态。
 3. **静态类**：所有模块以静态方法暴露接口，不需要实例化。
 4. **无动态分配**：模块内部不使用 `new` / `malloc`，不使用 STL 容器。
@@ -262,3 +262,8 @@ static DeferredEntry _deferred[ESP8266BASE_CFG_DEFERRED_SIZE];
 | 通用事件总线 | 增加框架复杂度和 RAM 常驻状态 |
 | 复杂状态页 | 大 HTML 缓冲耗 RAM |
 | 异步 Web | ESPAsyncWebServer RAM 占用更大 |
+
+
+## 可选单流可靠记录
+
+RecordStore只依赖Filesystem/LittleFS与Log，由应用在FS就绪后显式begin，不进入默认初始化顺序。OTA、Web正常重启和Sleep在启用时调用它的维护入口；Store不反向感知网络或生命周期模块。Journal继续维护诊断专用记录。单流固定编码、持久世代、未释放保护及低频检查点见 [记录契约](13_record_store.md)，平台SDK只在上层解释序号、ACK和补发。

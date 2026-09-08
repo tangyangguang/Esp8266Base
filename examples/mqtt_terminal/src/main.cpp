@@ -38,6 +38,19 @@ MrY=
 static BearSSL::X509List mqttTrustAnchor(MQTT_ROOT_CA);
 static uint16_t pendingSubscribePacketId = 0;
 
+// 演示每次尝试更新借用内容；这里只是演示计数，不是平台 connectionId 编码。
+static uint32_t preparationCount = 0;
+static char preparedWill[64];
+static bool prepareMqttWill(Esp8266BaseMQTTWill& will) {
+    if (preparationCount == UINT32_MAX) return false;
+    const int length = snprintf(preparedWill, sizeof(preparedWill), "offline attempt=%lu",
+                                static_cast<unsigned long>(++preparationCount));
+    if (length < 0 || static_cast<size_t>(length) >= sizeof(preparedWill)) return false;
+    will.payload = reinterpret_cast<const uint8_t*>(preparedWill);
+    will.length = static_cast<size_t>(length);
+    return true;
+}
+
 static void onMqttConnected(bool sessionPresent) {
     ESP8266BASE_LOG_I("App ", "mqtt_connected session_present=%s action=subscribe",
                       sessionPresent ? "yes" : "no");
@@ -120,11 +133,20 @@ void setup() {
     config.willQos = 1;
     config.willRetain = true;
     Esp8266BaseMQTT::configure(config);
+    Esp8266BaseMQTT::setPrepareCallback(prepareMqttWill);
     Esp8266BaseMQTT::setCallbacks(onMqttConnected, onMqttDisconnected, onMqttMessage,
                                   onMqttSubscribeAck, onMqttPublishAck, onMqttClientError);
     Esp8266BaseOTA::setLifecycleCallbacks(onOtaPrepare, onOtaFailure);
 
     Esp8266Base::begin();
+#if ESP8266BASE_USE_RECORD_STORE
+    // 可选组合只打开已有 Store，不自动重建或解释平台记录。
+    const Esp8266BaseRecordStoreConfig recordConfig = {8, 32, 4, 16384};
+    if (!Esp8266BaseRecordStore::begin(recordConfig)) {
+        ESP8266BASE_LOG_W("App ", "record_store_unavailable result=%u action=application_decides",
+                          unsigned(Esp8266BaseRecordStore::lastResult()));
+    }
+#endif
 }
 
 void loop() {

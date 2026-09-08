@@ -135,6 +135,7 @@ static bool permanentCertificateError(int code) {
 
 using namespace Esp8266BaseMQTTInternal;
 
+Esp8266BaseMQTTPrepareCallback Esp8266BaseMQTT::_prepareCallback = nullptr;
 bool Esp8266BaseMQTT::_configured = false;
 bool Esp8266BaseMQTT::_begun = false;
 bool Esp8266BaseMQTT::_shutdownActive = false;
@@ -209,6 +210,29 @@ bool Esp8266BaseMQTT::configure(const Esp8266BaseMQTTConfig& config) {
         _cleanSession ? "yes" : "no", static_cast<unsigned>(ESP8266BASE_MQTT_TX_SLOTS),
         static_cast<unsigned>(ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES),
         static_cast<unsigned>(ESP8266BASE_MQTT_RX_CHUNK_BYTES));
+    return true;
+}
+
+bool Esp8266BaseMQTT::setPrepareCallback(Esp8266BaseMQTTPrepareCallback callback) {
+    if (_begun) return false;
+    _prepareCallback = callback;
+    return true;
+}
+
+bool Esp8266BaseMQTT::_prepareWill() {
+    if (!_prepareCallback) return true;
+    Esp8266BaseMQTTWill will = {_willTopic, _willPayload, _willLength, _willQos, _willRetain};
+    if (!_prepareCallback(will) ||
+        !validWill(will.topic, will.payload, will.length, will.qos) ||
+        (will.topic && strlen(will.topic) >= sizeof(_willTopic))) return false;
+    // memmove permits the unchanged borrowed topic (or a suffix of it).
+    const size_t topicLength = will.topic ? strlen(will.topic) : 0;
+    if (topicLength) memmove(_willTopic, will.topic, topicLength);
+    _willTopic[topicLength] = '\0';
+    _willPayload = will.payload;
+    _willLength = will.length;
+    _willQos = will.qos;
+    _willRetain = will.retain;
     return true;
 }
 
@@ -288,6 +312,12 @@ void Esp8266BaseMQTT::handle() {
         }
     }
 #endif
+    if (!_prepareWill()) {
+        _lastReason = Esp8266BaseMQTTDisconnectReason::PREPARE_REJECTED;
+        ESP8266BASE_LOG_W("MQTT", "connect_prepare_rejected action=backoff");
+        _scheduleRetry();
+        return;
+    }
     if (_attemptCount < 0xffffffffUL) ++_attemptCount;
 #if ESP8266BASE_USE_JOURNAL
     Esp8266BaseJournal::record(JNL_MQTT_ATTEMPT, 0,
@@ -652,6 +682,7 @@ const char* Esp8266BaseMQTT::lastDisconnectReasonName() {
         case Esp8266BaseMQTTDisconnectReason::NOT_AUTHORIZED: return "not_authorized";
         case Esp8266BaseMQTTDisconnectReason::TLS_BAD_FINGERPRINT: return "tls_bad_fingerprint";
         case Esp8266BaseMQTTDisconnectReason::TCP_DISCONNECTED: return "tcp_disconnected";
+        case Esp8266BaseMQTTDisconnectReason::PREPARE_REJECTED: return "prepare_rejected";
         default: return "unknown";
     }
 }

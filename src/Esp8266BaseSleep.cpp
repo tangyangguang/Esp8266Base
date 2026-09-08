@@ -1,3 +1,4 @@
+#include "Esp8266BaseRecordStore.h"
 #include "Esp8266BaseOptions.h"
 #if ESP8266BASE_USE_SLEEP
 #include "Esp8266BaseSleep.h"
@@ -89,6 +90,10 @@ void Esp8266BaseSleep::deepSleep(uint32_t sleepSec) {
     // 预飞：暂停看门狗
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::pause();
+#endif
+
+#if ESP8266BASE_USE_RECORD_STORE
+    Esp8266BaseRecordStore::prepareMaintenance();
 #endif
 
     // 预飞：flush Config（确保待写数据落盘）

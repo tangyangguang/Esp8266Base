@@ -77,6 +77,7 @@ mDNS初始化失败会按5秒间隔恢复；配置清理失败保留待写值，
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、持续重试与有界 radio 卡态恢复 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
 | OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、业务安全生命周期回调 |
+| Record Store | `Esp8266BaseRecordStore` | 可裁剪的单流固定宽度可靠记录、未释放保护及低频检查点；[契约](docs/13_record_store.md) |
 | MQTT | `Esp8266BaseMQTT` | 可选 TLS MQTT 传输、门控、退避、OTA 协调和诊断 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
@@ -121,6 +122,7 @@ Esp8266Base/
 │   ├── basic_wifi/                 # WiFi STA/AP 配网示例
 │   ├── wifi_config_ota/            # Web 配网 + OTA 示例
 │   ├── custom_web/                 # 自定义 Web 页面示例
+│   ├── record_store/                # LOCAL + 可靠记录读写/释放/检查点示例
 │   ├── mqtt_terminal/               # MQTT_TERMINAL 通用连接和回调示例
 │   ├── sleep_watchdog/             # Sleep + Watchdog 示例
 │   └── full_demo/                  # 全模块演示（参考实现）
@@ -182,6 +184,7 @@ build_flags =
 | `ESP8266BASE_USE_WEB` | `1` | 编译 Web 管理页 |
 | `ESP8266BASE_PROFILE_MQTT_TERMINAL` | `0` | 正式 MQTT 智能终端模式；要求 Web/OTA/NTP/WDT/MQTT 全部启用 |
 | `ESP8266BASE_TERMINAL_HOME_PATH` | `"/health"` | MQTT_TERMINAL 的 STA 根路径跳转目标；AP 配网仍固定跳转 `/wifi` |
+| `ESP8266BASE_USE_RECORD_STORE` | `0` | 单流可靠记录存储，要求 Filesystem；不自动初始化或重建 |
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译 `Esp8266BaseMQTT` 可选模块；要求 NTP |
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 首次退避间隔 |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 指数退避上限 |
@@ -307,3 +310,5 @@ tools/test_all.sh --all-envs
 网络边界包括主动 NTP 请求匹配、当前时钟有效性门控及限时完整写入；相关资源与验证限制见 [网络管理](docs/08_networking.md)。
 
 网络与 LOCAL 当前验证结果、资源及未覆盖范围见 [验证结果](docs/12_validation_results.md)。
+
+每次实际 TLS/MQTT 建连尝试前可通过 `setPrepareCallback()` 更新本次 LWT；拒绝准备走原有退避，不计入 radio 故障。回调内容由上层持有，基础库不生成平台连接身份。可靠事实可使用独立可选 Record Store；平台序号、业务确认和补发仍由应用/SDK解释，两个Base无相互依赖。见 [MQTT API](docs/03_api_reference.md) 和 [记录存储](docs/13_record_store.md)。

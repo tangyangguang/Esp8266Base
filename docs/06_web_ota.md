@@ -286,3 +286,5 @@ tools/ota_upload.sh http://192.168.1.50 .pio/build/esp12f/firmware.bin admin
 - API：`docs/03_api_reference.md`
 - 日志页和文件日志：`docs/07_observability.md`
 - 故障排查：`docs/10_troubleshooting.md`
+
+启用RecordStore时，业务OTA准备成功后先保存释放检查点并暂停Store访问，再停止MQTT并开始Update。检查点失败可通过maintenanceResult诊断，但不阻断恢复OTA；准备租约超时或上传失败恢复访问，成功保持暂停直至重启。Web正常重启同样保存检查点；完整契约见[Record Store](13_record_store.md)。

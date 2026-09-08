@@ -136,3 +136,5 @@ rg -n 'eb_wifi_ssid|eb_wifi_pass|eb_boot_count|Esp8266BaseFileLog|rotateFiles|/l
 ```
 
 无前缀 key 不应作为库保留 key 出现在文档或代码中。
+
+发布包由library.json的export白名单保留src、docs、examples、partitions和tools等受管资料，确保README的契约入口随包交付；不得加入缓存、私密配置、任务计划或未跟踪资料。发布前用pio pkg pack检查包内容与受管文件一致，生成的临时包只用于本地检查，不代表已发布。

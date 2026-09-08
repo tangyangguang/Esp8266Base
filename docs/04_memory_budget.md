@@ -206,3 +206,10 @@ LittleFS 写入会阻塞 CPU 约 1-5ms：
 mDNS失败恢复额外使用一个布尔标志与一个32位失败时间（字段合计5B，不含链接布局填充），仍在原模块预算内。未缩减WiFi/MQTT/TLS或OTA保护余量。
 
 2026-09-09失败恢复修复后，根项目（full_demo源）实测静态RAM46,640B、Flash436,624B；较前次同组合增加100B/212B，包含示例失败处理。上表仍是各自历史构建参考，当前复审结果及测量边界见`12_validation_results.md`，不能用这些静态值声称运行堆已达标。
+
+
+## 可选 Record Store 与连接前准备
+
+ESP8266 Core3.1.2 / ESP-12F ELF中 `StoreState` 为192B（nm尺寸0xC0），编译期上限256B。无常驻payload缓存，局部编解码块最大64B；LittleFS本身的打开文件/块缓存资源仍存在，不把192B当作运行峰值。Store默认关闭；默认根项目仍为RAM46,640B/Flash436,624B，符号核对确保未带入Store。
+
+MQTT准备回调增加一个4B函数指针；LWT复用现有topic缓冲和借用payload，不新增整包缓冲。示例额外64B演示payload与计数、诊断字符串会影响整个固件，不能把示例差值全归为库状态。LOCAL+Store及MQTT+Store组合的完整链接数字见[验证结果](12_validation_results.md)。TLS 4096/1024、固定outbox和恢复阈值保持。

@@ -11,6 +11,9 @@
 #include "Esp8266BaseFileLog.h"
 #endif
 #include "Esp8266BaseUtil.h"
+#if ESP8266BASE_USE_RECORD_STORE
+#include "Esp8266BaseRecordStore.h"
+#endif
 #if ESP8266BASE_USE_CONFIG
 #include "Esp8266BaseConfig.h"
 #endif

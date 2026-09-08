@@ -91,7 +91,8 @@ enum class Esp8266BaseMQTTDisconnectReason : uint8_t {
     NOT_AUTHORIZED,
     TLS_BAD_FINGERPRINT,
     TCP_DISCONNECTED,
-    UNKNOWN
+    UNKNOWN,
+    PREPARE_REJECTED
 };
 
 enum class Esp8266BaseMQTTClientError : uint8_t {
@@ -122,6 +123,16 @@ struct Esp8266BaseMQTTConfig {
     bool willRetain;
 };
 
+// 回调输入为当前 LWT；可替换整个视图。payload 借用至下次准备，topic 当场复制。
+struct Esp8266BaseMQTTWill {
+    const char* topic;
+    const uint8_t* payload;
+    size_t length;
+    uint8_t qos;
+    bool retain;
+};
+typedef bool (*Esp8266BaseMQTTPrepareCallback)(Esp8266BaseMQTTWill& will);
+
 typedef void (*Esp8266BaseMQTTConnectedCallback)(bool sessionPresent);
 typedef void (*Esp8266BaseMQTTDisconnectedCallback)(Esp8266BaseMQTTDisconnectReason reason);
 typedef void (*Esp8266BaseMQTTMessageCallback)(uint8_t qos, bool dup, bool retain,
@@ -148,6 +159,9 @@ public:
     // 必须在 Esp8266Base::begin() 前调用。短字符串复制到固定缓冲；trustAnchors
     // 和 willPayload 由业务持有，并须覆盖整个 MQTT 生命周期。
     static bool configure(const Esp8266BaseMQTTConfig& config);
+    // begin 前注册；每次实际 TLS/CONNECT 尝试前调用，拒绝走退避，不计入 radio 故障。
+    // 同 loop 同步执行，禁止重入 MQTT、Flash 写入或长阻塞；nullptr 禁用。
+    static bool setPrepareCallback(Esp8266BaseMQTTPrepareCallback callback);
     static void setCallbacks(Esp8266BaseMQTTConnectedCallback connected,
                              Esp8266BaseMQTTDisconnectedCallback disconnected,
                              Esp8266BaseMQTTMessageCallback message,
@@ -223,6 +237,8 @@ public:
     static void keepPausedAfterOTASuccess();
 
 private:
+    static Esp8266BaseMQTTPrepareCallback _prepareCallback;
+    static bool _prepareWill();
     static bool _configured;
     static bool _begun;
     static bool _shutdownActive;
