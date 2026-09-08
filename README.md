@@ -6,6 +6,9 @@ ESP8266 专用轻量基础库。RAM 优先设计，仅支持 ESP8266 Arduino Cor
 > **平台**：ESP8266 only — 代码中无任何 ESP32 分支  
 > **前缀**：主类 `Esp8266Base`，模块类 `Esp8266Base<Module>`，宏 `ESP8266BASE_*`
 
+> [!IMPORTANT]
+> 业务项目强烈建议始终引用唯一的 Esp8266Base Git 工作区，不要把源码复制、内置或作为 `third_party` 副本维护。共用能力应先沉淀到本库，再由业务项目使用最新提交完成适配；需要复现历史构建时，根据项目记录的 Esp8266Base Git 提交检出对应版本。接入要求见 [使用指南](docs/00_user_guide.md)，已知使用项目和接入进度见 [使用项目](CONSUMERS.md)。
+
 ---
 
 ## 核心目标

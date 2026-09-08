@@ -6,6 +6,12 @@
 
 ---
 
+## 重要：统一引用基础库
+
+业务项目强烈建议使用 `symlink://` 引用独立、唯一的 Esp8266Base Git 工作区，不要在业务仓库内复制源码、维护 `third_party/Esp8266Base`、Git submodule 或私有修改版。更新业务项目时，先把统一基础库更新到当前最新提交；共用能力应在本库实现、验证并提交，不在业务项目中分叉实现。
+
+每次正式构建或发布由业务项目在自己的构建或验收记录中写明实际使用的 Esp8266Base Git 提交。复现历史构建时，根据该记录临时检出对应提交，复现结束后恢复当前版本，不为历史构建保留源码副本。已知项目状态见[使用项目清单](../CONSUMERS.md)。
+
 ## 一、这个库解决什么问题
 
 Esp8266Base 提供 ESP8266 项目常见基础能力：
@@ -34,8 +40,10 @@ board = esp12e
 framework = arduino
 monitor_speed = 115200
 upload_speed = 460800
-board_build.ldscript = partitions/esp8266-4mb-2mfs.ld
-lib_deps = LittleFS
+board_build.ldscript = ../Esp8266Base/partitions/esp8266-4mb-2mfs.ld
+lib_deps =
+    LittleFS
+    symlink://../Esp8266Base
 
 build_flags =
     -DESP8266BASE_LOG_LEVEL=1
@@ -49,6 +57,8 @@ build_flags =
     -DESP8266BASE_WEB_AUTH_USER=\"admin\"
     -DESP8266BASE_WEB_AUTH_PASS=\"admin\"
 ```
+
+示例假定业务项目与唯一的 `Esp8266Base` 工作区位于同一父目录；目录不同只调整相对路径，不复制基础库源码。
 
 上传建议使用 `460800` baud。部分 ESP8266 硬件在 `921600` 下容易出现 packet error。
 
