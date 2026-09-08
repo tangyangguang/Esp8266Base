@@ -81,6 +81,19 @@ int main() {
         assert(Store::readById(3,output,sizeof(output)) && Store::readById(4,output,sizeof(output)));
         assert(Store::releaseThrough(2)); assert(Store::append(payload,8,id)); assert(id>=5);
     }
+    // Repeated torn appends must not recycle the final complete fact: the upper layer
+    // derives its next continuous sequence from that fact, not from physical ID holes.
+    reset(); for(int i=0;i<4;++i) assert(Store::append(payload,8,id));
+    assert(Store::releaseThrough(4)); assert(Store::checkpoint());
+    for(int attempt=0;attempt<6;++attempt) {
+        writeBudget=113; // meta64 + segment48 + one payload byte
+        assert(!Store::append(payload,8,id)); writeBudget=-1;
+        assert(Store::begin(config));
+        assert(Store::readById(4,output,sizeof(output)));
+    }
+    assert(Store::append(payload,8,id) && id>4);
+    assert(Store::readById(4,output,sizeof(output)));
+
     // Randomized-looking repeated rotation and reboot, no id reuse or stale-generation records.
     reset(); uint64_t previous=0;
     for(unsigned i=0;i<300;++i) {

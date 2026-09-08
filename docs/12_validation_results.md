@@ -70,7 +70,7 @@ MQTT测试执行生产prepare和handle门控方法，以假transport覆盖初次
 | 当前重点组合 | RAM (B) | Flash (B) |
 | --- | ---: | ---: |
 | 根项目，Store关闭 | 46640 | 436624 |
-| record_store，LOCAL+Store | 41124 | 387787 |
+| record_store，LOCAL+Store | 41124 | 387899 |
 | mqtt_terminal，Store关闭 | 45512 | 514703 |
 | mqtt_terminal，无FS | 42808 | 478223 |
 | mqtt_terminal，启用Store | 45944 | 517639 |
@@ -80,3 +80,5 @@ MQTT+Store启用相对该示例关闭Store增加432B静态RAM/2936B Flash（只�
 ESP8266主线的本批功能、相关验证和契约已收齐；平台SDK实现与平台/真实Broker链路属于后续平台阶段，ESP8266实验板、弱网并发、真实掉电/欠压/FS满与长期寿命仍待适用授权和实测。两个Base永久独立。
 
 交付包已核对84个受管文件与源码内容一致，包含新Store源码、示例及docs契约；显式导出白名单修正默认漏打docs的问题，无缓存/私密/未跟踪文件。临时tarball检查后删除，未发布或推送。
+
+SDK接续复审补充：连续轮转后写入不完整时，最后一条已释放的完整事实仍必须保留，直到更新记录成功提交。新增6次连续中断回归修前复现、修后通过；不新增持久副本或静态状态，仅轮转选择排除最新完整记录所在段。只重跑Store原生和LOCAL+Store目标增量构建（6.54秒），RAM不变、Flash增加112B，不重复其他环境矩阵；前表MQTT+Store是追加此纯Store轮转修正之前的测值。

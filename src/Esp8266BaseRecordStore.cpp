@@ -103,12 +103,19 @@ int newestSegment() {
     return newest;
 }
 bool rotate(int& active) {
+    uint64_t latestComplete=0;
+    for (uint8_t i=0;i<store.config.segmentCount;++i) {
+        const Segment& s=store.segments[i];
+        if (s.count && s.first+s.count-1>latestComplete) latestComplete=s.first+s.count-1;
+    }
     int target=-1;
     for (uint8_t i=0;i<store.config.segmentCount;++i) {
         const Segment& s=store.segments[i];
         if (!s.first) { target=i; break; }
         // Reserve the entire segment ID range, including incomplete-tail holes.
-        if (s.count && s.first+s.count-1>store.released) continue;
+        if (s.count && (s.first+s.count-1>store.released || s.first+s.count-1==latestComplete)) continue;
+        // Keep the last complete fact until a newer append commits, even across
+        // repeated torn writes into otherwise empty/released segments.
         if (target<0 || s.first<store.segments[target].first) target=i;
     }
     if (target<0) return fail(Result::FULL);
