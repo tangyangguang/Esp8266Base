@@ -57,6 +57,8 @@ void loop() {
 }
 ```
 
+mDNS初始化失败会按5秒间隔恢复；配置清理失败保留待写值，MQTT正常退出检查DISCONNECT排空结果，失败不报告成功。
+
 `handle()` 每轮先处理已经到达的本地 Web 请求，再推进 MQTT；这样 ESP8266 的 DNS/TCP/TLS 建连发生同步等待时，不会先压住本轮本地控制请求。
 
 首次使用：设备以 AP 模式启动，SSID `ESP8266-Config-XXXX`，连接后访问 `http://192.168.4.1/` 配置 WiFi 凭证。

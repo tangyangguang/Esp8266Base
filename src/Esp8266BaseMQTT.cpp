@@ -736,11 +736,17 @@ void Esp8266BaseMQTT::_handleShutdown() {
 
 void Esp8266BaseMQTT::_startGracefulDisconnect() {
     _state = Esp8266BaseMQTTState::SHUTDOWN_DISCONNECTING;
-    const bool sent = _sendDisconnectPacket();
-    if (sent) client.flush();
+    Esp8266BaseMQTTShutdownResult result = Esp8266BaseMQTTShutdownResult::DISCONNECT_TIMEOUT;
+    if (!_isDue(millis(), _shutdownDeadline)) {
+        if (!_sendDisconnectPacket()) {
+            result = Esp8266BaseMQTTShutdownResult::DISCONNECT_FAILED;
+        } else if (Esp8266BaseInternal::flushBeforeDeadline(
+                       client, _shutdownDeadline, []() { return millis(); })) {
+            result = Esp8266BaseMQTTShutdownResult::SUCCESS;
+        }
+    }
     _closeTransport(Esp8266BaseMQTTDisconnectReason::USER_OK, false);
-    _finishShutdown(sent ? Esp8266BaseMQTTShutdownResult::SUCCESS
-                         : Esp8266BaseMQTTShutdownResult::DISCONNECT_FAILED);
+    _finishShutdown(result);
 }
 
 bool Esp8266BaseMQTT::_sendDisconnectPacket() {

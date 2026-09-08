@@ -23,4 +23,6 @@ public:
 
 private:
     static bool _running;  // 1B
+    static bool _retryPending;
+    static uint32_t _lastFailureMs;
 };

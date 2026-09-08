@@ -264,7 +264,7 @@ static bool flush();
 ```cpp
 static bool clearAll();
 ```
-删除所有 `/cfg_*` 配置文件，用于恢复出厂配置。函数会先丢弃 deferred 队列，避免恢复出厂前把待写数据重新写回；成功后通常应重启设备。
+删除所有 `/cfg_*` 配置文件，用于恢复出厂配置。配置清理失败时，`clearAll()` 返回 false 并保留 deferred 待写值；目录删除不是事务，部分文件可能已删除，后续 flush 可重新写回待写项。成功清理才取消全部 deferred 项，业务文件不受影响。成功后通常应重启设备。
 
 ```cpp
 static uint8_t pendingCount();
@@ -609,7 +609,7 @@ static void resumeAfterShutdown();
 
 `beginShutdown()` 是正常关闭 MQTT 和 OTA 重启前共用的受控下线入口。业务提供不透明 topic/payload；基础库复制到固定槽并发布 retained QoS1，返回 `true` 只表示成功入队。入队后普通 publish/subscribe、消息分发、重连请求和 readiness 确认均被禁止；只有 packetId 精确匹配的 PUBACK 才发送 MQTT DISCONNECT、flush 并释放 TLS。成功得到 `SUCCESS` 并保持 `PAUSED`，不会自动重连。
 
-`Esp8266BaseMQTTShutdownResult` 包含 `NONE/IN_PROGRESS/SUCCESS/NOT_CONNECTED/INVALID_ARGUMENT/PUBLISH_FAILED/CONNECTION_LOST/PUBACK_TIMEOUT/DISCONNECT_FAILED/DISCONNECT_TIMEOUT`。PUBACK 等待默认 5000ms，使用 wrap-safe `millis()` 比较；同步 DISCONNECT 写失败使用 `DISCONNECT_FAILED`，`DISCONNECT_TIMEOUT` 是稳定结果集的保留值。任何失败都不会伪装为成功，状态保持暂停。业务确认可以恢复后显式调用 `resumeAfterShutdown()`；只有 `shutdownSucceeded()` 才证明匹配 PUBACK、DISCONNECT 写入和 TLS 释放都已完成。
+`Esp8266BaseMQTTShutdownResult` 包含 `NONE/IN_PROGRESS/SUCCESS/NOT_CONNECTED/INVALID_ARGUMENT/PUBLISH_FAILED/CONNECTION_LOST/PUBACK_TIMEOUT/DISCONNECT_FAILED/DISCONNECT_TIMEOUT`。PUBACK 等待默认 5000ms，使用 wrap-safe `millis()` 比较；同步 DISCONNECT 写失败使用 `DISCONNECT_FAILED`，DISCONNECT排空会使用整个shutdown剩余预算并检查SDK结果，超时或排空未确认返回 `DISCONNECT_TIMEOUT`。单次SDK调用只能返回后检查，因此不承诺硬实时上限。任何失败都不会伪装为成功，状态保持暂停。业务确认可以恢复后显式调用 `resumeAfterShutdown()`；只有 `shutdownSucceeded()` 才证明匹配 PUBACK、DISCONNECT 写入和 TLS 释放都已完成。
 
 OTA 场景中，业务 prepare callback 必须先完成执行器安全停机；存在活动 MQTT 会话时还必须调用 `beginShutdown()`。`pauseForOTA()` 对已完全 disconnected、未配置或未 begin 的 MQTT 直接进入暂停并允许 OTA，但保留 `NOT_CONNECTED` 或既有失败结果，不能用 `shutdownSucceeded()` 描述这条无会话路径。CONNECTED、CONNECTING 或尚未释放的 transport 若没有完成受控下线则返回 false，OTA 报 `MQTT_PAUSE_FAILED`。参考 `examples/mqtt_terminal`。
 

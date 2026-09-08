@@ -12,6 +12,8 @@
 - mDNS：广播 `hostname.local` 和 `_http._tcp` 服务。
 - MQTT：可选 TLS MQTT 传输、WiFi/NTP 门控、有界退避和连接诊断。
 
+mDNS启动成功后才登记运行状态与HTTP服务；失败后由handle持续恢复，每次失败后至少等待5秒，避免每轮重试。WiFi重连仍重新启动广播，失败不能沿用旧的成功标志。
+
 NTP 和 mDNS 不在 `begin()` 中启动，而是在 `handle()` 中检测到 WiFi STA 已连接后触发。
 
 ---

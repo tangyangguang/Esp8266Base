@@ -202,3 +202,7 @@ LittleFS 写入会阻塞 CPU 约 1-5ms：
 - `wifiSsid` / `wifiRssi`：当前 STA WiFi 名称和 RSSI(dBm)，用于对比弱网下的请求与 OTA 速度；`/health` 无需认证，因此 SSID 对同一局域网可见
 
 维护要求：新增模块或新增常驻状态时，必须同步本文件的预算表，并在 `docs/11_maintainer_guide.md` 的发布检查中确认构建后的 RAM 用量没有突破目标。
+
+mDNS失败恢复额外使用一个布尔标志与一个32位失败时间（字段合计5B，不含链接布局填充），仍在原模块预算内。未缩减WiFi/MQTT/TLS或OTA保护余量。
+
+2026-09-09失败恢复修复后，根项目（full_demo源）实测静态RAM46,640B、Flash436,624B；较前次同组合增加100B/212B，包含示例失败处理。上表仍是各自历史构建参考，当前复审结果及测量边界见`12_validation_results.md`，不能用这些静态值声称运行堆已达标。

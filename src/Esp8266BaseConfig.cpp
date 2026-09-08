@@ -421,16 +421,13 @@ bool Esp8266BaseConfig::flush() {
 
 bool Esp8266BaseConfig::clearAll() {
     if (!_ready) return false;
-    for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
-        _deferred[i].used = false;
-    }
 
     bool ok = true;
     while (true) {
-        char removeName[32] = "";
+        char removeName[ESP8266BASE_CFG_KEY_MAX + 11] = "";
         Dir dir = LittleFS.openDir("/");
         while (dir.next()) {
-            char name[32];
+            char name[ESP8266BASE_CFG_KEY_MAX + 11];
             strncpy(name, dir.fileName().c_str(), sizeof(name) - 1);
             name[sizeof(name) - 1] = '\0';
             if (strncmp(name, "/cfg_", 5) == 0 || strncmp(name, "cfg_", 4) == 0) {
@@ -446,6 +443,13 @@ bool Esp8266BaseConfig::clearAll() {
             break;
         }
         yield();
+    }
+
+    // A partial filesystem failure must not silently discard pending values.
+    if (ok) {
+        for (int i = 0; i < ESP8266BASE_CFG_DEFERRED_SIZE; i++) {
+            _deferred[i].used = false;
+        }
     }
 
     ESP8266BASE_LOG_I("Cfg ", "clear_all_config_files result=%s", ok ? "success" : "partial_failure");

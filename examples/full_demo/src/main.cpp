@@ -391,7 +391,14 @@ static void handleBoardButton() {
 #if ESP8266BASE_USE_WATCHDOG
         Esp8266BaseWatchdog::pause();
 #endif
-        Esp8266BaseConfig::clearAll();
+        if (!Esp8266BaseConfig::clearAll()) {
+            ESP8266BASE_LOG_E("Btn ", "config_clear_failed action=keep_running release_button_before_retry");
+#if ESP8266BASE_USE_WATCHDOG
+            Esp8266BaseWatchdog::resume();
+#endif
+            setBoardLed(false);
+            return;
+        }
 #if ESP8266BASE_USE_FILELOG
         Esp8266BaseFileLog::flush();
 #endif

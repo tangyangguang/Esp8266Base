@@ -283,8 +283,7 @@ void Esp8266Base::handle() {
 #endif
 #if ESP8266BASE_USE_MDNS
     if (!_mdnsWasStarted && wifiNow) {
-        Esp8266BaseMDNS::begin(_hostname);
-        _mdnsWasStarted = true;
+        _mdnsWasStarted = Esp8266BaseMDNS::begin(_hostname);
     } else if (_mdnsWasStarted && !wifiNow) {
         _mdnsWasStarted = false;  // WiFi 掉线，下次连上时重启 mDNS
     }

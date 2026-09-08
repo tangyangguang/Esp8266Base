@@ -8,6 +8,8 @@
 // 静态成员定义
 // ----------------------------------------------------------------------------
 bool Esp8266BaseMDNS::_running = false;
+bool Esp8266BaseMDNS::_retryPending = false;
+uint32_t Esp8266BaseMDNS::_lastFailureMs = 0;
 
 // ----------------------------------------------------------------------------
 // begin
@@ -18,7 +20,11 @@ bool Esp8266BaseMDNS::begin(const char* hostname) {
         return false;
     }
 
+    if (_retryPending && millis() - _lastFailureMs < 5000U) return false;
+    _running = false;
     if (!MDNS.begin(hostname)) {
+        _retryPending = true;
+        _lastFailureMs = millis();
         ESP8266BASE_LOG_E("mDNS", "MDNS.begin() failed host=%s", hostname);
         return false;
     }
@@ -26,6 +32,7 @@ bool Esp8266BaseMDNS::begin(const char* hostname) {
     // 广播 HTTP 服务
     MDNS.addService("http", "tcp", 80);
 
+    _retryPending = false;
     _running = true;
     ESP8266BASE_LOG_I("mDNS", "mdns_started host=%s.local service=http tcp_port=80", hostname);
     return true;

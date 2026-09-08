@@ -10,6 +10,9 @@ struct FakeClient {
     uint32_t cost = 0;
     char received[32] = {};
     size_t used = 0;
+    bool flushAllowed = true;
+    uint32_t flushBudget = 0;
+    bool flush(uint32_t budget) { flushBudget=budget; nowMs+=cost; return flushAllowed; }
     bool connected() { return online; }
     size_t write(const uint8_t* data, size_t length) {
         nowMs += cost;
@@ -65,5 +68,18 @@ int main() {
     assert(Esp8266BaseInternal::writeAll(client,data,2,0,30,clock,cooperate));
     assert(Esp8266BaseInternal::writeAll(client,data,2,0,30,clock,cooperate));
     assert(!Esp8266BaseInternal::writeAll(client,data,2,0,30,clock,cooperate));
+    client={}; nowMs=10;
+    assert(Esp8266BaseInternal::flushBeforeDeadline(client,30,clock));
+    assert(client.flushBudget==20);
+    client={}; client.flushAllowed=false;
+    assert(!Esp8266BaseInternal::flushBeforeDeadline(client,30,clock));
+    client={}; nowMs=30;
+    assert(!Esp8266BaseInternal::flushBeforeDeadline(client,30,clock));
+    assert(client.flushBudget==0);
+    client={}; nowMs=0; client.cost=30;
+    assert(!Esp8266BaseInternal::flushBeforeDeadline(client,30,clock));
+    client={}; nowMs=0xfffffffcUL; client.cost=3;
+    assert(Esp8266BaseInternal::flushBeforeDeadline(client,6,clock));
+    assert(client.flushBudget==10);
     return 0;
 }

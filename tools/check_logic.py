@@ -877,6 +877,11 @@ def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
 
 
 def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:
+    actual_mqtt = read("src/Esp8266BaseMQTT.cpp")
+    begin = actual_mqtt.index("void Esp8266BaseMQTT::_startGracefulDisconnect()")
+    end = actual_mqtt.index("bool Esp8266BaseMQTT::_sendDisconnectPacket()", begin)
+    require_token(actual_mqtt[begin:end], "flushBeforeDeadline", "checked DISCONNECT flush")
+    forbid_token(actual_mqtt[begin:end], "client.flush();", "unchecked DISCONNECT flush")
     options_h = read("src/Esp8266BaseOptions.h")
     base_cpp = read("src/Esp8266Base.cpp")
     mqtt_h = read("src/Esp8266BaseMQTT.h")

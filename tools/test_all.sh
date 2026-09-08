@@ -26,6 +26,7 @@ run() {
 run git diff --check
 run bash tools/check_static.sh
 run python3 tools/check_logic.py
+run python3 tools/test_local_recovery.py
 run bash tools/test_mqtt_fixed.sh
 run bash tools/test_ota_upload.sh
 

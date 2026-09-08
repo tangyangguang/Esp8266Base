@@ -22,4 +22,13 @@ bool writeAll(Client& client, const uint8_t* bytes, size_t length,
     return true;
 }
 
+// Never pass zero to SDK flush: zero selects its own default wait budget.
+template <typename Client, typename Clock>
+bool flushBeforeDeadline(Client& client, uint32_t deadline, Clock clock) {
+    const uint32_t remaining = deadline - clock();
+    if (!remaining || remaining > 0x7fffffffUL) return false;
+    if (!client.flush(remaining)) return false;
+    return static_cast<int32_t>(clock() - deadline) < 0;
+}
+
 }

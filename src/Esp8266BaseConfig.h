@@ -78,6 +78,7 @@ public:
     static bool flush();
 
     // 删除所有 /cfg_* 配置文件（恢复出厂配置前调用）
+    // 仅全部删除成功才取消pending；部分失败保留pending且不会回滚已删除文件。
     static bool clearAll();
 
     // 当前 pending 条数（用于诊断日志）
