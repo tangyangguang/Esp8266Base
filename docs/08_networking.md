@@ -200,3 +200,11 @@ DNS/TCP/TLS I/O、CONNACK server-unavailable 和应用 readiness 等可恢复失
 | NTP 不同步 | `ntp_sync_pending`、DNS/网关/UDP 123 |
 
 更多排查见 `docs/10_troubleshooting.md`。
+
+## 主动对时和网络写入边界
+
+主动 UDP 路径发送一个 8 字节随机请求标识作为 transmit timestamp，并要求响应的 originate timestamp 原样匹配；同时检查已等待、源 IP/端口、NTP 版本 3、mode、leap 和 stratum。请求超时先于收包判断，旧响应、错误响应或持续无关流量不能延长本次等待。RTT 起点在 DNS 完成后、实际发送数据包前；同步成功关闭本库主动 UDP socket，保留系统 SNTP 负责后续对时。NTP 秒字段按 1970..2104 范围展开，正确处理 2036 回绕。依据 [RFC 4330 的时间格式与客户端检查](https://www.rfc-editor.org/rfc/rfc4330.html#section-5)。请求匹配不是身份认证，仍不宣称普通 NTP 能抵御链路上的时间篡改。
+
+`isSynced()` 和 `timestamp()` 同时检查当前系统 UTC 有效性；校时后系统时钟回到无效范围时，MQTT 时间门控关闭并重新触发对时，日志回退运行毫秒，不继续宣称已同步。`formatTo()` 缓冲不足返回 false。
+
+MQTT 写入的现有超时预算覆盖持续部分进展，零写和部分写都让出调度；不会通过频繁小写入无限延长本次发送。Web `sendChunk` / `sendContent_P` 补齐部分写入，用 30 秒总预算限制每次 API 调用（内置页面的 SDK 单次 write 仍保留 1500ms timeout），失败关闭连接以防后续正文拼接成残缺响应。PROGMEM 字符串各分块共用本次调用的预算；这不是整个 HTTP 请求的硬上限，也不能抢占 SDK 内部的一次阻塞 write。TLS 缓冲仍为 4096/1024，固定 outbox 和恢复策略不变。

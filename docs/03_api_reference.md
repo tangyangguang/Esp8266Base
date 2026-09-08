@@ -1008,3 +1008,7 @@ static void formatRecord(...);         // ≤80 字符文本行（页面/raw 共
 - `kind==0xFF` 是携带 bootNo/reset 的会话边界；
 - 事件最多丢最后 10 秒 RAM 队列，趋势最多丢当前 30 分钟聚合；
 - 静态增量约 0.3KB；写入、擦除、I/O 错误和队列丢弃见 stats。
+
+### 对时与发送边界
+
+NTP 在原有来源校验之外要求本次请求标识匹配，并在接收前执行 3 秒请求超时。`isSynced()` / `timestamp()` 不会把当前无效系统时钟当作已同步；`formatTo()` 格式化失败或缓冲不足返回 false。Web 流式发送补齐部分写入，失败关闭连接；每次 API 调用共用 30 秒发送预算，内置页面的 SDK 单次 write timeout 仍为 1500ms，不宣称整个请求可被抢占。详情见 [网络管理](08_networking.md)。

@@ -252,6 +252,14 @@ def test_ntp_manual_packet_validation() -> None:
                   "NTP retry signed delta comparison")
     if millis_due(0xFFFFFFF0, 0x00000010) or not millis_due(0x00000020, 0x00000010):
         fail("NTP manual retry deadline must remain correct across millis wrap")
+    require_token(ntp_cpp, "Esp8266BaseNTPInternal::matchesRequest(pkt, _manualNonce)", "NTP response must match current request")
+    require_token(ntp_cpp, "memcpy(pkt + 40, _manualNonce", "NTP request correlation timestamp")
+    poll = ntp_cpp[ntp_cpp.index("bool Esp8266BaseNTP::_pollManual"):ntp_cpp.index("void Esp8266BaseNTP::_sendManual")]
+    if poll.index("now - _manualSentMs >= 3000UL") > poll.index("parsePacket()"):
+        fail("NTP request timeout must be checked before any received packet")
+    send = ntp_cpp[ntp_cpp.index("void Esp8266BaseNTP::_sendManual"):ntp_cpp.index("bool Esp8266BaseNTP::_isDue")]
+    if not send.index("hostByName") < send.index("_manualSentMs = millis()") < send.index("endPacket()"):
+        fail("NTP RTT must exclude DNS and begin at packet transmission")
     require_token(networking, "主动 UDP NTP 只接受当前等待服务器", "NTP manual validation doc")
     require_token(api, "校验响应来源 IP、端口、mode、stratum", "API NTP validation doc")
 

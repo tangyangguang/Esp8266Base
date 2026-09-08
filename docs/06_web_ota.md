@@ -171,6 +171,8 @@ void setup() {
 }
 ```
 
+`sendChunk()` 和 `sendContent_P()` 会补齐部分写入，失败关闭连接；每次调用的全部分块共用 30 秒协作式发送预算。`/health` 正文也共用一次 30 秒发送预算。预算不能抢占底层同步 write，也不是整个 HTTP 请求的硬截止；详见 [网络边界](08_networking.md#主动对时和网络写入边界)。
+
 Handler 必须是普通函数或无捕获 lambda。不要直接调用 `server().on()` 注册业务路由，否则会绕过静态路由表和请求诊断。`sendFooter()` 会完成 HTML 输出并关闭当前连接，之后不要再调用 `sendChunk()` 或直接写 `server().client()`。
 
 ---

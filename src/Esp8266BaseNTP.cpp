@@ -1,6 +1,10 @@
 #include "Esp8266BaseOptions.h"
 #if ESP8266BASE_USE_NTP
 #include "Esp8266BaseNTP.h"
+#include "Esp8266BaseNTPPacket.h"
+extern "C" {
+#include <osapi.h>
+}
 #include "Esp8266BaseLog.h"
 #if ESP8266BASE_USE_WATCHDOG
 #include "Esp8266BaseWatchdog.h"
@@ -34,7 +38,7 @@ static WiFiUDP _ntpUdp;
 static IPAddress _manualIp;
 static const uint16_t NTP_PORT = 123;
 static const uint16_t NTP_LOCAL_PORT = 2390;
-static const uint32_t NTP_EPOCH_DELTA = 2208988800UL;
+static uint8_t _manualNonce[8];
 
 // NTP 服务器列表（全部在 Flash）
 static const char NTP_S1[] PROGMEM = ESP8266BASE_NTP_SERVER_1;
@@ -50,21 +54,6 @@ static void _formatIP(const IPAddress& ip, char* out, size_t len) {
     if (!out || len == 0) return;
     snprintf(out, len, "%u.%u.%u.%u",
              (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2], (unsigned)ip[3]);
-}
-
-static uint64_t _ntpTimestampUs(const uint8_t* value) {
-    const uint32_t seconds = ((uint32_t)value[0] << 24)
-                           | ((uint32_t)value[1] << 16)
-                           | ((uint32_t)value[2] << 8)
-                           |  (uint32_t)value[3];
-    const uint32_t fraction = ((uint32_t)value[4] << 24)
-                            | ((uint32_t)value[5] << 16)
-                            | ((uint32_t)value[6] << 8)
-                            |  (uint32_t)value[7];
-    if (seconds <= NTP_EPOCH_DELTA) return 0;
-    const uint64_t unixSeconds = (uint64_t)(seconds - NTP_EPOCH_DELTA);
-    const uint64_t micros = ((uint64_t)fraction * 1000000ULL) >> 32;
-    return unixSeconds * 1000000ULL + micros;
 }
 
 // ----------------------------------------------------------------------------
@@ -91,7 +80,6 @@ bool Esp8266BaseNTP::begin() {
     _estimatedUncertaintyMs = 0;
     _lastSyncRttMs = 0;
     _ntpUdp.stop();
-    _ntpUdp.begin(NTP_LOCAL_PORT);
 
     ESP8266BASE_LOG_I("NTP ", "ntp_client_started timezone=UTC+%d servers=%s,%s,%s check_interval=5s manual_udp=yes",
                       ESP8266BASE_NTP_TIMEZONE / 3600, _ntpServer1, _ntpServer2, _ntpServer3);
@@ -103,6 +91,12 @@ bool Esp8266BaseNTP::begin() {
 // ----------------------------------------------------------------------------
 void Esp8266BaseNTP::handle() {
     uint32_t now = millis();
+    if (_synced && !isSynced()) {
+        _synced = false;
+        _uncertaintyMeasured = false;
+        _nextManualMs = now;
+        _lastCheckMs = now - 5000UL;
+    }
     if (!_synced && _pollManual(now)) {
         return;
     }
@@ -116,7 +110,7 @@ void Esp8266BaseNTP::handle() {
     _lastCheckMs = now;
 
     time_t t = time(nullptr);
-    if (t < 1000000000UL) {
+    if (t < 1000000000UL || static_cast<uint64_t>(t) > UINT32_MAX) {
         _sendManual(now);
         if (!_synced && (now - _lastPendingLogMs >= 30000UL || _lastPendingLogMs == 0)) {
             _lastPendingLogMs = now;
@@ -155,17 +149,28 @@ void Esp8266BaseNTP::reset() {
 }
 
 bool Esp8266BaseNTP::_pollManual(uint32_t now) {
+    if (_manualWaiting && now - _manualSentMs >= 3000UL) {
+        char ip[16];
+        _formatIP(_manualIp, ip, sizeof(ip));
+        ESP8266BASE_LOG_W("NTP ", "manual_ntp_timeout server_index=%u ip=%s timeout=3s",
+                          (unsigned)_manualServer, ip);
+        _manualWaiting = false;
+        _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
+        _nextManualMs = now + 2000UL;
+    }
     int packetSize = _ntpUdp.parsePacket();
     if (packetSize >= 48) {
         IPAddress remoteIp = _ntpUdp.remoteIP();
         uint16_t remotePort = _ntpUdp.remotePort();
         uint8_t pkt[48];
-        _ntpUdp.read(pkt, sizeof(pkt));
+        if (_ntpUdp.read(pkt, sizeof(pkt)) != sizeof(pkt)) return false;
         uint8_t mode = pkt[0] & 0x07;
         uint8_t leap = (pkt[0] >> 6) & 0x03;
         uint8_t stratum = pkt[1];
         if (!_manualWaiting || remoteIp != _manualIp || remotePort != NTP_PORT ||
-            mode != 4 || leap == 3 || stratum == 0 || stratum > 15) {
+            mode != 4 || leap == 3 || stratum == 0 || stratum > 15 ||
+            ((pkt[0] >> 3) & 7) != 3 ||
+            !Esp8266BaseNTPInternal::matchesRequest(pkt, _manualNonce)) {
             char remote[16];
             char expected[16];
             _formatIP(remoteIp, remote, sizeof(remote));
@@ -176,8 +181,8 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
                               _manualWaiting ? "yes" : "no");
             return false;
         }
-        const uint64_t receivedUs = _ntpTimestampUs(pkt + 32);
-        const uint64_t transmittedUs = _ntpTimestampUs(pkt + 40);
+        const uint64_t receivedUs = Esp8266BaseNTPInternal::timestampMicros(pkt + 32);
+        const uint64_t transmittedUs = Esp8266BaseNTPInternal::timestampMicros(pkt + 40);
         if (transmittedUs >= 1000000000ULL * 1000000ULL &&
             (receivedUs == 0 || transmittedUs >= receivedUs)) {
             const uint32_t rttMs = now - _manualSentMs;
@@ -195,7 +200,7 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
             timeval tv;
             tv.tv_sec = (time_t)(currentUs / 1000000ULL);
             tv.tv_usec = (suseconds_t)(currentUs % 1000000ULL);
-            settimeofday(&tv, nullptr);
+            if (settimeofday(&tv, nullptr) != 0) return false;
             _manualWaiting = false;
             _lastSyncRttMs = rttMs;
             const uint32_t uncertainty = (uint32_t)((networkUs + 1999ULL) / 2000ULL) + 1UL;
@@ -215,15 +220,6 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
         while (_ntpUdp.available()) _ntpUdp.read();
     }
 
-    if (_manualWaiting && now - _manualSentMs >= 3000UL) {
-        char ip[16];
-        _formatIP(_manualIp, ip, sizeof(ip));
-        ESP8266BASE_LOG_W("NTP ", "manual_ntp_timeout server_index=%u ip=%s timeout=3s",
-                          (unsigned)_manualServer, ip);
-        _manualWaiting = false;
-        _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
-        _nextManualMs = now + 2000UL;
-    }
     return false;
 }
 
@@ -252,12 +248,21 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
     memset(pkt, 0, sizeof(pkt));
     pkt[0] = 0x1B;  // LI=0, VN=3, Mode=3(client)
 
-    _ntpUdp.beginPacket(_manualIp, NTP_PORT);
-    _ntpUdp.write(pkt, sizeof(pkt));
+    // The server echoes this opaque client timestamp in Originate Timestamp.
+    // Matching it correlates the response; it does not authenticate NTP.
+    const uint32_t nonceHigh = os_random();
+    const uint32_t nonceLow = os_random();
+    memcpy(_manualNonce, &nonceHigh, sizeof(nonceHigh));
+    memcpy(_manualNonce + 4, &nonceLow, sizeof(nonceLow));
+    _manualNonce[0] |= 1U;
+    memcpy(pkt + 40, _manualNonce, sizeof(_manualNonce));
+    const bool packetReady = _ntpUdp.begin(NTP_LOCAL_PORT) &&
+                             _ntpUdp.beginPacket(_manualIp, NTP_PORT) &&
+                             _ntpUdp.write(pkt, sizeof(pkt)) == sizeof(pkt);
     char ip[16];
     _formatIP(_manualIp, ip, sizeof(ip));
-    if (_ntpUdp.endPacket()) {
-        _manualSentMs = now;
+    _manualSentMs = millis();
+    if (packetReady && _ntpUdp.endPacket()) {
         _manualWaiting = true;
         ESP8266BASE_LOG_I("NTP ", "manual_ntp_request server=%s ip=%s",
                           server, ip);
@@ -265,7 +270,7 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
         ESP8266BASE_LOG_W("NTP ", "manual_ntp_send_failed server=%s ip=%s",
                           server, ip);
         _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
-        _nextManualMs = now + 5000UL;
+        _nextManualMs = millis() + 5000UL;
     }
 }
 
@@ -274,6 +279,8 @@ bool Esp8266BaseNTP::_isDue(uint32_t now, uint32_t due) {
 }
 
 void Esp8266BaseNTP::_finishSync(time_t t) {
+    _ntpUdp.stop();
+    _manualWaiting = false;
     _synced = true;
 #if ESP8266BASE_USE_JOURNAL
     const uint32_t epoch = static_cast<uint32_t>(t);
@@ -300,8 +307,6 @@ void Esp8266BaseNTP::_finishSync(time_t t) {
                       nowBuf, (unsigned long)uptimeMs, bootBuf);
     ESP8266BASE_LOG_I("NTP ", "time_mapping boot_millis=0 actual_time=%s current_millis=%lu current_time=%s",
                       bootBuf, (unsigned long)uptimeMs, nowBuf);
-    _ntpUdp.stop();
-    _manualWaiting = false;
 
     if (!_logSwitched) {
         _logSwitched = true;
@@ -314,11 +319,11 @@ void Esp8266BaseNTP::_finishSync(time_t t) {
 // 公开查询
 // ----------------------------------------------------------------------------
 bool Esp8266BaseNTP::isSynced() {
-    return _synced;
+    return timestamp() != 0;
 }
 
 bool Esp8266BaseNTP::hasMeasuredUncertainty() {
-    return _synced && _uncertaintyMeasured;
+    return isSynced() && _uncertaintyMeasured;
 }
 
 uint32_t Esp8266BaseNTP::lastSyncRttMs() {
@@ -330,18 +335,18 @@ uint16_t Esp8266BaseNTP::estimatedUncertaintyMs() {
 }
 
 uint32_t Esp8266BaseNTP::timestamp() {
-    if (!_synced) return 0;
-    return (uint32_t)time(nullptr);
+    const time_t current = time(nullptr);
+    return _synced && current >= 1000000000UL && static_cast<uint64_t>(current) <= UINT32_MAX
+        ? static_cast<uint32_t>(current) : 0;
 }
 
 bool Esp8266BaseNTP::formatTo(char* out, size_t len, const char* fmt) {
     if (!out || !len || !fmt) return false;
     out[0] = '\0';
-    if (!_synced) return false;
+    if (!isSynced()) return false;
     time_t t = time(nullptr);
     struct tm* tm_info = localtime(&t);
-    strftime(out, len, fmt, tm_info);
-    return true;
+    return tm_info && strftime(out, len, fmt, tm_info) != 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -351,6 +356,10 @@ bool Esp8266BaseNTP::formatTo(char* out, size_t len, const char* fmt) {
 // ----------------------------------------------------------------------------
 const char* Esp8266BaseNTP::_timeStr() {
     static char buf[20];  // "YYYY-MM-DD HH:MM:SS\0" = 20 字节
+    if (!isSynced()) {
+        snprintf(buf, sizeof(buf), "%lu", static_cast<unsigned long>(millis()));
+        return buf;
+    }
     time_t t = time(nullptr);
     struct tm* tm_info = localtime(&t);
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_info);

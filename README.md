@@ -301,3 +301,7 @@ tools/test_all.sh --all-envs
 4. `docs/11_maintainer_guide.md` — 维护规则与发布检查
 
 查接口：`docs/03_api_reference.md`。专题细节：`docs/05_config_storage.md`、`docs/06_web_ota.md`、`docs/08_networking.md`、`docs/09_power_watchdog.md`。
+
+网络边界包括主动 NTP 请求匹配、当前时钟有效性门控及限时完整写入；相关资源与验证限制见 [网络管理](docs/08_networking.md)。
+
+网络与 LOCAL 当前验证结果、资源及未覆盖范围见 [验证结果](docs/12_validation_results.md)。

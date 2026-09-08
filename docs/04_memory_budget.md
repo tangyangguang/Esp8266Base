@@ -46,7 +46,7 @@
 | Esp8266BaseOTA | <= 160B | 上传状态/计时 + 两阶段准备租约状态 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
 | Esp8266BaseFilesystem | <= 1B 自有状态 | LittleFS 挂载生命周期；文件系统实现的动态成本属于 Core |
 | Esp8266BaseMQTT | 默认 <= 2.4KB；768B 出站上限时 <= 2.9KB | 默认两个约 664B 固定出站槽；每槽 payload 可从 512B 增到最多 768B，超出部分放入独立 <=256B tail；另有约 429B RX 状态/窗口、固定配置/回调、假在线恢复计数/冷却、14B 最近恢复快照、`WiFiClientSecure` 对象和 80B TLS 错误文本；不含动态 TLS/证书 |
-| Esp8266BaseNTP | <= 224B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 + 7B RTT/误差证据 |
+| Esp8266BaseNTP | <= 232B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 + 8B 请求匹配标识 + 7B RTT/误差证据 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
 | Esp8266BaseWatchdog | <= 144B DRAM + 28B RTC | SDK timer + heartbeat/阶段 + timeout/pause/count + application-ready 计时 + 两套预算 + 最近拒绝快照 + 两个安全函数指针；RTC user memory word 64-70 保存恢复原因、预算与校验 |

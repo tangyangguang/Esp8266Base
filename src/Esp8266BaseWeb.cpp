@@ -4,6 +4,7 @@
 #endif
 #if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
+#include "Esp8266BaseStreamWrite.h"
 #include "Esp8266BaseLog.h"
 #if ESP8266BASE_USE_FILELOG
 #include "Esp8266BaseFileLog.h"
@@ -1003,7 +1004,7 @@ void Esp8266BaseWeb::sendHeader() {
     WiFiClient& client = _server.client();
     client.setNoDelay(true);
     client.setTimeout(1500);
-    client.print(F("HTTP/1.1 200 OK\r\n"
+    sendContent_P(PSTR("HTTP/1.1 200 OK\r\n"
                    "Content-Type: text/html; charset=utf-8\r\n"
                    "Connection: close\r\n"
                    "Cache-Control: no-store\r\n\r\n"));
@@ -1067,29 +1068,39 @@ void Esp8266BaseWeb::sendFooter() {
     yield();
 }
 
+// Whole API-call budget; keep the 1500ms SDK write timeout separate.
+// A page may require many acknowledged 127-byte writes over normal WiFi.
+static bool _writeWebBytes(WiFiClient& client, const uint8_t* data,
+                           size_t length, uint32_t startedMs) {
+    const bool ok = Esp8266BaseInternal::writeAll(
+        client, data, length, startedMs, 30000UL,
+        []() { return millis(); }, []() { yield(); });
+    if (!ok) client.stop();
+    return ok;
+}
+
 void Esp8266BaseWeb::sendContent_P(PGM_P content) {
-    // 单遍从 PROGMEM 逐字节读取并分块发送，避免 strlen_P 二次遍历
+    if (!content || !_server.client().connected()) return;
+    const uint32_t startedMs = millis();
+    // One pass over PROGMEM, one timeout budget for this string.
     char buf[128];
     size_t chunk = 0;
     uint8_t c;
     while ((c = pgm_read_byte(content++)) != 0) {
-        buf[chunk++] = (char)c;
+        buf[chunk++] = static_cast<char>(c);
         if (chunk == sizeof(buf) - 1) {
-            _server.client().write((const uint8_t*)buf, chunk);
-            yield();
+            if (!_writeWebBytes(_server.client(), reinterpret_cast<const uint8_t*>(buf), chunk, startedMs)) return;
             chunk = 0;
         }
     }
     if (chunk > 0) {
-        _server.client().write((const uint8_t*)buf, chunk);
-        yield();
+        _writeWebBytes(_server.client(), reinterpret_cast<const uint8_t*>(buf), chunk, startedMs);
     }
 }
 
 void Esp8266BaseWeb::sendChunk(const char* content) {
     if (content) {
-        _server.client().write((const uint8_t*)content, strlen(content));
-        yield();
+        _writeWebBytes(_server.client(), reinterpret_cast<const uint8_t*>(content), strlen(content), millis());
     }
 }
 
@@ -1670,7 +1681,7 @@ void Esp8266BaseWeb::_handleTerminalDispatch() {
 }
 #endif
 
-static void _sendJsonString(WiFiClient& client, const char* value) {
+static bool _sendJsonString(WiFiClient& client, const char* value, uint32_t startedMs) {
     char chunk[64];
     size_t used = 0;
     chunk[used++] = '"';
@@ -1680,7 +1691,7 @@ static void _sendJsonString(WiFiClient& client, const char* value) {
             const uint8_t ch = *p++;
             const size_t needed = (ch == '"' || ch == '\\') ? 2U : (ch < 0x20 ? 6U : 1U);
             if (used + needed > sizeof(chunk)) {
-                client.write(reinterpret_cast<const uint8_t*>(chunk), used);
+                if (!_writeWebBytes(client, reinterpret_cast<const uint8_t*>(chunk), used, startedMs)) return false;
                 used = 0;
             }
             if (ch == '"' || ch == '\\') {
@@ -1701,11 +1712,11 @@ static void _sendJsonString(WiFiClient& client, const char* value) {
         }
     }
     if (used == sizeof(chunk)) {
-        client.write(reinterpret_cast<const uint8_t*>(chunk), used);
+        if (!_writeWebBytes(client, reinterpret_cast<const uint8_t*>(chunk), used, startedMs)) return false;
         used = 0;
     }
     chunk[used++] = '"';
-    client.write(reinterpret_cast<const uint8_t*>(chunk), used);
+    return _writeWebBytes(client, reinterpret_cast<const uint8_t*>(chunk), used, startedMs);
 }
 
 void Esp8266BaseWeb::_handleHealth() {
@@ -1773,19 +1784,21 @@ void Esp8266BaseWeb::_handleHealth() {
     // 用户名、密码或证书。
     WiFiClient& client = _server.client();
     client.setNoDelay(true);
-    client.print(F("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                   "Connection: close\r\nCache-Control: no-store\r\n\r\n"));
+    client.setTimeout(1500);
+    sendContent_P(PSTR("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                       "Connection: close\r\nCache-Control: no-store\r\n\r\n"));
+    const uint32_t startedMs = millis();
     char json[160];
     snprintf(json, sizeof(json),
              "{\"hostname\":\"%s\",\"firmware\":\"%s\",\"version\":\"%s\",\"uptime\":%lu,"
              "\"heap\":%u,\"maxBlock\":%u,",
              Esp8266Base::hostname(), _fwName, _fwVersion, millis() / 1000UL,
              (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
-    client.write((const uint8_t*)json, strlen(json));
+    if (!_writeWebBytes(client, reinterpret_cast<const uint8_t*>(json), strlen(json), startedMs)) return;
     snprintf(json, sizeof(json),
              "\"wifi\":\"%s\",\"wifiSsid\":", wifiState);
-    client.write((const uint8_t*)json, strlen(json));
-    _sendJsonString(client, Esp8266BaseWiFi::isConnected() ? Esp8266BaseWiFi::ssid() : "");
+    if (!_writeWebBytes(client, reinterpret_cast<const uint8_t*>(json), strlen(json), startedMs)) return;
+    if (!_sendJsonString(client, Esp8266BaseWiFi::isConnected() ? Esp8266BaseWiFi::ssid() : "", startedMs)) return;
     snprintf(json, sizeof(json),
              ",\"wifiRssi\":%d,\"ip\":\"%s\",\"ntp\":\"%s\","
              "\"wifiAttempt\":%u,\"wifiRadioReset\":%u,"
@@ -1794,25 +1807,25 @@ void Esp8266BaseWeb::_handleHealth() {
              (unsigned)Esp8266BaseWiFi::attemptCount(),
              (unsigned)Esp8266BaseWiFi::radioResetCount(),
              mqttState, mqttConnected ? "true" : "false");
-    client.write((const uint8_t*)json, strlen(json));
+    if (!_writeWebBytes(client, reinterpret_cast<const uint8_t*>(json), strlen(json), startedMs)) return;
     snprintf(json, sizeof(json),
              "\"mqttAttempt\":%lu,\"mqttLastReason\":\"%s\",\"mqttTlsError\":%d,"
              "\"lastWdtReset\":%s,\"otaInProgress\":%s,",
              (unsigned long)mqttAttempt, mqttReason, mqttTlsError,
              lastWdtReset ? "true" : "false", otaInProgress ? "true" : "false");
-    client.write((const uint8_t*)json, strlen(json));
+    if (!_writeWebBytes(client, reinterpret_cast<const uint8_t*>(json), strlen(json), startedMs)) return;
 #if ESP8266BASE_USE_WATCHDOG
     snprintf(json, sizeof(json),
              "\"recoveryCause\":%u,\"recoveryPhase\":%u,\"recoveryBudget\":%u,",
              (unsigned)Esp8266BaseWatchdog::lastRecoveryCause(),
              (unsigned)Esp8266BaseWatchdog::lastStallPhase(),
              (unsigned)Esp8266BaseWatchdog::consecutiveRecoveryRestarts());
-    client.write((const uint8_t*)json, strlen(json));
+    if (!_writeWebBytes(client, reinterpret_cast<const uint8_t*>(json), strlen(json), startedMs)) return;
 #endif
     snprintf(json, sizeof(json),
              "\"diagLevel\":\"%s\",\"diagBrief\":\"%s\"}",
              diagLevel, diagBrief);
-    client.write((const uint8_t*)json, strlen(json));
+    if (!_writeWebBytes(client, reinterpret_cast<const uint8_t*>(json), strlen(json), startedMs)) return;
     client.flush();
     client.stop();
 }

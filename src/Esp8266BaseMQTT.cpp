@@ -2,6 +2,7 @@
 #if ESP8266BASE_USE_MQTT
 
 #include "Esp8266BaseMQTT.h"
+#include "Esp8266BaseStreamWrite.h"
 #if ESP8266BASE_USE_WEB
 #include "Esp8266BaseWeb.h"
 #endif
@@ -92,17 +93,9 @@ static uint8_t encodeRemainingLength(uint32_t value, uint8_t out[4]) {
 static bool writeExact(const uint8_t* data, size_t length) {
     if (length == 0) return true;
     if (!data || !transportOpen) return false;
-    size_t written = 0;
-    const uint32_t deadline = millis() + ESP8266BASE_MQTT_CONNECT_TIMEOUT_MS;
-    while (written < length) {
-        const size_t count = client.write(data + written, length - written);
-        if (count > 0) {
-            written += count;
-            continue;
-        }
-        if (!client.connected() || static_cast<int32_t>(millis() - deadline) >= 0) return false;
-        yield();
-    }
+    if (!Esp8266BaseInternal::writeAll(client, data, length, millis(),
+                                       ESP8266BASE_MQTT_CONNECT_TIMEOUT_MS,
+                                       []() { return millis(); }, []() { yield(); })) return false;
     lastIoAt = millis();
     return true;
 }
