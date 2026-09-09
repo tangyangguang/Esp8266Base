@@ -19,9 +19,9 @@ ESP8266 专用轻量基础库。RAM 优先设计，仅支持 ESP8266 Arduino Cor
 | Web 管理页面打开 | >= 18KB |
 | OTA 上传过程中 | >= 12KB |
 | AP 配网模式 | >= 18KB |
-| MQTT/TLS Terminal，已连接稳态 | 不设未实测的固定值；同时记录 heap、max block 和栈低水位 |
+| MQTT/TLS Terminal，已连接稳态 | 准入目标：heap >=5KiB、max block >=3KiB；请求谷值 >=1KiB，另记录栈低水位 |
 
-这些是硬件运行时目标，不能只用 PlatformIO 编译阶段的 RAM 用量替代；发布前仍以 `docs/04_memory_budget.md` 的规则和硬件验收为准。
+这些是准入目标而非本库各示例已通过的实测结论，不能用PlatformIO静态RAM替代。ESP8266 Web+MQTT/TLS按ESP12F继电器实测经验统一遵守[资源准入基线](docs/04_memory_budget.md#esp8266-web--mqtttls-接入准入基线)：整份固件静态RAM不超过66%，继承TLS/lwIP/Web保护组合、小块增量解析和共享工作区原则，后续型号同样适用。SDK必须适应这些约束，不能要求设备放宽以维持网页和远程MQTT可用。
 
 ---
 
@@ -269,7 +269,7 @@ Esp8266BaseLog::enableConfigReadAudit(false);
 tools/test_all.sh
 ```
 
-默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、源码契约/顺序检查、纯退避与受控下线转换向量、OTA 上传脚本的 curl 兼容/失败语义回归，并编译根项目及全部示例的 `esp12f` 环境；`mqtt_terminal` 独立覆盖正式模式。它不动态验证 DNS/TLS、真实 broker PUBACK/retained/LWT 顺序或设备端 OTA。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
+默认测试不烧录、不访问串口、不要求 ESP12F 在线。它执行格式、源码契约/顺序检查、纯退避与受控下线转换向量、OTA 上传脚本的 curl 兼容/失败语义回归，并编译根项目及全部示例的 `esp12f` 环境；同时对三个MQTT示例环境运行 `tools/check_resource_budget.py` 的54067B静态门禁（不替代实机）；`mqtt_terminal` 独立覆盖正式模式。它不动态验证 DNS/TLS、真实 broker PUBACK/retained/LWT 顺序或设备端 OTA。`--all-envs` 还编译根项目和可用示例的 `nodemcuv2` 环境：
 
 ```bash
 tools/test_all.sh --all-envs

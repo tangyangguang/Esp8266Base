@@ -1,7 +1,7 @@
 # Esp8266Base RAM 预算与控制规则
 
 > 版本：1.0.0
-> 本文档是所有开发决策的资源约束基准。任何实现与 RAM 目标冲突时，以 **RAM 目标优先**。
+> 本文档是ESP8266基础库及其SDK/应用接入的资源约束基准。可靠性与资源门禁必须同时满足；冲突时停止准入并修正实现，不得削减TLS、重连、Web、WDT或存储保护来换取通过。
 
 ---
 
@@ -27,9 +27,45 @@
 | Web 管理页面打开时 | >= 18KB |
 | OTA 上传过程中最低值 | >= 12KB |
 | AP 配网模式 | >= 18KB |
-| MQTT/TLS Terminal 已连接 | 不使用普通设备 24KB 目标代替实测；记录 heap、max block、栈低水位 |
+| MQTT/TLS Terminal 已连接 | 请求间稳态heap >= 5120B、最大连续块 >= 3072B；请求谷值 >= 1024B，详见下方准入基线 |
 
 ---
+
+## ESP8266 Web + MQTT/TLS 接入准入基线
+
+2026-09-09用户明确：以[ESP12F继电器实测规范](../../../devices/esp12f-relay/docs/03-内存与稳定性约束.md)为经验依据，后续ESP8266设备直接继承以下基线，不能要求业务放宽内存约束来迁就SDK。原设备证据不自动成为其他型号、固件或当前Base示例的实机验收；每个最终组合仍须独立验证。LOCAL不因本规范强制启用MQTT。
+
+| 项目 | 不可放宽的准入要求 |
+| --- | --- |
+| 整份固件静态DRAM | `.data + .rodata + .bss <= 54067B`，即80KiB的66%；按整数比较，不使用显示百分比四舍五入 |
+| TLS在线、Web请求间 | free heap >= 5120B |
+| Web单请求谷值 | free heap >= 1024B，不能只用请求结束后的health快照代替 |
+| 最大连续空闲块（`/health`采样） | >= 3072B，同时记录最小栈剩余、主循环最大间隔及重连后的变化 |
+| 稳定性 | 无崩溃、异常复位或无预算重启；MQTT在高频Web压力下可短暂掉线，但必须恢复且本地功能可用 |
+| OTA | 先满足安全guard与MQTT释放条件，写入窗口heap >= 12KiB；普通TLS稳态目标不能代替OTA窗口目标 |
+
+保护组合须整体保留：BearSSL RX/TX `4096/1024`，低内存终端构建采用 `PBUF_POOL_SIZE=7`、`MEMP_NUM_TCP_PCB=4`，Web listener backlog=1，预解析heap/block闸门为 `4608/3072`，流式响应保持sync写；Web活跃3秒内不发起新DNS/TCP/TLS建连，常规Journal/慢FS诊断同样错峰。不能改成明文、换承载、放大lwIP池、关闭闸门或用无预算复位掩盖资源不足。现有Base提供可配置机制，不表示任意配置均已通过这个准入基线。Basic Auth与表单CSRF不得移除；favicon/apple-touch图标请求保持免认证204，避免额外请求成本。
+
+接入实现要求：
+
+- Web采用单页服务端流式输出、表单与PRG；页面约2KiB以内，不引入JS、持续轮询、大String或多份页面缓冲。Web请求栈上不增加超过100B的临时数组，不构造大JSON文档。
+- MQTT按小块增量消费（已验证输入窗口64B），不把完整命令复制到接收缓存后再逐槽保存原始JSON。完整命令容量与分块窗口是不同概念，不能把768B输入上限缩成64B来声称节省。
+- 命令保存受控、紧凑的语义字段；UUID/时间/reason不逐槽复制成显示字符串。去重、同ID冲突检测、活动命令保留、过期和失败证据仍完整，不能用有碰撞的短摘要替代语义校验。
+- 不并发使用的Web/MQTT编码复用有界工作区，不为SDK新增第二份完整页面/JSON常驻缓冲；按最坏合法报文证明容量，不按平均样本或平台16KiB上限预分配。
+- 继电器的75B Topic、614B上行、615B共享工作区、12项紧凑账本与128KiB历史是该型号的已验证布局，不作为其他型号业务字段的固定模板。其他型号仍必须守住上表和保护组合，并证明自己的字段、命令并发与历史容量；不得靠静默减少已有型号容量通过。
+- 同一事实只保留一份持久Store；容器/平台头/业务编码的总成本一起核算，不把层间重复字段或额外ACK文件藏在SDK之外。
+
+静态门禁（从本库运行，参数指定实际产物和对应工具链）：
+
+```sh
+python3 tools/check_resource_budget.py \
+  --elf examples/mqtt_terminal/.pio/build/esp12f/firmware.elf \
+  --size-tool "$HOME/.platformio/packages/toolchain-xtensa/bin/xtensa-lx106-elf-size"
+```
+
+工具读取目标ELF并按PlatformIO espressif8266的RAM口径检查；超限、非目标ELF或不完整size输出返回非零。`tools/test_all.sh`对三个MQTT示例环境执行此门禁。输出明确为 `static_only`，通过不表示TLS/Web运行可用。
+
+实机准入沿用继电器方法：先确认真实TLS/MQTT在线，再以三个独立客户端（两个业务页面、一个favicon）各按0.2～1.2秒间隔，连续3×180秒测试，目标约550～700请求/180秒；无重启/异常，保护性503占比不超过1%，与超时/连接错误等真实失败分别统计。同步检查上述堆/连续块/栈、MQTT恢复、认证/CSRF、本地业务和OTA往返；弱信号约-70dBm再验证完整响应与MQTT收发。无相应设备/环境证据时保持待验，不把静态门禁或短测说成长稳通过。
 
 ## 三、全局静态 RAM 预算表
 
@@ -82,7 +118,7 @@
 
 Journal 的常规趋势与事件下刷会在 Web 最后活跃后的 3 秒安静窗口再执行，避免 LittleFS `File` 临时分配与 TLS 在线的 Web 响应峰值重叠。固定 RAM ring 在此期间保留待写记录；ring 已满时常规记录宁可明确增加 drop 计数，也不在 Web 压力窗口强行打开文件。同步恢复路径显式调用的 `recordNow()` 仍可在重启前强制持久化；独立异步 heartbeat 回调不得调用它或访问 LittleFS。
 
-Web listener 默认 `ESP8266BASE_WEB_TCP_BACKLOG=1`。这是堆闸门的前置保护：ESP8266 Core 的 `WiFiServer::_accept()` 在 SDK context、HTTP hook 运行前即以 `new ClientContext` 接收 peer，低堆时默认 backlog 5 会先抛 OOM，hook 无法补救。backlog 1 只允许一个已 accept peer，其余并发留在 TCP backlog，由单线程 Web handler 依次消费；允许配置 1～2，但扩大值必须以目标固件 TLS 在线并发测试证明不会越过运行时堆红线。基础库先调用 WebServer `close()` 初始化请求状态与 Authorization header 收集，再以自定义 backlog 启动底层 listener，不能省略此前置步骤。预解析 hook 对已接收客户端启用 `WiFiClient` sync 写，每次响应写入等待 ACK 且不保留临时 TCP 发送副本，避免流式页面在通过闸门后与 MQTT/TLS、另一个已接收 peer 叠加发送堆；这是低堆稳定性约束，不得在未完成目标固件并发压测时关闭。
+Web listener 默认 `ESP8266BASE_WEB_TCP_BACKLOG=1`。这是堆闸门的前置保护：ESP8266 Core 的 `WiFiServer::_accept()` 在 SDK context、HTTP hook 运行前即以 `new ClientContext` 接收 peer，低堆时默认 backlog 5 会先抛 OOM，hook 无法补救。backlog 1 只允许一个已 accept peer，其余并发留在 TCP backlog，由单线程 Web handler 依次消费；API允许配置1～2，但本节MQTT/TLS准入基线只采用1；扩大值必须取得用户明确授权，并以目标固件TLS在线并发测试证明不会越过运行时堆红线。基础库先调用 WebServer `close()` 初始化请求状态与 Authorization header 收集，再以自定义 backlog 启动底层 listener，不能省略此前置步骤。预解析 hook 对已接收客户端启用 `WiFiClient` sync 写，每次响应写入等待 ACK 且不保留临时 TCP 发送副本，避免流式页面在通过闸门后与 MQTT/TLS、另一个已接收 peer 叠加发送堆；这是低堆稳定性约束，不得在未完成目标固件并发压测时关闭。
 
 | MQTT_TERMINAL 真机场景 | Free heap | Max block | 状态 |
 |---|---:|---:|---|
@@ -170,7 +206,7 @@ static String _hostname;
 ESP8266 默认栈约 4KB：
 
 - 日志格式化缓冲（128B）在栈上分配，不要在多层嵌套中重叠持有
-- Web handler 中临时缓冲优先保持 <= 96B；JSON 响应等少数固定格式可使用 <= 160B 栈缓冲，但不要跨 helper 保存指针
+- Web handler临时缓冲优先保持 <=96B，请求路径按新接入基线不新增超过100B的栈数组，不跨helper保存指针。旧实现中128/160B的固定JSON响应缓冲须在接入复审中逐项核对、收缩，不再以历史160B例外为新增实现背书；本轮确立规范和静态门禁不表示这些运行路径已全部调整或复验
 - MQTT CONNECT/PUBLISH 采用分段写入，不在栈上组装整包；最大固定入站窗口位于静态 RAM
 - 禁止递归（快速消耗栈）
 
@@ -198,7 +234,7 @@ LittleFS 写入会阻塞 CPU 约 1-5ms：
 
 关注两个指标：
 - `heap`：当前总空闲堆
-- `maxBlock`：最大连续空闲块；低于 8KB 时说明碎片化严重
+- `maxBlock`：最大连续空闲块；按当前场景准入值与实际连续分配需求判断，单凭低于8KB不能断言碎片化严重
 - `wifiSsid` / `wifiRssi`：当前 STA WiFi 名称和 RSSI(dBm)，用于对比弱网下的请求与 OTA 速度；`/health` 无需认证，因此 SSID 对同一局域网可见
 
 维护要求：新增模块或新增常驻状态时，必须同步本文件的预算表，并在 `docs/11_maintainer_guide.md` 的发布检查中确认构建后的 RAM 用量没有突破目标。

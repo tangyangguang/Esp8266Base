@@ -26,6 +26,7 @@ run() {
 run git diff --check
 run bash tools/check_static.sh
 run python3 tools/check_logic.py
+run python3 tools/test_resource_budget.py
 run python3 tools/test_local_recovery.py
 run python3 tools/test_mqtt_prepare.py
 run bash tools/test_record_store.sh
@@ -51,6 +52,12 @@ done
 run bash -lc "cd 'examples/mqtt_terminal' && pio run -e esp12f-no-fs -j1"
 run bash -lc "cd 'examples/mqtt_terminal' && pio run -e esp12f-store -j1"
 run bash -lc "cd 'examples/full_demo' && pio run -e esp12f-no-filelog -j1"
+
+SIZE_TOOL="${HOME}/.platformio/packages/toolchain-xtensa/bin/xtensa-lx106-elf-size"
+for env in esp12f esp12f-no-fs esp12f-store; do
+  run python3 tools/check_resource_budget.py \
+    --elf "examples/mqtt_terminal/.pio/build/${env}/firmware.elf" --size-tool "$SIZE_TOOL"
+done
 
 NM_TOOL="${HOME}/.platformio/packages/toolchain-xtensa/bin/xtensa-lx106-elf-nm"
 NO_FS_ELF="examples/mqtt_terminal/.pio/build/esp12f-no-fs/firmware.elf"

@@ -59,7 +59,7 @@ macOS 上 `pio device monitor` 可能有 termios 问题；串口监视优先用 
 
 ## 6. RAM 与实现硬约束
 
-- RAM 预算以 `docs/04_memory_budget.md` 为唯一权威来源。
+- RAM 预算以 `docs/04_memory_budget.md` 为唯一权威来源。ESP8266 Web+MQTT/TLS及后续设备接入必须继承其中由ESP12F继电器实测形成的准入基线；SDK/应用适应资源约束，不得反向放宽内存、TLS/lwIP/Web保护或降低既有产品容量来通过。静态门禁和真实并发验收分别完成，不能互相替代。
 - 禁止单个全局/静态缓冲超过 512B；Web handler 临时缓冲优先 <= 64B。
 - HTML 必须放 `PROGMEM`，不得放 DRAM。
 - Web 必须用 `sendContent_P()` / `sendChunk()` 流式输出，不拼整页 `String`。
