@@ -1024,4 +1024,4 @@ topic最大128B、payload沿用MQTT原上限，QoS只能0/1，非零payload必�
 
 ## 可选可靠 Record Store
 
-通过 `ESP8266BASE_USE_RECORD_STORE=1` 启用，Filesystem挂载后由应用显式begin。固定宽度/容量/世代、全部API、非事务故障语义、维护暂停、磁盘格式及恢复规则见 [通用可靠记录存储](13_record_store.md)。该模块不依赖Config、Journal、MQTT或平台。
+通过 `ESP8266BASE_USE_RECORD_STORE=1` 启用，Filesystem挂载后由应用显式begin。固定宽度/容量/世代、受限暂存导入、正逆序读取、全部API、故障语义、维护暂停、磁盘格式及恢复规则见 [通用可靠记录存储](13_record_store.md)。该模块不依赖Config、Journal、MQTT或平台。

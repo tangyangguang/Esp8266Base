@@ -17,13 +17,23 @@ enum class Esp8266BaseRecordStoreResult : uint8_t {
 class Esp8266BaseRecordStore {
 public:
     static bool begin(const Esp8266BaseRecordStoreConfig& config);
-    // 唯一破坏性入口：清除 /eb_records 下本模块文件；新世代由调用方提供，非零16B。
+    // 替换正式Store的唯一破坏性入口：清除本模块文件；新世代由调用方提供，非零16B。
     static bool rebuild(const Esp8266BaseRecordStoreConfig& config, const uint8_t generation[16]);
+    // 显式导入到未启用暂存区；已有正式meta时拒绝。重试仅清理同世代暂存。
+    // firstPhysicalId必须为1+k*recordsPerSegment；前缀由调用方证明可释放。
+    static bool beginImport(const Esp8266BaseRecordStoreConfig& config,
+                            const uint8_t generation[16], uint64_t firstPhysicalId = 1);
+    static bool appendImport(const uint8_t* payload, size_t length, uint64_t& id);
+    // 校验完整条数、CRC及释放范围后，以正式meta提交作为唯一启用点。
+    // 源数据/业务连续性由调用方核对；成功前普通读写与isReady均不可用。
+    static bool commitImport(uint32_t expectedRecords, uint64_t releasedThrough);
     // 只复制本次固定宽度 payload。失败后 id=0；IO/CORRUPT 必须 begin 重扫后再写。
     static bool append(const uint8_t* payload, size_t length, uint64_t& id);
     static bool readById(uint64_t id, uint8_t* payload, size_t capacity);
     // 返回最小的 id > afterId，含已释放但尚未回收的记录；无记录返回 NOT_FOUND。
     static bool readNext(uint64_t afterId, uint64_t& id, uint8_t* payload, size_t capacity);
+    // 最大的id < beforeId，自动跨空洞；从UINT64_MAX开始可逆序查询。
+    static bool readPrevious(uint64_t beforeId, uint64_t& id, uint8_t* payload, size_t capacity);
     static bool releaseThrough(uint64_t id); // RAM 水位；调用者保证此前事实已被确认
     static bool checkpoint();               // 无变化不写；轮转前自动保存
     static void prepareMaintenance();       // 检查点失败可诊断，但仍暂停写入以允许恢复动作

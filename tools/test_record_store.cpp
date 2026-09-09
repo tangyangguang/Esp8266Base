@@ -20,6 +20,102 @@ void reset() {
     Store::resumeAfterMaintenance(); disk.clear(); denyRename.clear(); denyRemove.clear(); writeBudget=-1;
     availableBytes=1024*1024; assert(Store::rebuild(config,generation));
 }
+void testImport() {
+    const std::vector<uint8_t> source={7,8,9};
+    const auto fresh=[&]() {
+        Store::resumeAfterMaintenance(); disk.clear(); denyRename.clear(); denyRemove.clear();
+        writeBudget=-1; availableBytes=1024*1024;
+        assert(!Store::begin(config));
+        disk["/history/h0.bin"]=source;
+    };
+    fresh(); uint64_t id=99;
+    assert(!Store::beginImport(config,generation,2)); // Segment ranges stay aligned to 1.
+    assert(!Store::beginImport(config,generation,UINT64_MAX));
+    assert(Store::beginImport(config,generation,3));
+    assert(!Store::isReady() && Store::releasedThrough()==0);
+    uint8_t copied[16]; assert(!Store::copyGeneration(copied));
+    assert(!Store::append(payload,8,id) && id==0);
+    assert(!Store::checkpoint() && !Store::releaseThrough(0));
+    assert(!Store::readNext(0,id,output,sizeof(output)) && id==0);
+    assert(Store::appendImport(payload,8,id) && id==3);
+    assert(!Store::commitImport(2,2));
+    assert(!Store::commitImport(1,1));
+    assert(!Store::commitImport(1,4));
+    assert(!disk.count("/eb_records/meta"));
+    assert(!Store::begin(config)); // Reboot cannot activate a partial import.
+    auto before=disk;
+    uint8_t other[16]={99};
+    assert(!Store::beginImport(config,other,3) && disk==before);
+    assert(!Store::rebuild(config,generation) && disk==before);
+    assert(Store::beginImport(config,generation,3)); // Same generation, inactive copy only.
+    assert(Store::appendImport(payload,8,id) && id==3);
+    assert(Store::appendImport(payload,8,id) && id==4);
+    assert(Store::commitImport(2,3));
+    assert(Store::isReady() && Store::releasedThrough()==3);
+    assert(Store::begin(config));
+    assert(Store::copyGeneration(copied) && !memcmp(copied,generation,16));
+    assert(Store::readNext(0,id,output,sizeof(output)) && id==3);
+    assert(Store::readNext(id,id,output,sizeof(output)) && id==4);
+    assert(Store::readPrevious(UINT64_MAX,id,output,sizeof(output)) && id==4);
+    assert(Store::readPrevious(id,id,output,sizeof(output)) && id==3);
+    assert(!Store::readPrevious(id,id,output,sizeof(output)) && id==0 && Store::lastResult()==R::NOT_FOUND);
+    assert(!Store::readPrevious(0,id,output,sizeof(output)) && id==0);
+    before=disk;
+    assert(!Store::beginImport(config,generation,3) && disk==before);
+    assert(!Store::beginImport(config,other,3) && disk==before);
+    assert(!Store::appendImport(payload,8,id) && id==0);
+    assert(disk["/history/h0.bin"]==source);
+
+    fresh(); disk["/eb_records/s0"]={1,2,3}; before=disk;
+    assert(!Store::beginImport(config,generation) && disk==before); // Unowned orphan: preserve.
+    fresh(); disk["/eb_records/meta"]={1,2,3}; before=disk;
+    assert(!Store::beginImport(config,generation) && disk==before); // Corrupt active: preserve.
+    fresh(); disk["/eb_records/import"]={1,2,3}; before=disk;
+    assert(!Store::beginImport(config,generation) && disk==before);
+
+    fresh(); writeBudget=63;
+    assert(!Store::beginImport(config,generation,3));
+    assert(!Store::begin(config)); writeBudget=-1;
+    assert(Store::beginImport(config,generation,3)); // Torn initial marker had no segments.
+    writeBudget=115; // Staging meta64 + segment48 + partial payload3.
+    assert(!Store::appendImport(payload,8,id) && !Store::isReady());
+    writeBudget=-1; assert(!Store::commitImport(0,2));
+    assert(!Store::begin(config));
+    assert(Store::beginImport(config,generation,3));
+    assert(Store::appendImport(payload,8,id) && id==3);
+    disk["/eb_records/s0"][48]^=1;
+    assert(!Store::commitImport(1,2) && Store::lastResult()==R::CORRUPT);
+    assert(!disk.count("/eb_records/meta"));
+    assert(Store::beginImport(config,generation,3));
+    assert(Store::appendImport(payload,8,id));
+    denyRename="/eb_records/meta";
+    assert(!Store::commitImport(1,2) && !Store::isReady());
+    assert(!Store::begin(config)); denyRename.clear();
+    assert(Store::beginImport(config,generation,3));
+    assert(Store::appendImport(payload,8,id) && id==3);
+    denyRemove="/eb_records/import";
+    assert(Store::commitImport(1,2)); // Cleanup failure is not a failed activation.
+    assert(disk.count("/eb_records/import"));
+    assert(Store::begin(config) && Store::releasedThrough()==2);
+    before=disk;
+    assert(!Store::beginImport(config,generation,3) && disk==before);
+    assert(disk["/history/h0.bin"]==source);
+    denyRemove.clear();
+
+    fresh(); assert(Store::beginImport(config,generation,3));
+    for (uint64_t n=3;n<=6;++n) assert(Store::appendImport(payload,8,id) && id==n);
+    assert(!Store::appendImport(payload,8,id) && Store::lastResult()==R::FULL);
+    assert(Store::commitImport(4,2) && Store::begin(config));
+    assert(Store::readById(3,output,sizeof(output)) && Store::readById(6,output,sizeof(output)));
+    fresh(); assert(Store::beginImport(config,generation));
+    Store::prepareMaintenance();
+    assert(!Store::appendImport(payload,8,id) && Store::lastResult()==R::PAUSED);
+    assert(!Store::commitImport(0,0) && Store::lastResult()==R::PAUSED);
+    Store::resumeAfterMaintenance();
+    assert(Store::commitImport(0,0) && Store::begin(config));
+    assert(disk["/history/h0.bin"]==source);
+    puts("Import staging, retained prefix, retry, corruption, atomic activation and source preservation passed");
+}
 int main() {
     assert(uint32_t(~crc(reinterpret_cast<const uint8_t*>("123456789"),9))==0xcbf43926UL);
     assert(!Store::begin(config) && Store::lastResult()==R::NOT_FOUND);
@@ -113,4 +209,5 @@ int main() {
     denyRemove="/eb_records/s0"; generation[0]=3;
     assert(!Store::rebuild(wide,generation)); assert(!Store::begin(wide) && Store::lastResult()==R::NOT_FOUND);
     puts("Record Store recovery, cut points, CRC, retention, maintenance, reserve and 300 append/release cycles passed");
+    testImport();
 }

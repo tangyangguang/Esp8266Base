@@ -77,7 +77,7 @@ mDNS初始化失败会按5秒间隔恢复；配置清理失败保留待写值，
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、持续重试与有界 radio 卡态恢复 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |
 | OTA | `Esp8266BaseOTA` | Web OTA 上传、WDT 联动、业务安全生命周期回调 |
-| Record Store | `Esp8266BaseRecordStore` | 可裁剪的单流固定宽度可靠记录、未释放保护及低频检查点；[契约](docs/13_record_store.md) |
+| Record Store | `Esp8266BaseRecordStore` | 可裁剪的单流固定宽度可靠记录、未释放保护、低频检查点、受限导入及逆序查询；[契约](docs/13_record_store.md) |
 | MQTT | `Esp8266BaseMQTT` | 可选 TLS MQTT 传输、门控、退避、OTA 协调和诊断 |
 | NTP | `Esp8266BaseNTP` | 网络对时、日志时间切换 |
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
