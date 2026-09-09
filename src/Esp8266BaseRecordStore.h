@@ -17,16 +17,8 @@ enum class Esp8266BaseRecordStoreResult : uint8_t {
 class Esp8266BaseRecordStore {
 public:
     static bool begin(const Esp8266BaseRecordStoreConfig& config);
-    // 替换正式Store的唯一破坏性入口：清除本模块文件；新世代由调用方提供，非零16B。
+    // 唯一破坏性入口：清除 /eb_records 下本模块文件；新世代由调用方提供，非零16B。
     static bool rebuild(const Esp8266BaseRecordStoreConfig& config, const uint8_t generation[16]);
-    // 显式导入到未启用暂存区；已有正式meta时拒绝。重试仅清理同世代暂存。
-    // firstPhysicalId必须为1+k*recordsPerSegment；前缀由调用方证明可释放。
-    static bool beginImport(const Esp8266BaseRecordStoreConfig& config,
-                            const uint8_t generation[16], uint64_t firstPhysicalId = 1);
-    static bool appendImport(const uint8_t* payload, size_t length, uint64_t& id);
-    // 校验完整条数、CRC及释放范围后，以正式meta提交作为唯一启用点。
-    // 源数据/业务连续性由调用方核对；成功前普通读写与isReady均不可用。
-    static bool commitImport(uint32_t expectedRecords, uint64_t releasedThrough);
     // 只复制本次固定宽度 payload。失败后 id=0；IO/CORRUPT 必须 begin 重扫后再写。
     static bool append(const uint8_t* payload, size_t length, uint64_t& id);
     static bool readById(uint64_t id, uint8_t* payload, size_t capacity);

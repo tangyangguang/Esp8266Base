@@ -13,7 +13,7 @@ struct StoreState {
     Esp8266BaseRecordStoreConfig config;
     uint8_t generation[16];
     uint64_t released, savedRelease, nextFirst;
-    bool ready, paused, importing;
+    bool ready, paused;
     Result result, maintenance;
 };
 static StoreState store = {};
@@ -22,8 +22,6 @@ constexpr size_t META_BYTES = 64, SEGMENT_BYTES = 48;
 const char* const META = "/eb_records/meta";
 const char* const META_TMP = "/eb_records/meta.tmp";
 const char* const SEGMENT_TMP = "/eb_records/segment.tmp";
-const char* const IMPORT = "/eb_records/import";
-const char* const IMPORT_TMP = "/eb_records/import.tmp";
 
 bool fail(Result result, bool fatal = false) {
     store.result = result;
@@ -69,20 +67,15 @@ bool writeFile(const char* path, const uint8_t* bytes, size_t size) {
     const bool ok=f && f.size()==size && size<=sizeof(verify) && exact(f,verify,size) && !memcmp(bytes,verify,size);
     f.close(); return ok;
 }
-void encodeMeta(uint8_t bytes[META_BYTES], uint64_t nextFirst) {
-    memset(bytes,0,META_BYTES);
+bool saveMeta(uint64_t nextFirst) {
+    if (!spaceFor(4096)) return false;
+    uint8_t bytes[META_BYTES]={};
     memcpy(bytes,"EBR1",4); put(bytes+4,1,2);
     put(bytes+6,store.config.payloadBytes,2); put(bytes+8,store.config.recordsPerSegment,2);
     bytes[10]=store.config.segmentCount;
     memcpy(bytes+12,store.generation,16); put(bytes+28,store.released,8); put(bytes+36,nextFirst,8);
-    finishHeader(bytes,META_BYTES);
-}
-bool saveMeta(uint64_t nextFirst) {
-    if (!spaceFor(4096)) return false;
-    uint8_t bytes[META_BYTES]; encodeMeta(bytes,nextFirst);
-    const char* tmp=store.importing ? IMPORT_TMP : META_TMP;
-    const char* target=store.importing ? IMPORT : META;
-    if (!writeFile(tmp,bytes,sizeof(bytes)) || !LittleFS.rename(tmp,target)) return fail(Result::IO_ERROR,true);
+    finishHeader(bytes,sizeof(bytes));
+    if (!writeFile(META_TMP,bytes,sizeof(bytes)) || !LittleFS.rename(META_TMP,META)) return fail(Result::IO_ERROR,true);
     store.savedRelease=store.released; store.nextFirst=nextFirst;
     return success();
 }
@@ -190,7 +183,7 @@ bool Esp8266BaseRecordStore::rebuild(const Esp8266BaseRecordStoreConfig& config,
     bool nonzero=false; if (generation) for (uint8_t i=0;i<16;++i) nonzero |= generation[i]!=0;
     if (!validConfig(config) || !nonzero) return fail(Result::INVALID_ARGUMENT);
     if (!Esp8266BaseFilesystem::isReady()) return fail(Result::NOT_READY);
-    File existing=LittleFS.open(LittleFS.exists(META) ? META : IMPORT,"r");
+    File existing=LittleFS.open(META,"r");
     if (existing) {
         uint8_t previous[META_BYTES];
         const bool same=existing.size()==sizeof(previous) && exact(existing,previous,sizeof(previous)) &&
@@ -203,7 +196,7 @@ bool Esp8266BaseRecordStore::rebuild(const Esp8266BaseRecordStoreConfig& config,
     store={}; store.config=config; memcpy(store.generation,newGeneration,16);
     if (!LittleFS.exists("/eb_records") && !LittleFS.mkdir("/eb_records")) return fail(Result::IO_ERROR);
     // Remove metadata first. Interrupted rebuild can never appear as the old valid store.
-    const char* fixed[]={META,META_TMP,SEGMENT_TMP,IMPORT,IMPORT_TMP};
+    const char* fixed[]={META,META_TMP,SEGMENT_TMP};
     for (const char* path:fixed) if (LittleFS.exists(path) && !LittleFS.remove(path)) return fail(Result::IO_ERROR);
     for (uint8_t i=0;i<8;++i) {
         char path[24]; segmentPath(i,path);
@@ -212,94 +205,7 @@ bool Esp8266BaseRecordStore::rebuild(const Esp8266BaseRecordStoreConfig& config,
     if (!saveMeta(1)) return false;
     store.ready=true; return success();
 }
-bool Esp8266BaseRecordStore::beginImport(const Esp8266BaseRecordStoreConfig& config,
-                                        const uint8_t generation[16], uint64_t firstPhysicalId) {
-    if (store.paused) return fail(Result::PAUSED);
-    bool nonzero=false;
-    if (generation) for (uint8_t i=0;i<16;++i) nonzero |= generation[i]!=0;
-    if (!validConfig(config) || !nonzero || !firstPhysicalId ||
-        (firstPhysicalId-1)%config.recordsPerSegment ||
-        firstPhysicalId>UINT64_MAX-uint64_t(config.recordsPerSegment)*config.segmentCount)
-        return fail(Result::INVALID_ARGUMENT);
-    if (!Esp8266BaseFilesystem::isReady()) return fail(Result::NOT_READY);
-    // Even a corrupt active metadata file is not permission to replace a store.
-    if (LittleFS.exists(META)) return fail(Result::INVALID_ARGUMENT);
-    const bool retry=LittleFS.exists(IMPORT);
-    if (retry) {
-        uint8_t previous[META_BYTES]; File f=LittleFS.open(IMPORT,"r");
-        const bool valid=f && f.size()==sizeof(previous) && exact(f,previous,sizeof(previous)) &&
-            validHeader(previous,sizeof(previous),"EBR1") && get(previous+4,2)==1;
-        f.close();
-        if (!valid) return fail(Result::CORRUPT);
-        if (memcmp(previous+12,generation,16)) return fail(Result::INVALID_ARGUMENT);
-        if (get(previous+6,2)!=config.payloadBytes || get(previous+8,2)!=config.recordsPerSegment ||
-            previous[10]!=config.segmentCount) return fail(Result::CONFIG_MISMATCH);
-    } else {
-        // No import marker: do not mistake an orphaned/corrupt old store for our staging files.
-        if (LittleFS.exists(META_TMP) || LittleFS.exists(SEGMENT_TMP)) return fail(Result::CORRUPT);
-        for (uint8_t i=0;i<8;++i) {
-            char path[24]; segmentPath(i,path);
-            if (LittleFS.exists(path)) return fail(Result::CORRUPT);
-        }
-    }
-    uint8_t newGeneration[16]; memcpy(newGeneration,generation,16);
-    store={}; store.config=config; memcpy(store.generation,newGeneration,16);
-    store.importing=true; store.released=firstPhysicalId-1;
-    if (!LittleFS.exists("/eb_records") && !LittleFS.mkdir("/eb_records")) return fail(Result::IO_ERROR);
-    if (retry) {
-        // The validated marker owns these inactive files. Never delete a source or active meta.
-        const char* temporary[]={META_TMP,SEGMENT_TMP,IMPORT_TMP};
-        for (const char* path:temporary)
-            if (LittleFS.exists(path) && !LittleFS.remove(path)) return fail(Result::IO_ERROR);
-        for (uint8_t i=0;i<8;++i) {
-            char path[24]; segmentPath(i,path);
-            if (LittleFS.exists(path) && !LittleFS.remove(path)) return fail(Result::IO_ERROR);
-        }
-    }
-    // Publish staging ownership before append can create any segment.
-    if (!saveMeta(firstPhysicalId)) return false;
-    store.ready=true; return success();
-}
-
-bool Esp8266BaseRecordStore::commitImport(uint32_t expectedRecords, uint64_t releasedThrough) {
-    if (store.paused) return fail(Result::PAUSED);
-    if (!store.ready || !store.importing) return fail(Result::NOT_READY);
-    if (LittleFS.exists(META)) return fail(Result::INVALID_ARGUMENT,true);
-    uint32_t count=0; uint64_t latest=store.released;
-    for (uint8_t i=0;i<store.config.segmentCount;++i) {
-        const Segment& s=store.segments[i];
-        count+=s.count;
-        if (s.count && s.first+s.count-1>latest) latest=s.first+s.count-1;
-    }
-    if (count!=expectedRecords || releasedThrough<store.released || releasedThrough>latest ||
-        (!count && store.released)) return fail(Result::INVALID_ARGUMENT);
-    // Revalidate the entire inactive copy before the sole activation point.
-    for (uint8_t i=0;i<store.config.segmentCount;++i) {
-        const Segment& s=store.segments[i]; if (!s.first) continue;
-        char path[24]; segmentPath(i,path); File f=LittleFS.open(path,"r");
-        uint8_t header[SEGMENT_BYTES];
-        if (!f || f.size()!=SEGMENT_BYTES+size_t(s.count)*(store.config.payloadBytes+4) ||
-            !exact(f,header,sizeof(header)) || !validHeader(header,sizeof(header),"EBS1") ||
-            get(header+4,2)!=1 || get(header+6,2)!=i || memcmp(header+8,store.generation,16) ||
-            get(header+24,8)!=s.first || get(header+32,2)!=store.config.payloadBytes ||
-            get(header+34,2)!=store.config.recordsPerSegment) return fail(Result::CORRUPT,true);
-        for (uint16_t n=0;n<s.count;++n) {
-            if (!verifyRecord(f,s.first+n,nullptr)) return fail(Result::CORRUPT,true);
-            yield();
-        }
-    }
-    if (!spaceFor(4096)) return false;
-    store.released=releasedThrough;
-    uint8_t bytes[META_BYTES]; encodeMeta(bytes,store.nextFirst);
-    if (!writeFile(META_TMP,bytes,sizeof(bytes)) || !LittleFS.rename(META_TMP,META))
-        return fail(Result::IO_ERROR,true);
-    store.savedRelease=store.released; store.importing=false;
-    // A leftover marker is harmless: active META always wins and blocks new imports.
-    LittleFS.remove(IMPORT);
-    return success();
-}
-
-static bool appendRecord(const uint8_t* payload, size_t length, uint64_t& id) {
+bool Esp8266BaseRecordStore::append(const uint8_t* payload, size_t length, uint64_t& id) {
     id=0;
     if (store.paused) return fail(Result::PAUSED);
     if (!store.ready) return fail(Result::NOT_READY);
@@ -322,21 +228,9 @@ static bool appendRecord(const uint8_t* payload, size_t length, uint64_t& id) {
     if (!f || f.size()!=offset+length+4 || !f.seek(offset,SeekSet) || !verifyRecord(f,candidate,nullptr)) return fail(Result::IO_ERROR,true);
     ++segment.count; id=candidate; return success();
 }
-bool Esp8266BaseRecordStore::append(const uint8_t* payload, size_t length, uint64_t& id) {
-    id=0;
-    if (store.paused) return fail(Result::PAUSED);
-    if (store.importing) return fail(Result::NOT_READY);
-    return appendRecord(payload,length,id);
-}
-bool Esp8266BaseRecordStore::appendImport(const uint8_t* payload, size_t length, uint64_t& id) {
-    id=0;
-    if (store.paused) return fail(Result::PAUSED);
-    if (!store.importing) return fail(Result::NOT_READY);
-    return appendRecord(payload,length,id);
-}
 bool Esp8266BaseRecordStore::readById(uint64_t id, uint8_t* payload, size_t capacity) {
     if (store.paused) return fail(Result::PAUSED);
-    if (!store.ready || store.importing) return fail(Result::NOT_READY);
+    if (!store.ready) return fail(Result::NOT_READY);
     if (!payload || capacity<store.config.payloadBytes || !id) return fail(Result::INVALID_ARGUMENT);
     for (uint8_t i=0;i<store.config.segmentCount;++i) {
         const Segment& s=store.segments[i];
@@ -352,7 +246,7 @@ bool Esp8266BaseRecordStore::readById(uint64_t id, uint8_t* payload, size_t capa
 bool Esp8266BaseRecordStore::readNext(uint64_t afterId, uint64_t& id, uint8_t* payload, size_t capacity) {
     id=0;
     if (store.paused) return fail(Result::PAUSED);
-    if (!store.ready || store.importing) return fail(Result::NOT_READY);
+    if (!store.ready) return fail(Result::NOT_READY);
     if (!payload || capacity<store.config.payloadBytes) return fail(Result::INVALID_ARGUMENT);
     uint64_t next=0;
     for (uint8_t i=0;i<store.config.segmentCount;++i) {
@@ -369,7 +263,7 @@ bool Esp8266BaseRecordStore::readPrevious(uint64_t beforeId, uint64_t& id,
                                          uint8_t* payload, size_t capacity) {
     id=0;
     if (store.paused) return fail(Result::PAUSED);
-    if (!store.ready || store.importing) return fail(Result::NOT_READY);
+    if (!store.ready) return fail(Result::NOT_READY);
     if (!payload || capacity<store.config.payloadBytes) return fail(Result::INVALID_ARGUMENT);
     uint64_t previous=0;
     for (uint8_t i=0;i<store.config.segmentCount;++i) {
@@ -385,7 +279,7 @@ bool Esp8266BaseRecordStore::readPrevious(uint64_t beforeId, uint64_t& id,
 }
 bool Esp8266BaseRecordStore::releaseThrough(uint64_t id) {
     if (store.paused) return fail(Result::PAUSED);
-    if (!store.ready || store.importing) return fail(Result::NOT_READY);
+    if (!store.ready) return fail(Result::NOT_READY);
     uint64_t latest=store.released;
     for (uint8_t i=0;i<store.config.segmentCount;++i) {
         const Segment& s=store.segments[i];
@@ -397,7 +291,7 @@ bool Esp8266BaseRecordStore::releaseThrough(uint64_t id) {
 }
 bool Esp8266BaseRecordStore::checkpoint() {
     if (store.paused) return fail(Result::PAUSED);
-    if (!store.ready || store.importing) return fail(Result::NOT_READY);
+    if (!store.ready) return fail(Result::NOT_READY);
     return store.released==store.savedRelease ? success() : saveMeta(store.nextFirst);
 }
 void Esp8266BaseRecordStore::prepareMaintenance() {
@@ -410,13 +304,13 @@ void Esp8266BaseRecordStore::prepareMaintenance() {
     store.paused=true;
 }
 void Esp8266BaseRecordStore::resumeAfterMaintenance() { store.paused=false; }
-bool Esp8266BaseRecordStore::isReady() { return store.ready && !store.importing; }
+bool Esp8266BaseRecordStore::isReady() { return store.ready; }
 bool Esp8266BaseRecordStore::isPaused() { return store.paused; }
 Esp8266BaseRecordStoreResult Esp8266BaseRecordStore::lastResult() { return store.result; }
 Esp8266BaseRecordStoreResult Esp8266BaseRecordStore::maintenanceResult() { return store.maintenance; }
-uint64_t Esp8266BaseRecordStore::releasedThrough() { return store.importing ? 0 : store.released; }
+uint64_t Esp8266BaseRecordStore::releasedThrough() { return store.released; }
 bool Esp8266BaseRecordStore::copyGeneration(uint8_t output[16]) {
-    if (!output || !store.ready || store.importing) return false;
+    if (!output || !store.ready) return false;
     memcpy(output,store.generation,16); return true;
 }
 #endif
