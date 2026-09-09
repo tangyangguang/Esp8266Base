@@ -72,7 +72,7 @@ mDNS初始化失败会按5秒间隔恢复；配置清理失败保留待写值，
 | 模块 | 类名 | 主要职责 |
 |------|------|----------|
 | 主入口 | `Esp8266Base` | 初始化协调、统一 handle |
-| 日志 | `Esp8266BaseLog` | 串口日志、编译期等级、时间戳 |
+| 日志 | `Esp8266BaseLog` | 串口日志、编译期等级、时间戳；网络固定日志模板驻Flash |
 | 配置 | `Esp8266BaseConfig` | LittleFS KV 存储、deferred 写入 |
 | WiFi | `Esp8266BaseWiFi` | STA 连接、AP 配网、持续重试与有界 radio 卡态恢复 |
 | Web | `Esp8266BaseWeb` | 极简管理页、Basic Auth、内置改密、应用扩展 |

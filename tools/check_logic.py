@@ -1285,7 +1285,16 @@ def test_web_home_contract() -> None:
         fail("full_demo deep sleep response must not build a full HTML page in a stack buffer")
 
 
+def test_network_log_literals_in_flash() -> None:
+    # Guard the fixed-text call sites, not the public API for dynamic formats.
+    ordinary_literal = re.compile(r'ESP8266BASE_LOG_[DIWE]\(\s*"[^"]*"\s*,\s*"')
+    for name in ("Esp8266BaseWiFi.cpp", "Esp8266BaseNTP.cpp", "Esp8266BaseMQTT.cpp"):
+        if ordinary_literal.search((ROOT / "src" / name).read_text()):
+            fail(f"{name}: fixed network log formats must use the existing _P macro")
+
+
 def main() -> None:
+    test_network_log_literals_in_flash()
     test_format_bytes()
     test_journal_heap_precision()
     test_log_file_buffer_rules()

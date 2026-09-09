@@ -45,15 +45,15 @@ bool Esp8266BaseWiFi::begin() {
 #if ESP8266BASE_WIFI_NO_SLEEP
     // 显式关闭 modem sleep（电台常开）：零省电，用于弱信号排障或低延迟场景。
     WiFi.setSleepMode(WIFI_NONE_SLEEP);
-    ESP8266BASE_LOG_I("WiFi", "sleep_policy=none reason=explicit_no_sleep");
+    ESP8266BASE_LOG_I_P("WiFi", "sleep_policy=none reason=explicit_no_sleep");
 #else
     // 显式 modem-sleep MIN 级（setSleepMode 第二参 0 => 最小睡眠级）：
     // 每个 DTIM 醒一次收 beacon，省电与稳定性平衡，不依赖 SDK 隐性默认；
     // 不启用 MAX 级（按 listen interval 长睡会放大弱信号丢 beacon/deauth 风险）。
     WiFi.setSleepMode(WIFI_MODEM_SLEEP);
-    ESP8266BASE_LOG_I("WiFi", "sleep_policy=modem_sleep_min level=min_dtim_wake");
+    ESP8266BASE_LOG_I_P("WiFi", "sleep_policy=modem_sleep_min level=min_dtim_wake");
 #endif
-    ESP8266BASE_LOG_I("WiFi", "wifi_retry_policy connect_timeout=%lus sta_settle=%ums stuck_disconnected=%lus fast_retry=%lus fast_count=%u slow_retry=%lus radio_reset_failures=%u radio_settle=%ums",
+    ESP8266BASE_LOG_I_P("WiFi", "wifi_retry_policy connect_timeout=%lus sta_settle=%ums stuck_disconnected=%lus fast_retry=%lus fast_count=%u slow_retry=%lus radio_reset_failures=%u radio_settle=%ums",
                       (unsigned long)(ESP8266BASE_WIFI_CONNECT_TIMEOUT / 1000UL),
                       (unsigned)ESP8266BASE_WIFI_STA_SETTLE_MS,
                       (unsigned long)(ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS / 1000UL),
@@ -72,12 +72,12 @@ bool Esp8266BaseWiFi::begin() {
 #if ESP8266BASE_USE_WIFI_CONFIG
         Esp8266BaseConfig::getStr(ESP8266BASE_CFG_KEY_WIFI_PASS, _staPass, sizeof(_staPass), "");
 #endif
-        ESP8266BASE_LOG_I("WiFi", "loaded_saved_wifi_credentials ssid=%s password=[redacted] password_length=%u",
+        ESP8266BASE_LOG_I_P("WiFi", "loaded_saved_wifi_credentials ssid=%s password=[redacted] password_length=%u",
                           _staSSID, (unsigned)strlen(_staPass));
         _startSTA(_staSSID, _staPass);
     } else {
         // 无凭证，直接进入 AP 配网
-        ESP8266BASE_LOG_I("WiFi", "no_saved_wifi_credentials starting_config_ap ssid=%s", _apSSID);
+        ESP8266BASE_LOG_I_P("WiFi", "no_saved_wifi_credentials starting_config_ap ssid=%s", _apSSID);
         _startAP();
     }
 
@@ -111,7 +111,7 @@ void Esp8266BaseWiFi::handle() {
                 now - _connectStart >= ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS &&
                 ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS < ESP8266BASE_WIFI_CONNECT_TIMEOUT) {
                 if (_stuckRestarted) {
-                    ESP8266BASE_LOG_W("WiFi",
+                    ESP8266BASE_LOG_W_P("WiFi",
                                       "station_connect_stuck_retrying ssid=%s status=%s status_code=%u elapsed=%lums restart_count=1 rssi=%d",
                                       _staSSID,
                                       _statusName(status),
@@ -122,7 +122,7 @@ void Esp8266BaseWiFi::handle() {
                     _scheduleRetry();
                     break;
                 }
-                ESP8266BASE_LOG_W("WiFi",
+                ESP8266BASE_LOG_W_P("WiFi",
                                   "station_connect_stuck_restarting ssid=%s status=%s status_code=%u elapsed=%lums restart_count=1 rssi=%d",
                                   _staSSID,
                                   _statusName(status),
@@ -136,7 +136,7 @@ void Esp8266BaseWiFi::handle() {
             }
 
             if (now - _connectStart >= ESP8266BASE_WIFI_CONNECT_TIMEOUT) {
-                ESP8266BASE_LOG_W("WiFi",
+                ESP8266BASE_LOG_W_P("WiFi",
                                   "station_connect_timeout ssid=%s status=%s status_code=%u elapsed=%lums rssi=%d",
                                   _staSSID,
                                   _statusName(status),
@@ -155,7 +155,7 @@ void Esp8266BaseWiFi::handle() {
 #if ESP8266BASE_USE_JOURNAL
                 Esp8266BaseJournal::record(JNL_WIFI_LOST, static_cast<uint8_t>(status), 0, 0, 0);
 #endif
-                ESP8266BASE_LOG_W("WiFi",
+                ESP8266BASE_LOG_W_P("WiFi",
                                   "station_connection_lost status=%s status_code=%u last_ip=%s rssi=%d reconnecting_with_saved_credentials",
                                   _statusName(status), (unsigned)status, _ip, (int)WiFi.RSSI());
                 _ip[0]      = '\0';
@@ -185,11 +185,11 @@ void Esp8266BaseWiFi::handle() {
 bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
     size_t ssidLen = ssid ? strlen(ssid) : 0;
     if (ssidLen == 0) {
-        ESP8266BASE_LOG_W("WiFi", "connect_rejected reason=empty_ssid");
+        ESP8266BASE_LOG_W_P("WiFi", "connect_rejected reason=empty_ssid");
         return false;
     }
     if (ssidLen > 32) {
-        ESP8266BASE_LOG_W("WiFi", "connect_rejected reason=ssid_too_long length=%u max=32",
+        ESP8266BASE_LOG_W_P("WiFi", "connect_rejected reason=ssid_too_long length=%u max=32",
                           (unsigned)ssidLen);
         return false;
     }
@@ -197,7 +197,7 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
     const char* safePass = pass ? pass : "";
     size_t passLen = strlen(safePass);
     if (passLen > 63) {
-        ESP8266BASE_LOG_W("WiFi", "connect_rejected reason=password_too_long length=%u max=63",
+        ESP8266BASE_LOG_W_P("WiFi", "connect_rejected reason=password_too_long length=%u max=63",
                           (unsigned)passLen);
         return false;
     }
@@ -209,11 +209,11 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
     bool ssidSaved = true;
     bool passSaved = true;
 #endif
-    ESP8266BASE_LOG_I("WiFi", "saving_wifi_credentials ssid=%s password=[redacted] password_length=%u ssid_saved=%s password_saved=%s",
+    ESP8266BASE_LOG_I_P("WiFi", "saving_wifi_credentials ssid=%s password=[redacted] password_length=%u ssid_saved=%s password_saved=%s",
                       ssid, (unsigned)passLen,
                       ssidSaved ? "yes" : "no", passSaved ? "yes" : "no");
     if (!ssidSaved || !passSaved) {
-        ESP8266BASE_LOG_E("WiFi", "connect_rejected reason=failed_to_save_credentials");
+        ESP8266BASE_LOG_E_P("WiFi", "connect_rejected reason=failed_to_save_credentials");
         return false;
     }
 
@@ -245,7 +245,7 @@ bool Esp8266BaseWiFi::clearCredentials() {
 #endif
     _staSSID[0] = '\0';
     _staPass[0] = '\0';
-    ESP8266BASE_LOG_I("WiFi", "saved_wifi_credentials_cleared");
+    ESP8266BASE_LOG_I_P("WiFi", "saved_wifi_credentials_cleared");
     return true;
 }
 
@@ -300,7 +300,7 @@ uint8_t Esp8266BaseWiFi::radioResetCount() {
 bool Esp8266BaseWiFi::recoverStation() {
     if (_staSSID[0] == '\0' || _state == Esp8266BaseWiFiState::AP_CONFIG) return false;
     _ip[0] = '\0';
-    ESP8266BASE_LOG_W("WiFi", "station_recovery_requested source=upper_transport action=radio_reset");
+    ESP8266BASE_LOG_W_P("WiFi", "station_recovery_requested source=upper_transport action=radio_reset");
     _resetRadioAndStartSTA();
     return true;
 }
@@ -336,14 +336,14 @@ void Esp8266BaseWiFi::_beginSTA(const char* ssid, const char* pass, bool keepAP)
     _retryAt      = millis();   // 立即开始计时
     _stuckRestarted = false;
     uint8_t status = (uint8_t)WiFi.status();
-    ESP8266BASE_LOG_I("WiFi", "station_connecting ssid=%s password=[redacted] password_length=%u keep_config_ap=%s status=%s status_code=%u",
+    ESP8266BASE_LOG_I_P("WiFi", "station_connecting ssid=%s password=[redacted] password_length=%u keep_config_ap=%s status=%s status_code=%u",
                       ssid, (unsigned)(pass ? strlen(pass) : 0),
                       keepAP ? "yes" : "no", _statusName(status), (unsigned)status);
 }
 
 void Esp8266BaseWiFi::_resetRadioAndStartSTA() {
     const uint8_t status = (uint8_t)WiFi.status();
-    ESP8266BASE_LOG_W("WiFi",
+    ESP8266BASE_LOG_W_P("WiFi",
                       "station_radio_reset_begin failures=%u total_attempts=%u status=%s status_code=%u",
                       (unsigned)_failuresSinceRadioReset,
                       (unsigned)_attemptCount,
@@ -365,7 +365,7 @@ void Esp8266BaseWiFi::_resetRadioAndStartSTA() {
 #if ESP8266BASE_USE_JOURNAL
     Esp8266BaseJournal::record(JNL_RADIO_RESET, 0, static_cast<int16_t>(_radioResetCount), 0, 0);
 #endif
-    ESP8266BASE_LOG_W("WiFi",
+    ESP8266BASE_LOG_W_P("WiFi",
                       "station_radio_reset_complete reset_count=%u off=%s sta=%s action=reconnect",
                       (unsigned)_radioResetCount,
                       offOk ? "ok" : "failed",
@@ -388,7 +388,7 @@ void Esp8266BaseWiFi::_startAP() {
     _state = Esp8266BaseWiFiState::AP_CONFIG;
     char apIp[16];
     _formatIP(WiFi.softAPIP(), apIp, sizeof(apIp));
-    ESP8266BASE_LOG_I("WiFi", "config_ap_started ssid=%s ip=%s channel=%d",
+    ESP8266BASE_LOG_I_P("WiFi", "config_ap_started ssid=%s ip=%s channel=%d",
                       _apSSID, apIp, channel);
 }
 
@@ -405,7 +405,7 @@ void Esp8266BaseWiFi::_handleConnected() {
     char dns[16];
     _formatIP(WiFi.gatewayIP(), gateway, sizeof(gateway));
     _formatIP(WiFi.dnsIP(), dns, sizeof(dns));
-    ESP8266BASE_LOG_I("WiFi", "station_connected ip=%s gateway=%s dns=%s rssi=%d",
+    ESP8266BASE_LOG_I_P("WiFi", "station_connected ip=%s gateway=%s dns=%s rssi=%d",
                       _ip, gateway, dns, (int)WiFi.RSSI());
 }
 
@@ -425,7 +425,7 @@ void Esp8266BaseWiFi::_scheduleRetry() {
         ? ESP8266BASE_WIFI_RETRY_FAST
         : ESP8266BASE_WIFI_RETRY_SLOW;
     uint8_t status = (uint8_t)WiFi.status();
-    ESP8266BASE_LOG_W("WiFi", "station_reconnect_scheduled attempt=%d retry_in=%lus mode=%s status=%s status_code=%u rssi=%d",
+    ESP8266BASE_LOG_W_P("WiFi", "station_reconnect_scheduled attempt=%d retry_in=%lus mode=%s status=%s status_code=%u rssi=%d",
                       (int)_retryCount, (unsigned long)(interval / 1000),
                       (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT) ? "fast" : "slow",
                       _statusName(status), (unsigned)status, (int)WiFi.RSSI());

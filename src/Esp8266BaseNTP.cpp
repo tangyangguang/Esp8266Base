@@ -81,7 +81,7 @@ bool Esp8266BaseNTP::begin() {
     _lastSyncRttMs = 0;
     _ntpUdp.stop();
 
-    ESP8266BASE_LOG_I("NTP ", "ntp_client_started timezone=UTC+%d servers=%s,%s,%s check_interval=5s manual_udp=yes",
+    ESP8266BASE_LOG_I_P("NTP ", "ntp_client_started timezone=UTC+%d servers=%s,%s,%s check_interval=5s manual_udp=yes",
                       ESP8266BASE_NTP_TIMEZONE / 3600, _ntpServer1, _ntpServer2, _ntpServer3);
     return true;
 }
@@ -114,7 +114,7 @@ void Esp8266BaseNTP::handle() {
         _sendManual(now);
         if (!_synced && (now - _lastPendingLogMs >= 30000UL || _lastPendingLogMs == 0)) {
             _lastPendingLogMs = now;
-            ESP8266BASE_LOG_W("NTP ", "ntp_sync_pending elapsed=%lus raw_time=%lu sntp_enabled=%s reach=%03o/%03o/%03o manual_waiting=%s next_check=5s",
+            ESP8266BASE_LOG_W_P("NTP ", "ntp_sync_pending elapsed=%lus raw_time=%lu sntp_enabled=%s reach=%03o/%03o/%03o manual_waiting=%s next_check=5s",
                               (unsigned long)((now - _startedMs) / 1000UL),
                               (unsigned long)t,
                               sntp_enabled() ? "yes" : "no",
@@ -145,14 +145,14 @@ void Esp8266BaseNTP::reset() {
     _uncertaintyMeasured = false;
     _estimatedUncertaintyMs = 0;
     _lastSyncRttMs = 0;
-    ESP8266BASE_LOG_I("NTP ", "ntp_client_reset reason=wifi_disconnected");
+    ESP8266BASE_LOG_I_P("NTP ", "ntp_client_reset reason=wifi_disconnected");
 }
 
 bool Esp8266BaseNTP::_pollManual(uint32_t now) {
     if (_manualWaiting && now - _manualSentMs >= 3000UL) {
         char ip[16];
         _formatIP(_manualIp, ip, sizeof(ip));
-        ESP8266BASE_LOG_W("NTP ", "manual_ntp_timeout server_index=%u ip=%s timeout=3s",
+        ESP8266BASE_LOG_W_P("NTP ", "manual_ntp_timeout server_index=%u ip=%s timeout=3s",
                           (unsigned)_manualServer, ip);
         _manualWaiting = false;
         _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
@@ -175,7 +175,7 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
             char expected[16];
             _formatIP(remoteIp, remote, sizeof(remote));
             _formatIP(_manualIp, expected, sizeof(expected));
-            ESP8266BASE_LOG_W("NTP ", "manual_ntp_packet_rejected remote=%s port=%u expected=%s mode=%u leap=%u stratum=%u waiting=%s",
+            ESP8266BASE_LOG_W_P("NTP ", "manual_ntp_packet_rejected remote=%s port=%u expected=%s mode=%u leap=%u stratum=%u waiting=%s",
                               remote, (unsigned)remotePort, expected,
                               (unsigned)mode, (unsigned)leap, (unsigned)stratum,
                               _manualWaiting ? "yes" : "no");
@@ -208,7 +208,7 @@ bool Esp8266BaseNTP::_pollManual(uint32_t now) {
             _uncertaintyMeasured = true;
             char ip[16];
             _formatIP(_manualIp, ip, sizeof(ip));
-            ESP8266BASE_LOG_I("NTP ", "manual_ntp_synchronized server_index=%u ip=%s rtt=%lums uncertainty_estimate=%ums",
+            ESP8266BASE_LOG_I_P("NTP ", "manual_ntp_synchronized server_index=%u ip=%s rtt=%lums uncertainty_estimate=%ums",
                               (unsigned)_manualServer,
                               ip,
                               (unsigned long)rttMs,
@@ -238,7 +238,7 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
     Esp8266BaseWatchdog::feed();
 #endif
     if (dnsOk != 1 || !_manualIp.isSet()) {
-        ESP8266BASE_LOG_W("NTP ", "manual_ntp_dns_failed server=%s", server);
+        ESP8266BASE_LOG_W_P("NTP ", "manual_ntp_dns_failed server=%s", server);
         _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
         _nextManualMs = millis() + 30000UL;
         return;
@@ -264,10 +264,10 @@ void Esp8266BaseNTP::_sendManual(uint32_t now) {
     _manualSentMs = millis();
     if (packetReady && _ntpUdp.endPacket()) {
         _manualWaiting = true;
-        ESP8266BASE_LOG_I("NTP ", "manual_ntp_request server=%s ip=%s",
+        ESP8266BASE_LOG_I_P("NTP ", "manual_ntp_request server=%s ip=%s",
                           server, ip);
     } else {
-        ESP8266BASE_LOG_W("NTP ", "manual_ntp_send_failed server=%s ip=%s",
+        ESP8266BASE_LOG_W_P("NTP ", "manual_ntp_send_failed server=%s ip=%s",
                           server, ip);
         _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
         _nextManualMs = millis() + 5000UL;
@@ -303,15 +303,15 @@ void Esp8266BaseNTP::_finishSync(time_t t) {
         strftime(bootBuf, sizeof(bootBuf), "%Y-%m-%d %H:%M:%S", bootTm);
     }
 
-    ESP8266BASE_LOG_I("NTP ", "time_synchronized actual_time=%s uptime_ms=%lu boot_time=%s",
+    ESP8266BASE_LOG_I_P("NTP ", "time_synchronized actual_time=%s uptime_ms=%lu boot_time=%s",
                       nowBuf, (unsigned long)uptimeMs, bootBuf);
-    ESP8266BASE_LOG_I("NTP ", "time_mapping boot_millis=0 actual_time=%s current_millis=%lu current_time=%s",
+    ESP8266BASE_LOG_I_P("NTP ", "time_mapping boot_millis=0 actual_time=%s current_millis=%lu current_time=%s",
                       bootBuf, (unsigned long)uptimeMs, nowBuf);
 
     if (!_logSwitched) {
         _logSwitched = true;
         Esp8266BaseLog::setTimeProvider(_timeStr);
-        ESP8266BASE_LOG_I("NTP ", "log_timestamp_mode=absolute_datetime");
+        ESP8266BASE_LOG_I_P("NTP ", "log_timestamp_mode=absolute_datetime");
     }
 }
 

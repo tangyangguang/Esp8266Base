@@ -2,6 +2,12 @@
 
 验证日期：2026-09-08 至 2026-09-09。范围为本库 NTP、MQTT 写入、Web 流式发送及既有 OTA/裁剪回归；不是整个平台接入完成声明。
 
+## 固定网络日志模板的低风险收缩
+
+WiFi/NTP/MQTT的51处普通固定格式调用改为既有 `_P` 宏。与修改前归一化比较，除宏的存储选择外源代码完全一致，全部fmt都是字面量；没有修改格式文字、tag、参数、分支、状态或配置。当前目标ELF中 `vsnprintf_P` 尾调用同一 `vsnprintf` 实现，未新增格式缓冲或堆申请；Base日志分发/截断仍复用原实现。
+
+`python3 tools/check_logic.py`通过，含三个模块的固定模板Flash调用检查。真实消费端 `devices/esp12f-relay` 的 `pio run -e esp12f` 通过：RAM51088B/81920B（62.363%），Flash593759B；相对相同候选改动前少3184B RAM、多68B Flash，54067B静态门禁余2979B。没有重复所有示例/芯片矩阵，没有烧录或实机验证；不能把静态通过当作完整设备可用。日志为本机 `/tmp/esp8266-log-storage-logic.log`、`/tmp/esp12f-sdk-build.log`。
+
 ## ESP8266资源准入与低内存实现
 
 后续ESP8266接入按用户指定的ESP12F继电器实测规范，以 `docs/04_memory_budget.md` 为通用准入入口。静态门禁固定54067B；MQTT默认RX窗口已改为64B，完整入站上限仍为768B。MQTT示例采用既有实测lwIP组合7/4，未改TLS4096/1024、两出站槽、Web闸门/错峰、WDT或存储保护。
