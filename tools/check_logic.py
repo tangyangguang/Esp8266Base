@@ -210,8 +210,8 @@ def test_wifi_retry_rules() -> None:
     if "ESP.restart()" in wifi_cpp:
         fail("WiFi recovery must not reboot the MCU")
     web_cpp = read("src/Esp8266BaseWeb.cpp")
-    require_token(web_cpp, r'\"wifiAttempt\":%u', "health WiFi attempt evidence")
-    require_token(web_cpp, r'\"wifiRadioReset\":%u', "health WiFi radio reset evidence")
+    require_token(web_cpp, 'json.number("wifiAttempt", Esp8266BaseWiFi::attemptCount());', "health WiFi attempt evidence")
+    require_token(web_cpp, 'json.number("wifiRadioReset", Esp8266BaseWiFi::radioResetCount());', "health WiFi radio reset evidence")
     require_token(networking, "不重启 MCU、不清除 Config、不进入 AP",
                   "bounded WiFi radio recovery contract")
     require_token(wifi_cpp, "_isDue(now, _retryAt)", "wrap-safe WiFi retry deadline")
@@ -848,10 +848,14 @@ def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
     health_end = web_cpp.index("void Esp8266BaseWeb::_handleNotFound()", health_start)
     if "lastTlsErrorText" in web_cpp[health_start:health_end]:
         fail("health endpoint must not expose long TLS error text")
-    require_token(web_cpp, "char chunk[64];", "health JSON bounded write buffer")
-    json_writer_start = web_cpp.index("static void _sendJsonString")
-    if "client.write(ch);" in web_cpp[json_writer_start:health_start]:
-        fail("health JSON must not emit one TCP write per SSID byte")
+    web_json = read("src/Esp8266BaseWebJson.h")
+    require_token(web_json, "char chunk_[96];", "health/hostname bounded JSON buffer")
+    require_token(web_cpp, "WebJsonWriter json(_writeWebJson, &output);", "production bounded JSON encoder")
+    require_token(web_cpp, "output.startedMs", "whole-response write budget")
+    if any(int(size) > 100 for size in re.findall(r"\bchar\s+\w+\[(\d+)\]", web_cpp)):
+        fail("Web must not reintroduce >100B temporary character arrays")
+    require_token(web_json, "sink_(reinterpret_cast<const uint8_t*>(chunk_), used_, context_)",
+                  "JSON sink receives buffered chunks, not individual bytes")
 
     require_token(upload_script, "--fail-with-body", "curl body-preserving fail support")
     require_token(upload_script, "exit 22", "legacy curl explicit HTTP failure")
@@ -911,6 +915,8 @@ def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:
                   "ESP8266BASE_USE_WIFI_CONFIG", "ESP8266BASE_USE_WEB_AUTH_CONFIG",
                   "ESP8266BASE_USE_FILELOG"]:
         require_token(options_h, token, f"storage feature switch {token}")
+    for token in ["-DPBUF_POOL_SIZE=7", "-DMEMP_NUM_TCP_PCB=4"]:
+        require_token(terminal_ini, token, "relay-derived MQTT/Web pool configuration")
     require_token(terminal_ini, "[env:esp12f-no-fs]", "no-filesystem terminal build")
     for token in ["-DESP8266BASE_USE_FILESYSTEM=0", "-DESP8266BASE_USE_CONFIG=0",
                   "-DESP8266BASE_USE_FILELOG=0"]:
@@ -931,7 +937,7 @@ def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:
                   "routine Journal flush Web quiet-window gate")
     require_token(journal_cpp, "if (g_ringCount == RING_ENTRIES) _flushPending();",
                   "forced recovery Journal flush remains explicit")
-    require_token(fixed_h, "#define ESP8266BASE_MQTT_RX_CHUNK_BYTES 256",
+    require_token(fixed_h, "#define ESP8266BASE_MQTT_RX_CHUNK_BYTES 64",
                   "streaming receive chunk")
     for token in ["CAPACITY_EXHAUSTED", "PACKET_TOO_LARGE", "PROTOCOL_ERROR"]:
         require_token(mqtt_h, token, f"explicit MQTT error {token}")

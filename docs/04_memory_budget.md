@@ -48,7 +48,7 @@
 
 接入实现要求：
 
-- Web采用单页服务端流式输出、表单与PRG；页面约2KiB以内，不引入JS、持续轮询、大String或多份页面缓冲。Web请求栈上不增加超过100B的临时数组，不构造大JSON文档。
+- TLS常驻时的应用控制/状态/设置页采用单页服务端流式输出、表单与PRG；页面约2KiB以内，不引入JS、持续轮询、大String或多份页面缓冲。请求栈上不增加超过100B的临时数组，不构造大JSON文档。基础库必要的配网、认证和OTA入口仍保留，分别按对应场景预算与并发要求验收，不用业务单页规则删除维护能力或增加后台轮询。
 - MQTT按小块增量消费（已验证输入窗口64B），不把完整命令复制到接收缓存后再逐槽保存原始JSON。完整命令容量与分块窗口是不同概念，不能把768B输入上限缩成64B来声称节省。
 - 命令保存受控、紧凑的语义字段；UUID/时间/reason不逐槽复制成显示字符串。去重、同ID冲突检测、活动命令保留、过期和失败证据仍完整，不能用有碰撞的短摘要替代语义校验。
 - 不并发使用的Web/MQTT编码复用有界工作区，不为SDK新增第二份完整页面/JSON常驻缓冲；按最坏合法报文证明容量，不按平均样本或平台16KiB上限预分配。
@@ -81,7 +81,7 @@ python3 tools/check_resource_budget.py \
 | Esp8266BaseWeb（MQTT_TERMINAL 0+0 路由） | <= 640B | ESP8266WebServer + auth/device/hostname/firmware/active request + 4B 表单令牌；应用数组和完整导航状态均排除 |
 | Esp8266BaseOTA | <= 160B | 上传状态/计时 + 两阶段准备租约状态 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
 | Esp8266BaseFilesystem | <= 1B 自有状态 | LittleFS 挂载生命周期；文件系统实现的动态成本属于 Core |
-| Esp8266BaseMQTT | 默认 <= 2.4KB；768B 出站上限时 <= 2.9KB | 默认两个约 664B 固定出站槽；每槽 payload 可从 512B 增到最多 768B，超出部分放入独立 <=256B tail；另有约 429B RX 状态/窗口、固定配置/回调、假在线恢复计数/冷却、14B 最近恢复快照、`WiFiClientSecure` 对象和 80B TLS 错误文本；不含动态 TLS/证书 |
+| Esp8266BaseMQTT | 默认 <= 2.4KB；768B 出站上限时 <= 2.9KB | 默认两个约 664B 固定出站槽；每槽 payload 可从 512B 增到最多 768B，超出部分放入独立 <=256B tail；另有232B RX状态/窗口（Core3.1.2目标ELF）、固定配置/回调、假在线恢复计数/冷却、14B 最近恢复快照、`WiFiClientSecure` 对象和 80B TLS 错误文本；不含动态 TLS/证书 |
 | Esp8266BaseNTP | <= 232B | 同步状态 + 检查计时器 + 主动 UDP NTP 状态 + 8B 请求匹配标识 + 7B RTT/误差证据 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
@@ -114,7 +114,7 @@ python3 tools/check_resource_budget.py \
 
 这些数值来自本次 PlatformIO 链接结果，只能证明静态 RAM/Flash 趋势。未连接、连接尝试、TLS 已连接和断开后的 free heap/max block 只能在真机测量。重构前同工具链 `mqtt_terminal` 为 45,916B RAM / 512,237B Flash；固定传输版本在保留 Config 的正式组合中减少 1,560B RAM / 10,098B Flash。无文件系统组合相对基线减少 3,952B RAM / 42,390B Flash，但 WiFi 凭据、Web Auth 与业务配置仅在 RAM 中保存，重启即丢失，因此只适合确实无持久化需求的固件。
 
-正式 `MQTT_TERMINAL` 不使用 `espMqttClient`、`EMC_MIN_FREE_MEMORY`、动态 outbox、packet `malloc/new`、`std::function` 或 `std::list`。MQTT 默认边界为 2 个出站槽、128B topic、512B 出站 payload、256B RX 窗口和 768B 入站 payload；出站可在 64～768B 内按封闭业务协议配置，每增加 1B 会按槽位数增加固定 RAM。超过 512B 时每槽使用独立的 512B head 和最多 256B tail，任何单个静态数组仍不超过 512B；仅一个 QoS1 包在途。BearSSL 仍显式保持 4096B RX / 1024B TX。仍会动态分配的第三方边界是 DNS/TCP、BearSSL 证书和 TLS 会话、ESP8266WebServer 的路由/请求参数与 multipart OTA、启用时的 LittleFS/Core；这些峰值和碎片必须真机记录。
+正式 `MQTT_TERMINAL` 不使用 `espMqttClient`、`EMC_MIN_FREE_MEMORY`、动态 outbox、packet `malloc/new`、`std::function` 或 `std::list`。MQTT 默认边界为 2 个出站槽、128B topic、512B出站payload、64B RX窗口和768B入站payload；出站可在 64～768B 内按封闭业务协议配置，每增加 1B 会按槽位数增加固定 RAM。超过 512B 时每槽使用独立的 512B head 和最多 256B tail，任何单个静态数组仍不超过 512B；仅一个 QoS1 包在途。BearSSL 仍显式保持 4096B RX / 1024B TX。仍会动态分配的第三方边界是 DNS/TCP、BearSSL 证书和 TLS 会话、ESP8266WebServer 的路由/请求参数与 multipart OTA、启用时的 LittleFS/Core；这些峰值和碎片必须真机记录。
 
 Journal 的常规趋势与事件下刷会在 Web 最后活跃后的 3 秒安静窗口再执行，避免 LittleFS `File` 临时分配与 TLS 在线的 Web 响应峰值重叠。固定 RAM ring 在此期间保留待写记录；ring 已满时常规记录宁可明确增加 drop 计数，也不在 Web 压力窗口强行打开文件。同步恢复路径显式调用的 `recordNow()` 仍可在重启前强制持久化；独立异步 heartbeat 回调不得调用它或访问 LittleFS。
 
@@ -206,7 +206,7 @@ static String _hostname;
 ESP8266 默认栈约 4KB：
 
 - 日志格式化缓冲（128B）在栈上分配，不要在多层嵌套中重叠持有
-- Web handler临时缓冲优先保持 <=96B，请求路径按新接入基线不新增超过100B的栈数组，不跨helper保存指针。旧实现中128/160B的固定JSON响应缓冲须在接入复审中逐项核对、收缩，不再以历史160B例外为新增实现背书；本轮确立规范和静态门禁不表示这些运行路径已全部调整或复验
+- Web handler临时缓冲优先保持 <=96B，请求路径不新增超过100B的栈数组，不跨helper保存指针。`sendContent_P`已从128B缩到96B；health/hostname响应使用私有WebJsonWriter的96B输出块（目标对象总计<=112B，另有8B sink上下文），不再用160B格式化数组，也不增加全局JSON工作区或堆。只在块满/结束时发送，保留完整写入/整次预算；这些源码/构建边界不代替真实栈低水位及Web并发验证
 - MQTT CONNECT/PUBLISH 采用分段写入，不在栈上组装整包；最大固定入站窗口位于静态 RAM
 - 禁止递归（快速消耗栈）
 
@@ -246,6 +246,6 @@ mDNS失败恢复额外使用一个布尔标志与一个32位失败时间（字�
 
 ## 可选 Record Store 与连接前准备
 
-ESP8266 Core3.1.2 / ESP-12F ELF中 `StoreState` 为192B（nm尺寸0xC0），编译期上限256B。无常驻payload缓存，局部编解码块最大64B；LittleFS本身的打开文件/块缓存资源仍存在，不把192B当作运行峰值。Store默认关闭；默认根项目仍为RAM46,640B/Flash436,624B，符号核对确保未带入Store。
+ESP8266 Core3.1.2 / ESP-12F ELF中 `StoreState` 为192B（nm尺寸0xC0），编译期上限256B。无常驻payload缓存，局部编解码块最大64B；LittleFS本身的打开文件/块缓存资源仍存在，不把192B当作运行峰值。Store默认关闭；Web资源收缩后默认根项目为RAM46,400B/Flash437,056B，Store开关及既有裁剪边界不变。
 
 MQTT准备回调增加一个4B函数指针；LWT复用现有topic缓冲和借用payload，不新增整包缓冲。示例额外64B演示payload与计数、诊断字符串会影响整个固件，不能把示例差值全归为库状态。LOCAL+Store及MQTT+Store组合的完整链接数字见[验证结果](12_validation_results.md)。TLS 4096/1024、固定outbox和恢复阈值保持。

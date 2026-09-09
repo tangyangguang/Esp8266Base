@@ -5,7 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_BIN="$(mktemp /tmp/esp8266base-mqtt-fixed.XXXXXX)"
 TEST_SPLIT_BIN="$(mktemp /tmp/esp8266base-mqtt-fixed-split.XXXXXX)"
 NETWORK_BIN="$(mktemp /tmp/esp8266base-network-helpers.XXXXXX)"
-trap 'rm -f "$TEST_BIN" "$TEST_SPLIT_BIN" "$NETWORK_BIN"' EXIT
+WEB_JSON_BIN="$(mktemp /tmp/esp8266base-web-json.XXXXXX)"
+trap 'rm -f "$TEST_BIN" "$TEST_SPLIT_BIN" "$NETWORK_BIN" "$WEB_JSON_BIN"' EXIT
 
 "${CXX:-c++}" -std=c++11 -Wall -Wextra -Werror \
   "$ROOT_DIR/tools/test_mqtt_fixed.cpp" -o "$TEST_BIN"
@@ -20,3 +21,8 @@ echo "MQTT fixed-memory logic tests passed (default and split payload)."
   "$ROOT_DIR/tools/test_network_helpers.cpp" -o "$NETWORK_BIN"
 "$NETWORK_BIN"
 echo "NTP packet and bounded network writer tests passed."
+
+"${CXX:-c++}" -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  "$ROOT_DIR/tools/test_web_json.cpp" -o "$WEB_JSON_BIN"
+"$WEB_JSON_BIN"
+echo "Bounded Web JSON writer tests passed (ASAN/UBSAN)."

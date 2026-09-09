@@ -2,15 +2,18 @@
 
 验证日期：2026-09-08 至 2026-09-09。范围为本库 NTP、MQTT 写入、Web 流式发送及既有 OTA/裁剪回归；不是整个平台接入完成声明。
 
-## ESP8266资源准入规则与检查器（2026-09-09）
+## ESP8266资源准入与低内存实现
 
-用户指定以ESP12F继电器实测内存/稳定性规范约束后续ESP8266接入，已将通用准入要求落实到 `docs/04_memory_budget.md`，没有修改固件实现、TLS/lwIP配置或设备代码。本阶段仅建立规则和静态门禁，不代表Base现有全部配置、Web内部历史栈缓冲或SDK命令路径已经完成低内存适配。
+后续ESP8266接入按用户指定的ESP12F继电器实测规范，以 `docs/04_memory_budget.md` 为通用准入入口。静态门禁固定54067B；MQTT默认RX窗口已改为64B，完整入站上限仍为768B。MQTT示例采用既有实测lwIP组合7/4，未改TLS4096/1024、两出站槽、Web闸门/错峰、WDT或存储保护。
 
-- `python3 tools/test_resource_budget.py`：5组测试通过，覆盖54067/54068B精确边界、PlatformIO RAM口径、缺失/重复/越界size输出、非目标ELF拒绝和CLI失败退出码。
-- `bash tools/check_static.sh`、`bash -n tools/test_all.sh`与差异格式检查通过。完整矩阵未重跑；`test_all.sh`新增三个MQTT示例ELF的静态预算检查。
-- 检查器在SDK的ESP8266 MQTT实际ELF上报告53376B/65.156%，低于54067B上限；SDK正常及无重新编译的增量构建均执行门禁成功。该数值属于SDK示例，不是本库独占成本或继电器接入结果。
-- `pio pkg pack`产生的86个文件全部属于受管文件；新检查器包含在包内，无私密/构建/缓存产物，临时包已删除。Python缓存同时从Git与发布包排除。
-- 尚无本阶段真实TLS/Web并发、运行堆峰值、OTA往返、烧录或物理设备证据，不能用静态通过替代3×180秒及后续长稳验证。
+Web的PROGMEM发送缓冲改为96B；health/hostname使用私有96B分块JSON编码器，目标对象<=112B，不增加全局缓冲/JSON文档/堆。所有字符串统一转义、数值完整输出，修复合法最长hostname组合超过旧160B格式缓冲而被截断的问题。仍仅按块发送，保持整次正文30秒预算、1500ms SDK写超时和失败关连接；不把它说成完整HTTP硬截止。
+
+- `python3 tools/test_resource_budget.py`：5组通过，包括54067/54068B精确边界、RAM口径、畸形/重复/缺失输出和失败退出码；Base测试入口及SDK8266示例已接线，增量不重链也执行门禁。
+- `bash tools/test_mqtt_fixed.sh`：默认/614B MQTT、生产NTP/完整写helper及新Web JSON ASAN/UBSAN测试通过；包括301种长度、最长hostname、控制字符/UTF-8、整数极值、逐块发送失败后不续写、结束状态和空sink。主机sink不是实机TCP。
+- `python3 tools/test_mqtt_prepare.py`、`python3 tools/check_logic.py`、`bash tools/check_static.sh`及脚本语法/差异检查通过；检查器旧的JSON格式化文本匹配同步更新为实际编码调用及有界块断言。
+- 定向构建：根项目（LOCAL/完整Web）46400B RAM / 437056B Flash；MQTT Terminal 45160B / 515079B；SDK MQTT示例52980B / 544559B。根项目比之前46640B减少240B，SDK示例比53376B减少396B；后者是整份配置的差值，不是SDK独占成本。原生完整矩阵与其他板型未重复。
+- SDK示例静态门禁报告64.673%；这不证明12槽真实产品已适配。当前无这组改动的真实TLS/Web并发、运行峰值、OTA往返或烧录证据，不能替代3×180秒及长稳验证。日志在两库本机 `.cache/resource-*`，不入包。
+- 发布包88个文件均受管且与源码逐字节一致，无私密/构建/Python缓存内容；临时包已删除。
 
 ## 当前实现判断
 
@@ -21,13 +24,13 @@
 
 ## 自动验证
 
-`bash tools/test_all.sh` 集中验证静态约束、契约检查、MQTT 固定内存测试、OTA 上传测试、根项目和六个示例默认环境，以及 MQTT 无文件系统、完整模式无 FileLog 两个裁剪组合。Web 最终调整仅对受影响的已构建环境做增量复查。
+`bash tools/test_all.sh` 是完整入口，包含静态/契约/原生检查、OTA上传工具及根项目、七个示例默认环境和三个裁剪/Store组合。此前完整矩阵证据保留；本次资源收缩只执行上节所列定向检查与三个相关固件构建，下方历史链接数字不能冒充全矩阵重新测量。
 
 新增原生测试直接使用生产 NTP 时间戳解析和网络完整写入代码，覆盖请求匹配/错配、零时间戳、秒字段回绕、小数、部分写、无进展、慢进展、断连和计时回绕。静态检查另核对主动 NTP 的超时与 DNS/发送顺序；这些不是完整 UDP 或 SDK 时钟集成测试。
 
 构建使用 PlatformIO Espressif 8266 4.2.1、Arduino Core 3.1.2、Xtensa GCC 10.3.0、ESP-12E/ESP-12F 目标。资源是链接时静态 RAM 和 Flash，不代表运行堆峰值。
 
-| ESP-12F 构建 | RAM (B) | Flash (B) |
+| NTP/网络修正构建参考（此前测量） | RAM (B) | Flash (B) |
 |---|---:|---:|
 | 根项目 | 46540 | 436412 |
 | basic_wifi | 34240 | 321639 |
@@ -77,7 +80,7 @@ MQTT测试执行生产prepare和handle门控方法，以假transport覆盖初次
 
 集中默认集成测试10个构建通过，随后仅对改动过的MQTT示例增量复测，并新增MQTT+Store组合；当前默认入口包含11个组合。未重复其他Core或NodeMCU矩阵。无新C/C++警告，上游elf2bin.py的Python SyntaxWarning保留。新增Store静态控制状态192B（编译上限256B），关闭时根项目无Store符号且RAM/Flash均不变。未压缩TLS、重连、outbox或OTA保护预算。
 
-| 当前重点组合 | RAM (B) | Flash (B) |
+| 连接准备/Store组合参考（此前测量） | RAM (B) | Flash (B) |
 | --- | ---: | ---: |
 | 根项目，Store关闭 | 46640 | 436624 |
 | record_store，LOCAL+Store | 41124 | 387899 |

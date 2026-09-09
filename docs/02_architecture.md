@@ -205,7 +205,7 @@ struct AppRoute {
 
 业务可用 `setConnectAttemptsEnabled(false)` 暂停后续 DNS/TCP/TLS 新建连接，以保护执行器的本地单调截止。门禁不拆除已建立会话，已连接客户端仍执行 `loop()`；恢复为 `true` 后沿既有退避时间继续。该接口只调整传输调度，不改变 MQTT 协议契约。
 
-MQTT 传输直接使用 `BearSSL::WiFiClientSecure` 实现所需的 MQTT 3.1.1 子集：CONNECT/CONNACK、SUBSCRIBE/SUBACK、QoS0/1 PUBLISH/PUBACK、PING 和 DISCONNECT。两个固定出站槽按 `CRITICAL → EVIDENCE → STATE`、同优先级 FIFO 选择，但任何时刻只有一个 QoS1 包在途；因此业务顺序提交 runtime、overview 时，overview 必须等待 runtime 的匹配 PUBACK。入站 topic 固定 128B，payload 以 256B 窗口分块，单包上限 768B。容量耗尽或越界立即返回明确错误，不分配 heap。
+MQTT 传输直接使用 `BearSSL::WiFiClientSecure` 实现所需的 MQTT 3.1.1 子集：CONNECT/CONNACK、SUBSCRIBE/SUBACK、QoS0/1 PUBLISH/PUBACK、PING 和 DISCONNECT。两个固定出站槽按 `CRITICAL → EVIDENCE → STATE`、同优先级 FIFO 选择，但任何时刻只有一个 QoS1 包在途；因此业务顺序提交 runtime、overview 时，overview 必须等待 runtime 的匹配 PUBACK。入站 topic 固定 128B，payload默认以64B窗口分块，单包上限 768B。容量耗尽或越界立即返回明确错误，不分配 heap。
 
 受控下线是 `CONNECTED → SHUTDOWN_WAIT_ACK → SHUTDOWN_DISCONNECTING → PAUSED` 的单向状态机。`beginShutdown(topic, payload)` 把 retained QoS1 最终消息复制到固定槽；进入后立即禁止新的 publish/subscribe/message/reconnect/readiness。只有固定槽精确匹配最终 packetId 的 PUBACK 才发送正常 MQTT DISCONNECT，随后 flush socket、释放 TLS 并得到 `SUCCESS`；不匹配 PUBACK 不推进。入队失败、连接丢失或 PUBACK 超时保留明确结果和暂停门禁，绝不主动用异常 close 冒充正常成功。业务显式 `resumeAfterShutdown()` 才重新允许连接。
 

@@ -601,7 +601,7 @@ static void resumeAfterShutdown();
 
 支持 QoS 0/1；未连接、受控下线暂停、空参数、非法 QoS、固定槽耗尽或 topic/payload 越界时返回 0。LWT 通过 `Esp8266BaseMQTTConfig::willTopic/willPayload/willQos/willRetain` 配置。subscribeAck 的 `0x80` 表示拒绝；publishAck 对应 QoS1 PUBACK；clientError 包含 `CAPACITY_EXHAUSTED/PACKET_TOO_LARGE/PROTOCOL_ERROR`。message callback 的 `len/index/total` 由固定接收窗口分块产生。
 
-出站默认两个固定槽位，优先级为 `CRITICAL/EVIDENCE/STATE`，同优先级保持 FIFO；任意时刻只有一个 QoS1 包在途，匹配 PUBACK 后才发送下一包。业务按相同优先级顺序提交 runtime、overview 时，overview 必须等待 runtime 的 PUBACK。默认边界是 128B topic、512B 出站 payload、256B RX 分块和 768B 单个入站 payload，均可在允许范围内由构建期宏调整。出站 payload 可配置 64～768B；配置超过 512B 时，每个固定槽位由 512B head 和最多 256B tail 组成，发送时顺序写出，不创建大于 512B 的单个静态数组或额外完整 packet。
+出站默认两个固定槽位，优先级为 `CRITICAL/EVIDENCE/STATE`，同优先级保持 FIFO；任意时刻只有一个 QoS1 包在途，匹配 PUBACK 后才发送下一包。业务按相同优先级顺序提交 runtime、overview 时，overview 必须等待 runtime 的 PUBACK。默认边界是 128B topic、512B 出站 payload、64B RX分块和768B单个入站payload，均可在允许范围内由构建期宏调整。出站 payload 可配置 64～768B；配置超过 512B 时，每个固定槽位由 512B head 和最多 256B tail 组成，发送时顺序写出，不创建大于 512B 的单个静态数组或额外完整 packet。
 
 `requestReconnect(true)` 用于把应用订阅/readiness 失败计入恢复周期，并在下一轮 `handle()` 释放传输；维护或受控生命周期重连使用默认 `false`。CONNACK 不视为应用 ready，只有 `markConnectionReady()` 清除连续恢复计数并恢复初始 2s 退避，同时生成固定大小的最近恢复快照。业务以已消费 serial 调用 `recoveryReport()`，可只持久化一次 duration/failureCycles/radioResetCount，不需要在基础库中注册动态回调。可恢复失败累计 6 次、且距上次恢复至少 15 分钟时调用 `recoverStation()` 退出 SDK 假在线；持续 30 分钟并经历至少 2 次 radio reset 后，通过 Watchdog 请求受 guard 与预算约束的 MCU 恢复。协议、身份、凭据、ACL 和 X509 校验错误不进入 radio/MCU 重启阶梯。
 
@@ -949,7 +949,7 @@ void loop() {
 | `ESP8266BASE_MQTT_TX_SLOTS` | `2` | 固定出站槽位，范围 1-4 |
 | `ESP8266BASE_MQTT_MAX_TOPIC_BYTES` | `128` | MQTT topic 上限 |
 | `ESP8266BASE_MQTT_MAX_PAYLOAD_BYTES` | `512` | 出站 payload 上限；范围 64～768，超过 512 时增加固定 tail RAM |
-| `ESP8266BASE_MQTT_RX_CHUNK_BYTES` | `256` | 入站分块窗口 |
+| `ESP8266BASE_MQTT_RX_CHUNK_BYTES` | `64` | 入站分块窗口；完整入站上限仍为768B |
 | `ESP8266BASE_MQTT_MAX_INBOUND_PAYLOAD_BYTES` | `768` | 入站 payload 上限 |
 | `ESP8266BASE_USE_OTA` | `0` | 编译 OTA；要求 `ESP8266BASE_USE_WEB=1` |
 | `ESP8266BASE_USE_NTP` | `0` | 编译 NTP 对时 |
