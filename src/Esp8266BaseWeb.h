@@ -171,6 +171,7 @@ private:
 
     // 内置路由处理函数（静态，无捕获）
     static void _markRequest();
+    static void _sendIconResponse();
     static void _handleAppPage(uint8_t index);
     static void _handleAppApi(uint8_t index);
     static void _handleAppPage0();

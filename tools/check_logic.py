@@ -1307,7 +1307,25 @@ def test_tls_handshake_admission() -> None:
         require_token(source, token, "TLS working-set memory admission")
 
 
+def test_small_http_replies() -> None:
+    source = read("src/Esp8266BaseWeb.cpp")
+    start = source.index('client->print(F("HTTP/1.1 503')
+    end = source.index("client->flush()", start)
+    pieces = re.findall(r'"((?:\\.|[^"\\])*)"', source[start:end])
+    reply = ''.join(pieces).encode().decode('unicode_escape')
+    header, body = reply.split('\r\n\r\n', 1)
+    declared = int(re.search(r'Content-Length: (\d+)', header).group(1))
+    if declared != len(body.encode()):
+        fail("503 declared length differs from its actual body")
+    if '_server.send(204' in source or source.count('_sendIconResponse();') != 2:
+        fail("Both icon routes must use the bounded static response path")
+    icon = source[source.index('void Esp8266BaseWeb::_sendIconResponse()'):source.index('void Esp8266BaseWeb::_markRequest()')]
+    for token in ('sendContent_P(PSTR(', '_server.keepAlive(false)', '_server.client().stop()'):
+        require_token(icon, token, "bounded icon response")
+
+
 def main() -> None:
+    test_small_http_replies()
     test_tls_handshake_admission()
     test_network_log_literals_in_flash()
     test_format_bytes()

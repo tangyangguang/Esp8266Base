@@ -871,7 +871,7 @@ ESP8266WebServer::ClientFuture Esp8266BaseWeb::_heapGateHook(
         // 预解析阶段：直接写最小响应后要求关闭连接，不进入请求头解析。
         client->print(F("HTTP/1.1 503 Service Unavailable\r\n"
                         "Content-Type: text/plain\r\n"
-                        "Content-Length: 11\r\n"
+                        "Content-Length: 10\r\n"
                         "Connection: close\r\n"
                         "Cache-Control: no-store\r\n\r\nbusy retry"));
         client->flush();
@@ -948,6 +948,15 @@ void Esp8266BaseWeb::_sendKv(const char* key, const char* value) {
     sendChunk("</dt><dd>");
     _sendAttrEscaped(value && value[0] ? value : "-");
     sendChunk("</dd>");
+}
+
+void Esp8266BaseWeb::_sendIconResponse() {
+    _server.keepAlive(false);
+    _server.client().setNoDelay(true);
+    // A 204 has no body or Content-Length. Reuse the bounded, partial-write
+    // aware Flash sender rather than Core send()'s temporary header String.
+    sendContent_P(PSTR("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"));
+    _server.client().stop();
 }
 
 void Esp8266BaseWeb::_markRequest() {
@@ -1688,7 +1697,7 @@ void Esp8266BaseWeb::_handleTerminalDispatch() {
     // Browser icon probes: answer with no auth and no memory-heavy response.
     if (method == HTTP_GET &&
         (uri == "/favicon.ico" || uri.startsWith("/apple-touch-icon"))) {
-        _server.send(204, "image/x-icon", "");
+        _sendIconResponse();
         return;
     }
     if (uri == "/" && method == HTTP_GET) return _handleTerminalRoot();
@@ -1808,7 +1817,7 @@ void Esp8266BaseWeb::_handleNotFound() {
     const String& uri = _server.uri();
     if (_server.method() == HTTP_GET &&
         (uri == "/favicon.ico" || uri.startsWith("/apple-touch-icon"))) {
-        _server.send(204, "image/x-icon", "");
+        _sendIconResponse();
         return;
     }
     if (!checkAuth()) return;
