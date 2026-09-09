@@ -1293,7 +1293,22 @@ def test_network_log_literals_in_flash() -> None:
             fail(f"{name}: fixed network log formats must use the existing _P macro")
 
 
+def test_tls_handshake_admission() -> None:
+    source = read("src/Esp8266BaseMQTT.cpp")
+    start = source.index("if (!_prepareWill())")
+    gate = source.index("availableHeap < requiredHeap || availableBlock < requiredBlock", start)
+    attempts = source.index("if (_attemptCount <", gate)
+    connect = source.index("if (!_connectTransport())", attempts)
+    if not start < gate < attempts < connect:
+        fail("TLS memory admission must precede attempt accounting and allocation")
+    for token in ("sizeof(br_ssl_client_context)", "sizeof(br_x509_minimal_context)",
+                  "tlsRounded + 4096U", "largestAllocation + 64U + 1023U",
+                  "_retryAt = millis() + 5000UL", "return; // Not a connection attempt"):
+        require_token(source, token, "TLS working-set memory admission")
+
+
 def main() -> None:
+    test_tls_handshake_admission()
     test_network_log_literals_in_flash()
     test_format_bytes()
     test_journal_heap_precision()

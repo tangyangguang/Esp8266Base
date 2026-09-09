@@ -173,6 +173,8 @@ log_timestamp_mode=absolute_datetime
 
 配置由业务在 `Esp8266Base::begin()` 前提供：host/clientId/username/password/LWT topic 复制到固定缓冲；trust anchor `BearSSL::X509List` 和可选 LWT payload 由业务持有且生命周期必须覆盖 MQTT。来源可以是业务私有构建配置或 Config，但仓库示例只含 `.invalid` host、占位 clientId 和公开根证书，不含真实凭据。基础库不新增 broker 配置持久化 key，也不在 `/health` 输出 host、clientId、用户名、密码或证书。
 
+新建TLS前仍保留Web活动后3秒错峰，并检查握手同时分配的工作集：按当前Core的SSL/X509结构、4096/1024缓冲与协议/分配开销计算总heap需求；连续块只按最大单项分配加余量计算，不能要求所有独立分配位于一个块。当前Core需heap≥16384B、最大块≥7168B；不足时BACKOFF并5秒后复查，不计连接尝试或恢复失败，不影响已建立连接。该保护针对Core `make_shared`可能在空指针检查前因OOM直接abort的问题，不降低证书校验或缓冲；仍须实机验证工作负载。
+
 断线重试为 2s、4s、8s、16s、32s、60s，之后保持 60s。日志包含 `connect_attempt`、`connected`、`disconnected reason=`、`reconnect_scheduled` 以及 free heap/max block。TCP_DISCONNECTED 时若 BearSSL 存在错误，还会输出真实 `tls_code/tls_detail`；无 TLS 错误时不伪造。`lastTlsErrorCode()`/`lastTlsErrorText()` 提供只读诊断，`/health` 只含 code；新连接前清除旧值。
 
 当配置 `cleanSession=true`，断线完成后会在业务断线回调前清空两个固定出站槽，避免旧 QoS 证据跨到新连接周期；实际清除时记录 `session_queue_discarded`。`cleanSession=false` 只保留未确认 QoS1 PUBLISH，并在重连后置 DUP 重发；SUBSCRIBE 和 QoS0 不跨连接。

@@ -318,6 +318,31 @@ void Esp8266BaseMQTT::handle() {
         _scheduleRetry();
         return;
     }
+    // Core's make_shared allocation can abort on OOM before BearSSL's null
+    // checks run. Reserve the complete simultaneous TLS allocation set, not
+    // merely its largest individual buffer. Sizes follow the selected Core.
+    // setBufferSizes adds 325/85 bytes; allow allocator/shared_ptr overhead.
+    constexpr size_t tlsBytes = sizeof(br_ssl_client_context) +
+        sizeof(br_x509_minimal_context) + 4096U + 325U + 1024U + 85U + 64U;
+    constexpr size_t tlsRounded = (tlsBytes + 1023U) & ~size_t(1023U);
+    constexpr size_t requiredHeap = tlsRounded + 4096U;
+    constexpr size_t contextBytes = sizeof(br_ssl_client_context) > sizeof(br_x509_minimal_context)
+        ? sizeof(br_ssl_client_context) : sizeof(br_x509_minimal_context);
+    constexpr size_t largestAllocation = contextBytes > 4421U ? contextBytes : 4421U;
+    // The independent allocations need not share a single contiguous block.
+    // Requiring the entire working set contiguously would strand a healthy,
+    // fragmented heap after Web traffic. Keep margin around the largest one.
+    constexpr size_t requiredBlock = ((largestAllocation + 64U + 1023U) & ~size_t(1023U)) + 2048U;
+    const size_t availableHeap = ESP.getFreeHeap();
+    const size_t availableBlock = ESP.getMaxFreeBlockSize();
+    if (availableHeap < requiredHeap || availableBlock < requiredBlock) {
+        _state = Esp8266BaseMQTTState::BACKOFF;
+        _retryAt = millis() + 5000UL;
+        ESP8266BASE_LOG_I_P("MQTT", "tls_heap_deferred heap=%u block=%u need=%u/%u",
+            static_cast<unsigned>(availableHeap), static_cast<unsigned>(availableBlock),
+            static_cast<unsigned>(requiredHeap), static_cast<unsigned>(requiredBlock));
+        return; // Not a connection attempt or recovery failure.
+    }
     if (_attemptCount < 0xffffffffUL) ++_attemptCount;
 #if ESP8266BASE_USE_JOURNAL
     Esp8266BaseJournal::record(JNL_MQTT_ATTEMPT, 0,
