@@ -57,6 +57,14 @@
 #error "ESP8266BASE_USE_MQTT must be 0 or 1"
 #endif
 
+// 有界异常现场；显式启用，RTC words 72..99，不写 Flash/网络。
+#ifndef ESP8266BASE_USE_CRASH
+#define ESP8266BASE_USE_CRASH 0
+#endif
+#if ESP8266BASE_USE_CRASH != 0 && ESP8266BASE_USE_CRASH != 1
+#error "ESP8266BASE_USE_CRASH must be 0 or 1"
+#endif
+
 // 断线现场诊断档案（Esp8266BaseJournal）：事件+趋势落 LittleFS 槽位环。
 // 默认在“配置(挂载 FS) + MQTT 终端”组合下启用；其它形态可显式开/关。
 #ifndef ESP8266BASE_USE_JOURNAL

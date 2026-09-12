@@ -1,4 +1,7 @@
 #include "Esp8266Base.h"
+#if ESP8266BASE_USE_CRASH
+#include "Esp8266BaseCrash.h"
+#endif
 #if ESP8266BASE_USE_JOURNAL
 #include "Esp8266BaseJournal.h"
 #endif
@@ -182,6 +185,9 @@ bool Esp8266Base::begin() {
     _resolveHostname();
 
     _bootCount = _loadAndIncrementBootCount();
+#if ESP8266BASE_USE_CRASH
+    Esp8266BaseCrash::begin(_bootCount);
+#endif
 #if ESP8266BASE_USE_JOURNAL
     Esp8266BaseJournal::beginBoot(_bootCount, static_cast<uint8_t>(resetReason()));
 #if ESP8266BASE_USE_WATCHDOG

@@ -77,9 +77,21 @@ Esp8266BaseWatchdog::setSafetyCallbacks(emergencyStop, restartGuard);
 |---:|---:|---|
 | 64-70 | 28B | magic、WDT count、连续恢复次数、原因/阶段/拒绝原因、24 小时窗口起点与次数、checksum |
 
-业务不得复用 64～70。
+| 72-99 | 112B | 可选 Crash 快照：构建 ID、异常寄存器、阶段、最多 12 个候选返回地址、CRC32 |
+
+业务不得复用 64～99；应用 RTC 可从 word 104 开始，末端不得超过 word 191。
 
 `lastRecoveryCause()`、`lastStallPhase()`、`lastRecoveryWasDenied()` 与 `lastRecoveryDecision()` 返回上次 RTC 胶囊；`consecutiveRecoveryRestarts()` 与 `recoveryRestartsInWindow()` 返回两套独立预算。它们与 SDK reset reason 是两套证据，不能互相替代。
+
+### 可选异常快照
+
+`-DESP8266BASE_USE_CRASH=1` 启用 `Esp8266BaseCrash`，默认关闭。它占用 Arduino Core 的 `custom_crash_callback`，不能再定义第二个同名 hook。应用在 `Base::begin()` 前调用 `setBuildId(word0, word1)`，并保存该构建 ID 对应的实际 ELF/bin 及其哈希；版本字符串不能替代匹配的构建产物。
+
+异常路径只捕获 SDK 寄存器和当前阶段；最多扫描 64 个对齐 DRAM words，最多保留 12 个代码区候选地址。不分配内存、不写 Flash、不联网，不保存任意栈数据或凭据。这些地址不是经展开确认的调用栈。`setPhase()` / `Esp8266BaseCrashPhase` 只更新 RAM，Watchdog 自动提供 Base 阶段；应用阶段由应用定义。
+
+下次正常启动通过 `last()` / `pending()` 读取经 CRC 验证的快照。消费者成功持久化后才调用 `markArchived()`；归档后仍保留本地快照，不在心跳中反复发送寄存器。资源现场复用既有 Journal/诊断样本，按异常 bootCount 关联，不把新启动的 heap 当成异常时刻数据。CRC 错误或 RTC 丢失不推断异常细节；RTC 不承诺断电保留。模块不恢复业务任务、不改变重启预算，也不证明上次执行成功。
+
+定向检查：`python3 tools/test_crash_snapshot.py`，覆盖实际 hook、CRC、RTC 区域隔离、阶段恢复及非法栈范围（ASan/UBSan）。责任应用编译需确认 ELF 中 `custom_crash_callback` 为强符号；异常注入/物理复位仍按设备授权执行。
 
 ## 七、OTA
 

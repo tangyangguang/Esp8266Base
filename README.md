@@ -83,6 +83,7 @@ mDNS初始化失败会按5秒间隔恢复；配置清理失败保留待写值，
 | mDNS | `Esp8266BaseMDNS` | hostname.local、_http._tcp 广播 |
 | Sleep | `Esp8266BaseSleep` | modem/deep sleep 封装、唤醒原因 |
 | Watchdog | `Esp8266BaseWatchdog` | 主循环活性监控、WDT 计数持久化 |
+| Crash | `Esp8266BaseCrash` | 可选有界 RTC 异常快照，构建标识与候选返回地址 |
 
 ---
 
@@ -201,6 +202,7 @@ build_flags =
 | `ESP8266BASE_USE_MDNS` | `1` | 编译 mDNS |
 | `ESP8266BASE_USE_SLEEP` | `1` | 编译 Sleep |
 | `ESP8266BASE_USE_WATCHDOG` | `1` | 编译 Watchdog |
+| `ESP8266BASE_USE_CRASH` | `0` | 启用异常 hook；RTC words 72–99，见 [恢复监护](docs/09_power_watchdog.md#可选异常快照) |
 | `ESP8266BASE_WEB_MAX_APP_PAGES` | `4` | 应用页面上限 |
 | `ESP8266BASE_WEB_MAX_APP_APIS` | `6` | 应用 API 上限 |
 | `ESP8266BASE_WEB_TCP_BACKLOG` | `1` | TCP listener 待处理 peer 上限；限制 HTTP hook 前的动态 `ClientContext` |

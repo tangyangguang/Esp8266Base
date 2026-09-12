@@ -1,6 +1,9 @@
 #include "Esp8266BaseOptions.h"
 #if ESP8266BASE_USE_WATCHDOG
 #include "Esp8266BaseWatchdog.h"
+#if ESP8266BASE_USE_CRASH
+#include "Esp8266BaseCrash.h"
+#endif
 #if ESP8266BASE_USE_CONFIG
 #include "Esp8266BaseConfig.h"
 #endif
@@ -181,12 +184,18 @@ void Esp8266BaseWatchdog::cycleStart() {
     _cycleStartMs = millis();
     _coveredMs = 0;
     _phase = static_cast<uint8_t>(Esp8266BaseWatchdogPhase::LOOP);
+#if ESP8266BASE_USE_CRASH
+    Esp8266BaseCrash::setPhase(_phase);
+#endif
     ++_heartbeat;
     _monitorArmed = true;
 }
 
 void Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase phase) {
     _phase = static_cast<uint8_t>(phase);
+#if ESP8266BASE_USE_CRASH
+    Esp8266BaseCrash::setPhase(_phase);
+#endif
 }
 
 void Esp8266BaseWatchdog::account(uint32_t maxBlockMs, uint32_t startedAtMs) {
