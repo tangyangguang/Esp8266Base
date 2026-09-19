@@ -461,7 +461,13 @@ bool Esp8266BaseMQTT::_pumpOutbox() {
 
 bool Esp8266BaseMQTT::_pumpIncoming() {
     uint16_t budget = 512;
-    while (budget && client.available() > 0) {
+    // A PINGRESP has a zero-byte body. Once its remaining-length byte is read,
+    // the TLS socket can have no further available bytes; still process the
+    // complete control packet instead of waiting forever for another packet.
+    while (budget &&
+           (controlPacketReady(rx.header, rx.remainingDone,
+                               rx.bodyRead, rx.remainingLength) ||
+            client.available() > 0)) {
         if (!rx.header) {
             const int value = client.read();
             if (value < 0) break;

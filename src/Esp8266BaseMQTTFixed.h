@@ -73,6 +73,12 @@ inline bool subackAccepted(const uint8_t* codes, size_t length) {
     return true;
 }
 
+inline bool controlPacketReady(uint8_t header, bool remainingDone,
+                               uint32_t bodyRead, uint32_t remainingLength) {
+    return header != 0 && remainingDone && (header >> 4) != 3 &&
+           bodyRead >= remainingLength;
+}
+
 enum class PacketKind : uint8_t { NONE = 0, SUBSCRIBE, PUBLISH };
 
 struct FixedPacket {

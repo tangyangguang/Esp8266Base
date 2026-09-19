@@ -64,6 +64,14 @@ int main() {
     assert(!subackAccepted(subackInvalid, sizeof(subackInvalid)));
     assert(!subackAccepted(nullptr, 0));
 
+    // PINGRESP is a complete control packet with a zero-byte body and must be
+    // dispatched even when the TLS socket has no following byte available.
+    assert(controlPacketReady(0xd0, true, 0, 0));
+    assert(!controlPacketReady(0xd0, false, 0, 0));
+    assert(!controlPacketReady(0xd0, true, 0, 1));
+    assert(controlPacketReady(0x40, true, 2, 2));
+    assert(!controlPacketReady(0x30, true, 0, 0));
+
     queue.clear();
     assert(queue.enqueuePublish(40, "state", 1, false, one, sizeof(one),
                                 Esp8266BaseMQTTPublishPriority::STATE));
