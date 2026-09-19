@@ -6,7 +6,7 @@
 
 真实 ESP8266 以 60 秒 keepalive 空闲运行时约每 120 秒断开。根因为固定内存解析器读完 `PINGRESP` 的 remaining-length=0 后，TLS socket 已无后续可读字节，旧循环未分发这个已完整的零正文控制包；`pingOutstanding` 因而不清除，并在下一 keepalive 截止主动关闭 TCP。修复后，解析循环会在控制包正文已完整时直接分发，不依赖 socket 还有下一字节；PUBLISH 仍要求其 Topic 和正文正常到达。
 
-`bash tools/test_mqtt_fixed.sh` 增加 PINGRESP、未完成控制包、普通控制包和 PUBLISH 边界并通过；静态检查、Base ESP12F 构建及真实消费端构建通过。真实低压 LED 核心板只写入应用固件，保留原 WiFi/LittleFS 配置；修复前 health 为 `mqtt=backoff`、`mqttAttempt=11`、`mqttLastReason=tcp_disconnected`，修复后首次连接持续至少 226 秒，跨过三个 60 秒保活周期，始终 `mqttConnected=true`、attempt=1、reason=none、无 WDT；末段 heap 6168B、maxBlock 5688B。15 秒空闲订阅仅有 173B retained availability。该结果完成根因定向验收，但 1～2 天观察仍由用户后续执行，不把 226 秒证明外推为长稳。
+`bash tools/test_mqtt_fixed.sh` 增加 PINGRESP、未完成控制包、普通控制包和 PUBLISH 边界并通过；静态检查、Base ESP12F 构建及真实消费端构建通过。真实低压 LED 核心板只写入应用固件，保留原 WiFi/LittleFS 配置；修复前 health 为 `mqtt=backoff`、`mqttAttempt=11`、`mqttLastReason=tcp_disconnected`，修复后首次连接持续至少 679 秒，跨过十个 60 秒保活周期，始终 `mqttConnected=true`、attempt=1、reason=none、无 WDT；679 秒时 heap 6936B、maxBlock 6560B。期间经测试域名执行 6 秒 LED 命令取得 accepted/succeeded，完成记录与 ACK 同步到 64；15 秒空闲订阅仅有 173B retained availability。该结果完成根因定向验收，但 1～2 天观察仍由用户后续执行，不把 679 秒证明外推为长稳。
 
 ## HTTP小响应收口与压力复验
 
