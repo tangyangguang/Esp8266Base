@@ -118,6 +118,10 @@ public:
 
     // 供 Esp8266Base 在 begin() 时设置系统信息
     static void setSystemInfo(const char* hostname, const char* fw, const char* ver, uint32_t bootCount);
+    // 可选：部署环境人类可读标签（如 "test"/"production"），由业务在 setup 设置；
+    // 非空时 /health 输出 cloudEnv，用于现场一眼区分正式/测试环境。只存指针，调用方
+    // 须传字符串字面量或生命周期覆盖整个运行期的缓冲。
+    static void setDeployEnvLabel(const char* label);
 
 private:
     struct AppRoute {
@@ -152,6 +156,7 @@ private:
     static char             _hostname[33];                      // 33B
     static char             _fwName[24];                        // 24B
     static char             _fwVersion[16];                     // 16B
+    static const char*      _deployEnvLabel;                    // 4B：部署环境标签，默认 nullptr
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
     static uint32_t         _bootCount;                         // 4B
     static char             _titleBuf[80];                      // "hostname (fw ver)" 80B

@@ -42,6 +42,7 @@
 ### 新增
 - **Web 软重启成为两个 profile 的基础能力**。`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 过去不注册任何重启路由，现与 full profile 一样提供 `GET/POST /reboot`：GET 返回零 JavaScript 的纯 HTML 二次确认页（GET 绝不触发重启），POST 必须同时通过 Basic Auth、每次启动表单令牌和显式 `confirm=1`；终端配网页 `/wifi` 底部增加“重启设备”入口。复位前先调用已注册的 emergency-stop 安全回调**立即断开受控输出**，再回复 Rebooting 页、落盘并重启。full profile 的重启表单同时补齐了原先缺失的 CSRF 令牌。
 - `Esp8266BaseWatchdog::invokeEmergencyStop()`：公开静态方法，供需要在复位/维护前无条件断开受控输出的路径复用；未注册回调时为 no-op。
+- **部署环境标识 `cloudEnv`**：新增 `Esp8266Base::setDeployEnvLabel(const char*)`（转发 `Esp8266BaseWeb::setDeployEnvLabel`），业务在 `begin()` 前传入部署环境标签（如 `"test"`/`"production"`，建议直接传字符串字面量）；非空时 `/health` 输出 `"cloudEnv"` 字段，用于现场一眼区分正式/测试设备。默认不设置则不输出该字段，旧消费方无需改动；只保存指针（4B 静态），不复制字符串。
 
 ### 行为变化 / 使用建议
 - **NTP 改为 fail-closed**：两个权威源不可达、解析到同一 IP、高 RTT 或结果不一致时，设备不采信任何时间、`isSynced()` 保持 false，MQTT/TLS 不放行（上云延后并重试）；本地定时与 15 分钟安全上限不依赖墙钟，继续工作。部署现场必须放行到这两个域名的 UDP/123。明文 NTP 不抵御完全受控链路，不同 IP+RTT 门+年份窗为纵深防护。

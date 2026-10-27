@@ -67,6 +67,10 @@ public:
     // 设置固件名称和版本，用于日志和 /health 响应
     static void setFirmwareInfo(const char* name, const char* version);
 
+    // 可选：设置部署环境标签（如 "test"/"production"），/health 以 cloudEnv 输出；
+    // 传字符串字面量或生命周期覆盖整个运行期的缓冲。应在 begin() 前调用。
+    static void setDeployEnvLabel(const char* label);
+
     // ---- 核心 API ----
 
     // 按序初始化：Log → Sleep → Config → FileLog → WiFi → Watchdog → Web → OTA → MQTT → 诊断

@@ -84,6 +84,14 @@ void Esp8266Base::setFirmwareInfo(const char* name, const char* version) {
     if (version) { strncpy(_fwVersion, version, sizeof(_fwVersion) - 1); _fwVersion[sizeof(_fwVersion)-1] = '\0'; }
 }
 
+void Esp8266Base::setDeployEnvLabel(const char* label) {
+#if ESP8266BASE_USE_WEB
+    Esp8266BaseWeb::setDeployEnvLabel(label);
+#else
+    (void)label;
+#endif
+}
+
 bool Esp8266Base::isValidHostname(const char* hostname) {
     if (!hostname) return false;
     size_t len = strlen(hostname);

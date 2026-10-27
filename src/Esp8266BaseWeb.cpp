@@ -64,6 +64,7 @@ char                     Esp8266BaseWeb::_homePath[24] = "";
 char                     Esp8266BaseWeb::_hostname[33] = "esp8266base";
 char                     Esp8266BaseWeb::_fwName[24] = "esp8266base";
 char                     Esp8266BaseWeb::_fwVersion[16] = "1.0.0";
+const char*              Esp8266BaseWeb::_deployEnvLabel = nullptr;
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
 uint32_t                 Esp8266BaseWeb::_bootCount = 0;
 char                     Esp8266BaseWeb::_titleBuf[80] = "ESP8266";
@@ -828,6 +829,10 @@ void Esp8266BaseWeb::setDefaultAuth(const char* user, const char* pass) {
     }
     if (user) { strncpy(_authUser, user, 23); _authUser[23] = '\0'; }
     if (pass) { strncpy(_authPass, pass, 23); _authPass[23] = '\0'; }
+}
+
+void Esp8266BaseWeb::setDeployEnvLabel(const char* label) {
+    _deployEnvLabel = label;
 }
 
 void Esp8266BaseWeb::setSystemInfo(const char* hostname, const char* fw, const char* ver, uint32_t bootCount) {
@@ -1841,6 +1846,7 @@ void Esp8266BaseWeb::_handleHealth() {
     json.text("hostname", Esp8266Base::hostname());
     json.text("firmware", _fwName);
     json.text("version", _fwVersion);
+    if (_deployEnvLabel) json.text("cloudEnv", _deployEnvLabel);
     json.number("uptime", millis() / 1000UL);
     json.number("heap", ESP.getFreeHeap());
     json.number("maxBlock", ESP.getMaxFreeBlockSize());

@@ -49,6 +49,11 @@ static void setFirmwareInfo(const char* name, const char* version);
 设置固件名称和版本号（显示在启动日志和 Web 标题中）。必须在 `begin()` 前调用。
 
 ```cpp
+static void setDeployEnvLabel(const char* label);
+```
+可选：设置部署环境人类可读标签（如 `"test"`/`"production"`）。设置后 `/health` 输出 `"cloudEnv"` 字段，现场可一眼区分正式/测试设备，供 OTA 脚本交叉核对。应在 `begin()` 前调用；只保存指针，须传字符串字面量或生命周期覆盖整个运行期的缓冲，不调用时 `/health` 不输出该字段。
+
+```cpp
 static const char* hostname();
 static uint32_t bootCount();
 static Esp8266BaseResetReason resetReason();
@@ -71,6 +76,7 @@ static const char* firmwareVersion();
 void setup() {
     Serial.begin(115200);
     Esp8266Base::setFirmwareInfo("fan-ctrl", "1.0.0");
+    Esp8266Base::setDeployEnvLabel("production");
     Esp8266Base::begin();
 
     Esp8266BaseWeb::addPage("/fan", "Fan", handleFanPage);
@@ -520,7 +526,7 @@ static bool isRunning();
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
 | `/reboot` | GET | 重启二次确认页（需要 Basic Auth；纯 HTML、无 JavaScript；GET 只展示确认表单，绝不触发重启） |
 | `/reboot` | POST | 先调用已注册的 emergency-stop 安全回调立即断开受控输出，再 flush Config/日志后重启；需 Basic Auth + 每次启动表单令牌 + 显式 `confirm=1` |
-| `/health` | GET | 固定 JSON：firmware/version/uptime/heap/maxBlock/wifi/wifiSsid/wifiRssi/ip/ntp/MQTT 状态、attempt、last reason、TLS error code、WDT/OTA（无需认证；SSID 用于现场诊断，不含密码、broker、clientId、证书或错误长文本） |
+| `/health` | GET | 固定 JSON：firmware/version/cloudEnv(可选)/uptime/heap/maxBlock/wifi/wifiSsid/wifiRssi/ip/ntp/MQTT 状态、attempt、last reason、TLS error code、WDT/OTA（无需认证；`cloudEnv` 仅在调用 `setDeployEnvLabel` 后出现；SSID 用于现场诊断，不含密码、broker、clientId、证书或错误长文本） |
 
 页面式路由和未知路径使用 Basic Auth 挑战；未知路径认证通过后返回 404。`/api/system/hostname` 未认证时返回 JSON 401，不发送 `WWW-Authenticate`，调用方需要显式提供 `Authorization` header。`/health` 保持免认证。
 
