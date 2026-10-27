@@ -78,6 +78,11 @@ public:
     // 30 分钟只打断连续重启链；可信 UTC 下的 24 小时预算独立保留。
     static void setApplicationReady(bool ready);
 
+    // 立即执行注册的 emergency-stop 安全回调（未注册则 no-op），不评估重启预算、
+    // 不自行重启。供人工 Web 软重启等非看门狗路径复用同一条“先断开受控输出”原语，
+    // 保证断输出优先于网络回复、落盘和复位。
+    static void invokeEmergencyStop();
+
     // NETWORK_UNRECOVERABLE obeys restartGuard. LOOP_STALL always invokes the
     // emergency-stop callback before evaluating the restart budget.
     static Esp8266BaseRestartDecision requestRestart(Esp8266BaseRecoveryCause cause);

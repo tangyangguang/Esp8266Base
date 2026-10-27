@@ -145,31 +145,32 @@ mdns_started host=esp8266base-full.local service=http tcp_port=80
 
 ---
 
-## 八、NTP
+## 八、NTP（可信双源对时）
 
-NTP 在 WiFi STA 连接后启动：
-
-```text
-ntp_client_started timezone=UTC+8 servers=ntp.aliyun.com,ntp.tencent.com,cn.pool.ntp.org check_interval=5s manual_udp=yes
-```
-
-同步成功后输出：
+设备**不启动 lwIP 系统 SNTP**（不调用 `configTime`/`sntp_init`），并显式 `sntp_servermode_dhcp(0)` 拒绝现场路由器经 DHCP option 42 下发的时间源；自研硬化 UDP 客户端是唯一设钟权威。WiFi STA 每次连接后触发：
 
 ```text
-time_synchronized actual_time=2026-05-04 18:46:52 uptime_ms=32778 boot_time=2026-05-04 18:46:20
-time_mapping boot_millis=0 actual_time=2026-05-04 18:46:20 current_millis=32778 current_time=2026-05-04 18:46:52
+ntp_client_started timezone=UTC-8 servers=ntp.aliyun.com,ntp.tencent.com set_clock=dual_source_consensus dhcp_ntp=off trusted=no
+ntp_request server=ntp.aliyun.com ip=203.107.1.1 index=0 mode=acquire
+ntp_request server=ntp.tencent.com ip=120.132.0.9 index=1 mode=acquire
+ntp_trusted rtt0=42ms rtt1=38ms agree=250ms
+time_synchronized actual_time=2026-10-27 14:32:10 uptime_ms=5846 boot_time=2026-10-27 14:32:04
 log_timestamp_mode=absolute_datetime
 ```
 
-这用于把对时前的 `millis()` 日志换算为实际日期时间。
+`time_synchronized` 给出实际时间、启动毫秒和推算的本次启动时间，用于把对时前的 `millis()` 日志换算为实际日期时间。
 
-库内主动 UDP NTP 只接受当前等待服务器的响应，并校验来源 IP、端口 123、server mode、stratum 和 leap indicator。无关 UDP 包会记录 `manual_ntp_packet_rejected` 并丢弃，不会改写系统时间。有效响应解析 receive/transmit 的秒与 32 位小数，结合本地单调 RTT 和服务端处理时间估算单程延迟，避免旧实现丢弃小数后形成接近 1 秒的量化误差。同步日志同时给出 `rtt` 与 `uncertainty_estimate`；只有主动路径具有该测量，系统 SNTP 路径不伪造误差证据。该估计仍受链路不对称影响，不能替代业务终端的单调截止和低压台架精度验收。
+**设钟门（fail-closed）**：两个钉死权威源必须同时满足才采信——解析到不同 IPv4、各自 RTT ≤ 500ms、时间值落在 2023..2035 合理年份窗、按本地单调钟归一到同一接收时刻后差值在一致窗 `(RTTa+RTTb)/4 + 100ms`（下限 250ms）内。任一不满足（单源快/慢、同一 IP、高延迟、垃圾年份）就丢弃整批并按 2s→60s 有界退避重新采集，期间 `isSynced()` 为 false、MQTT/TLS 不放行；本地定时与 15 分钟安全上限不依赖墙钟，继续工作。每个源只接受当前等待服务器的响应，校验来源 IP、端口 123、server mode、stratum 和 leap indicator；无关 UDP 包记录 `ntp_packet_rejected` 并丢弃。有效响应解析 receive/transmit 的秒与 32 位小数，结合本地单调 RTT 和服务端处理时间估算单程延迟。
+
+**设钟一次 + 运行只校验**：墙钟每次启动至多设置一次，且在首次 MQTT/TLS 放行前。设钟后每 `ESP8266BASE_NTP_SYNC_INTERVAL`（默认 3600s）做一次双源校验，复用启动期解析的 IP（不重新 DNS）；双源一致但与本地墙钟偏差超过 2s 时只记录 `ntp_time_suspect clock_delta_ms=... (clock left unchanged)`，**绝不回拨或前拨墙钟**（回拨会永久冻结命令账本），也不自动重启。WiFi 断开 `reset()` 释放 UDP 但不清已可信闘锁；重连后不重新设钟，墙钟继续走，MQTT 不因重连等待对时。
+
+`ntp_trusted` 后可读取两源平均 RTT 与保守一致窗（`hasMeasuredUncertainty()`/`lastSyncRttMs()`/`estimatedUncertaintyMs()`）；该估计受链路不对称影响，不是硬实时误差保证。明文 NTP 的 nonce 主要防离线伪造；不同 IP + RTT 门 + 年份窗是纵深防护，不宣称抵御完全受控链路上的时间篡改。
 
 ---
 
 ## 九、MQTT_TERMINAL 网络生命周期
 
-`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 要求 Web、OTA、NTP、Watchdog 和 MQTT 同时启用。MQTT 只在 STA 已连接且 NTP 已同步后尝试 DNS/TCP/TLS/MQTT 建连；WiFi 或时间门控丢失时释放连接，恢复后重新进入退避状态机。
+`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 要求 Web、OTA、NTP、Watchdog 和 MQTT 同时启用。MQTT 只在 STA 已连接且 NTP 已获双源可信时间后尝试 DNS/TCP/TLS/MQTT 建连；WiFi 掉线释放连接但不清 NTP 可信闘锁，恢复后重连不必再等对时。
 
 配置由业务在 `Esp8266Base::begin()` 前提供：host/clientId/username/password/LWT topic 复制到固定缓冲；trust anchor `BearSSL::X509List` 和可选 LWT payload 由业务持有且生命周期必须覆盖 MQTT。来源可以是业务私有构建配置或 Config，但仓库示例只含 `.invalid` host、占位 clientId 和公开根证书，不含真实凭据。基础库不新增 broker 配置持久化 key，也不在 `/health` 输出 host、clientId、用户名、密码或证书。
 
@@ -201,15 +202,15 @@ DNS/TCP/TLS I/O、CONNACK server-unavailable 和应用 readiness 等可恢复失
 | 有凭证但没连上 | `station_connect_stuck_restarting`、`station_connect_stuck_retrying`、`station_connect_timeout`、`station_reconnect_scheduled` |
 | 密码错误 | `WL_CONNECT_FAILED`、路由器认证日志；设备日志不输出密码正文 |
 | mDNS 访问慢 | `mdns_started`、改用 IP 验证 |
-| NTP 不同步 | `ntp_sync_pending`、DNS/网关/UDP 123 |
+| NTP 不可信/不上云 | `ntp_trust_pending`、`ntp_acquire_rejected reason=sources_untrusted`、双源是否一致/同源、DHCP option42、UDP 123 |
 
 更多排查见 `docs/10_troubleshooting.md`。
 
 ## 主动对时和网络写入边界
 
-主动 UDP 路径发送一个 8 字节随机请求标识作为 transmit timestamp，并要求响应的 originate timestamp 原样匹配；同时检查已等待、源 IP/端口、NTP 版本 3、mode、leap 和 stratum。请求超时先于收包判断，旧响应、错误响应或持续无关流量不能延长本次等待。RTT 起点在 DNS 完成后、实际发送数据包前；同步成功关闭本库主动 UDP socket，保留系统 SNTP 负责后续对时。NTP 秒字段按 1970..2104 范围展开，正确处理 2036 回绕。依据 [RFC 4330 的时间格式与客户端检查](https://www.rfc-editor.org/rfc/rfc4330.html#section-5)。请求匹配不是身份认证，仍不宣称普通 NTP 能抵御链路上的时间篡改。
+主动 UDP 路径为每个源发送 8 字节随机请求标识作为 transmit timestamp，并要求响应的 originate timestamp 原样匹配；同时检查来源 IP/端口、NTP 版本 3、mode、leap 和 stratum。请求超时（3s）先于收包判断，旧响应、错误响应或持续无关流量不能延长本次等待，RTT 也排除 DNS。设钟必须两个不同 IP 源在 RTT 门内、合理年份、同刻归一后一致（见第八节）；设钟成功后关闭主动 UDP socket，之后运行期周期校验复用缓存 IP、只比对不改钟。NTP 秒字段按 1970..2104 范围展开，正确处理 2036 回绕。依据 [RFC 4330 的时间格式与客户端检查](https://www.rfc-editor.org/rfc/rfc4330.html#section-5)。请求匹配不是身份认证，仍不宣称普通 NTP 能抵御链路上的时间篡改。
 
-`isSynced()` 和 `timestamp()` 同时检查当前系统 UTC 有效性；校时后系统时钟回到无效范围时，MQTT 时间门控关闭并重新触发对时，日志回退运行毫秒，不继续宣称已同步。`formatTo()` 缓冲不足返回 false。
+`isSynced()` 是本次启动获可信时间的一次性闘锁，WiFi 重连不清回 false；`timestamp()` 仅在已可信时返回当前 Unix 时间戳，否则返回 0。运行期发现墙钟与双源时间显著不符只置可疑标志并留证，不改钟、不回退已同步状态。`formatTo()` 缓冲不足返回 false。
 
 MQTT 写入的现有超时预算覆盖持续部分进展，零写和部分写都让出调度；不会通过频繁小写入无限延长本次发送。Web `sendChunk` / `sendContent_P` 补齐部分写入，用 30 秒总预算限制每次 API 调用（内置页面的 SDK 单次 write 仍保留 1500ms timeout），失败关闭连接以防后续正文拼接成残缺响应。PROGMEM 字符串各分块共用本次调用的预算；这不是整个 HTTP 请求的硬上限，也不能抢占 SDK 内部的一次阻塞 write。TLS 缓冲仍为 4096/1024，固定 outbox 和恢复策略不变。
 

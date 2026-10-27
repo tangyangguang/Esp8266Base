@@ -34,6 +34,21 @@
 
 没有内容的小节可以省略。
 
+## 2026-10-27
+
+### 修复
+- **NTP 可信对时，修复墙钟被不可信源设快导致命令在 TTL 内被误判 expired**。原实现同时启用 lwIP 系统 SNTP（`configTime`）且 `SNTP_CHECK_RESPONSE=0`、默认信任 DHCP option 42 下发的时间源，现场路由器/光猫可把自己 advertised 为 NTP 并把设备钟设快约 10 秒；该错误时间之后不会被纠正。现自研硬化 UDP 客户端成为唯一设钟权威：不再调用 `configTime`/`sntp_init`，并显式 `sntp_servermode_dhcp(0)`；只有两个钉死权威源（ntp.aliyun.com、ntp.tencent.com）解析到**不同 IP**、各自 RTT ≤ 500ms、时间落在 2023..2035 合理年份窗、按单调钟归一到同一时刻后差值在与 RTT 挂钩的一致窗内，才 `settimeofday` 一次。默认源移除质量参差的 `cn.pool.ntp.org`。
+
+### 新增
+- **Web 软重启成为两个 profile 的基础能力**。`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 过去不注册任何重启路由，现与 full profile 一样提供 `GET/POST /reboot`：GET 返回零 JavaScript 的纯 HTML 二次确认页（GET 绝不触发重启），POST 必须同时通过 Basic Auth、每次启动表单令牌和显式 `confirm=1`；终端配网页 `/wifi` 底部增加“重启设备”入口。复位前先调用已注册的 emergency-stop 安全回调**立即断开受控输出**，再回复 Rebooting 页、落盘并重启。full profile 的重启表单同时补齐了原先缺失的 CSRF 令牌。
+- `Esp8266BaseWatchdog::invokeEmergencyStop()`：公开静态方法，供需要在复位/维护前无条件断开受控输出的路径复用；未注册回调时为 no-op。
+
+### 行为变化 / 使用建议
+- **NTP 改为 fail-closed**：两个权威源不可达、解析到同一 IP、高 RTT 或结果不一致时，设备不采信任何时间、`isSynced()` 保持 false，MQTT/TLS 不放行（上云延后并重试）；本地定时与 15 分钟安全上限不依赖墙钟，继续工作。部署现场必须放行到这两个域名的 UDP/123。明文 NTP 不抵御完全受控链路，不同 IP+RTT 门+年份窗为纵深防护。
+- `isSynced()` 语义改为“本次启动已获双源可信时间”的**一次性闘锁**：WiFi 掉线重连不清回 false、不重新设钟；运行中周期性双源校验发现本地钟偏差超过 2s 只记录 `ntp_time_suspect` 并置标志，**绝不回拨/前拨墙钟、不自动重启**（回拨会永久冻结命令账本）。需要“运行中错钟受控重启自纠”的项目须另行设计与授权。
+- `ESP8266BASE_NTP_SERVER_3` 默认改为空串，当前仅前两个源参与信任判定，宏保留用于编译期覆盖；时区宏支持半小时与负偏移（UTC+8 内部按 POSIX 反号 `UTC-8`）。
+- RAM：esp12f-relay 消费端完整 ELF 实测 NTP 加固 + Web 重启合计 53340→53440B（+100B，65.23%，66% 红线与 54067B 静态门禁均通过，余 627B）；NTP 模块自有静态约 170B，仍在 ≤232B 预算内。
+
 ## 2026-09-07
 
 ### 修复

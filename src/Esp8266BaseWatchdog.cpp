@@ -105,6 +105,11 @@ void Esp8266BaseWatchdog::setSafetyCallbacks(Esp8266BaseEmergencyStopCallback em
     _restartGuard = restartGuard;
 }
 
+void Esp8266BaseWatchdog::invokeEmergencyStop() {
+    // 空指针安全：未注册 emergency-stop 回调的设备（full_demo/Fan_4P）为 no-op。
+    if (_emergencyStop) _emergencyStop();
+}
+
 bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     if (timeoutMs < 1000U) timeoutMs = 1000U;
     if (timeoutMs > 3000U) timeoutMs = 3000U;

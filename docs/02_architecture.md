@@ -52,7 +52,7 @@ Esp8266Base（主入口）
   ├── Esp8266BaseWiFi       （依赖 Config 读取凭证；凭证缓存在内存，重连不再读 Flash）
   ├── Esp8266BaseWeb        （begin() 在 WiFi 之后；始终监听，AP 模式也可访问）
   │     └── Esp8266BaseOTA  （依赖 Web server 已启动；GET 页面使用 Web Basic Auth）
-  ├── Esp8266BaseNTP        （WiFi 连接后由 handle() 触发 begin()；SNTP + 主动 UDP NTP 双路径对时）
+  ├── Esp8266BaseNTP        （WiFi 连接后由 handle() 触发 begin()；硬化双源 UDP 对时，唯一设钟权威，拒绝 DHCP 时间源）
   ├── Esp8266BaseMDNS       （WiFi 连接后由 handle() 触发 begin()；WiFi 掉线后重置，重连自动重启）
   ├── Esp8266BaseMQTT       （可选；依赖 WiFi + NTP 就绪；业务通过固定函数指针接入）
   ├── Esp8266BaseSleep      （deepSleep 前调用 Config::flush()；启用 Watchdog 时先 pause）

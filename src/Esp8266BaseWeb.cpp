@@ -250,25 +250,47 @@ static const char WEB_SYSTEM_PAGE[] PROGMEM =
     "<input class=danger type=submit value='Clear File Logs'>"
     "</form></section>"
 #endif
+    ;
+
+// Full-profile Reboot section. The CSRF token is injected between HEAD and
+// TAIL so the POST passes the same auth + token gate as the WiFi form.
+static const char WEB_REBOOT_SECTION_HEAD[] PROGMEM =
     "<section><h3>Reboot</h3>"
 #if ESP8266BASE_USE_FILELOG
     "<p>Flush pending config and file logs, then restart the device.</p>"
 #else
     "<p>Flush pending config, then restart the device.</p>"
 #endif
-    "<form method=post action='/reboot' onsubmit=\"return confirm('Reboot device now?')&&once(this)\">"
+    "<form method=post action='/reboot' onsubmit=\"return confirm('Reboot device now?')&&once(this)\">";
+static const char WEB_REBOOT_SECTION_TAIL[] PROGMEM =
+    "<input type=hidden name=confirm value='1'>"
     "<input class=danger type=submit value='Reboot Device'>"
-    "</form></section>"
-    "</div>";
-
-static const char WEB_REBOOTING[] PROGMEM =
-    "<h2>Rebooting...</h2>"
-    "<p>Device is restarting. Please wait a few seconds, then <a href='/'>reload</a>.</p>";
+    "</form></section></div>";
 
 #if ESP8266BASE_USE_FILELOG
 static const char WEB_LOGS_PRE[] PROGMEM =
     "<h2>Logs</h2>";
 #endif
+#endif
+
+// Shared by both profiles: page returned while the device is about to reset.
+static const char WEB_REBOOTING[] PROGMEM =
+    "<h2>Rebooting...</h2>"
+    "<p>Device is restarting. Please wait a few seconds, then <a href='/'>reload</a>.</p>";
+
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
+// Zero-JS, two-step reboot confirmation used by the terminal profile. GET shows
+// this page (never performs the reboot); the authenticated POST carrying the
+// CSRF token and explicit confirm=1 is what actually restarts.
+static const char WEB_REBOOT_CONFIRM_HEAD[] PROGMEM =
+    "<section><h3>Reboot Device</h3>"
+    "<p>This immediately stops the current output and restarts the device. "
+    "It stays offline for a few seconds.</p>"
+    "<form method=post action='/reboot'>";
+static const char WEB_REBOOT_CONFIRM_TAIL[] PROGMEM =
+    "<input type=hidden name=confirm value='1'>"
+    "<input class=danger type=submit value='Restart now'>"
+    "</form><p><a href='/wifi'>Cancel</a></p></section>";
 #endif
 
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL
@@ -618,7 +640,7 @@ bool Esp8266BaseWeb::begin() {
                       static_cast<unsigned>(ESP8266BASE_WEB_TCP_BACKLOG));
     ESP8266BASE_LOG_I("Web ", "web_server_started profile=%s auth_required=yes builtin_routes=%u app_pages_registered=%d/%d app_apis_registered=%d/%d",
 #if ESP8266BASE_PROFILE_MQTT_TERMINAL
-                      "mqtt_terminal", 6U,
+                      "mqtt_terminal", 8U,
 #else
                       "full", (unsigned)(15 + (ESP8266BASE_USE_OTA ? 1 : 0)),
 #endif
@@ -1282,6 +1304,10 @@ void Esp8266BaseWeb::_handleWiFiGet() {
     // Never echo the persisted secret into HTML. Saving this form requires the
     // operator to enter the password again (or leave it empty for an open AP).
     sendContent_P(WEB_WIFI_FORM_POST);
+#if ESP8266BASE_PROFILE_MQTT_TERMINAL
+    // Terminal profile has no System page; expose the two-step reboot entry here.
+    sendContent_P(PSTR("<section><h3>Reboot</h3><p><a href='/reboot'>Reboot device</a></p></section>"));
+#endif
     sendFooter();
 }
 
@@ -1658,28 +1684,12 @@ void Esp8266BaseWeb::_handleSystemGet() {
     _sendFileLogSystemSection();
 #endif
     sendContent_P(WEB_SYSTEM_PAGE);
+    sendContent_P(WEB_REBOOT_SECTION_HEAD);
+    _sendFormToken();
+    sendContent_P(WEB_REBOOT_SECTION_TAIL);
     sendFooter();
 }
 
-void Esp8266BaseWeb::_handleRebootPost() {
-    if (!checkAuth()) return;
-    sendHeader();
-    sendContent_P(WEB_REBOOTING);
-    sendFooter();
-    _server.client().stop();
-    ESP8266BASE_LOG_I("Web ", "reboot_requested source=web");
-#if ESP8266BASE_USE_RECORD_STORE
-    Esp8266BaseRecordStore::prepareMaintenance();
-#endif
-#if ESP8266BASE_USE_CONFIG
-    Esp8266BaseConfig::flush();
-#endif
-#if ESP8266BASE_USE_FILELOG
-    Esp8266BaseFileLog::flush();
-#endif
-    delay(500);
-    ESP.restart();
-}
 #else
 void Esp8266BaseWeb::_handleTerminalRoot() {
     _markRequest();
@@ -1706,9 +1716,57 @@ void Esp8266BaseWeb::_handleTerminalDispatch() {
     if (uri == "/auth" && method == HTTP_GET) return _handleAuthGet();
     if (uri == "/auth" && method == HTTP_POST) return _handleAuthPost();
     if (uri == "/health" && method == HTTP_GET) return _handleHealth();
+    if (uri == "/reboot" && method == HTTP_GET) return _handleRebootGet();
+    if (uri == "/reboot" && method == HTTP_POST) return _handleRebootPost();
     _handleNotFound();
 }
+
+void Esp8266BaseWeb::_handleRebootGet() {
+    // GET 只返回二次确认页，绝不重启（防预加载/跨站图片触发）。
+    _markRequest();
+    if (!checkAuth()) return;
+    sendHeader();
+    sendContent_P(WEB_REBOOT_CONFIRM_HEAD);
+    _sendFormToken();
+    sendContent_P(WEB_REBOOT_CONFIRM_TAIL);
+    sendFooter();
+}
 #endif
+
+void Esp8266BaseWeb::_performReboot() {
+#if ESP8266BASE_USE_WATCHDOG
+    // 安全硬约束：关闭受控输出必须优先于网络回复、证据落盘和复位。
+    Esp8266BaseWatchdog::invokeEmergencyStop();
+#endif
+    sendHeader();
+    sendContent_P(WEB_REBOOTING);
+    sendFooter();
+    _server.client().stop();
+    ESP8266BASE_LOG_I("Web ", "reboot_requested source=web");
+#if ESP8266BASE_USE_RECORD_STORE
+    Esp8266BaseRecordStore::prepareMaintenance();
+#endif
+#if ESP8266BASE_USE_CONFIG
+    Esp8266BaseConfig::flush();
+#endif
+#if ESP8266BASE_USE_FILELOG
+    Esp8266BaseFileLog::flush();
+#endif
+    delay(500);
+    ESP.restart();
+}
+
+void Esp8266BaseWeb::_handleRebootPost() {
+    _markRequest();
+    if (!checkAuth()) return;
+    if (!_verifyFormToken()) return;
+    // 必须显式 confirm=1：与确认页/系统页表单一致，裸 POST 不重启。
+    if (_server.arg("confirm") != "1") {
+        _server.send(400, "text/plain", "confirm required");
+        return;
+    }
+    _performReboot();
+}
 
 void Esp8266BaseWeb::_handleHealth() {
     _markRequest();

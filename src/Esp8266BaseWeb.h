@@ -7,9 +7,10 @@
 // Esp8266BaseWeb — 极简管理 Web
 //
 // 完整模式提供全部管理路由；ESP8266BASE_PROFILE_MQTT_TERMINAL=1 时只注册
-// GET / 根引导、GET/POST /wifi、GET/POST /auth、GET /health、POST /ota
-// 和应用扩展路由。
-// /system 是维护入口页面；/reboot 只保留 POST 重启动作
+// GET / 根引导、GET/POST /wifi、GET/POST /auth、GET/health、POST /ota、
+// GET/POST /reboot（零 JS 两段式软重启）和应用扩展路由。
+// /system 是完整模式维护入口页面；/reboot 两 profile 均提供：GET 为二次确认页
+// （terminal），POST 经认证 + CSRF + 显式 confirm 后执行“先断输出再复位”的软重启。
 // 应用扩展：最多 4 页面 + 6 API（静态数组，不动态分配）
 // Basic Auth 默认开启
 // HTML 全部放 PROGMEM，动态响应分段发送
@@ -203,11 +204,14 @@ private:
     static void _handleHostnameApiGet();
     static void _handleHostnameApiPost();
     static void _handleSystemGet();
-    static void _handleRebootPost();
 #else
     static void _handleTerminalRoot();
     static void _handleTerminalDispatch();
 #endif
+    // 两 profile 共用的软重启：GET 确认页（terminal 用）、POST 执行、共用重启体。
+    static void _handleRebootGet();
+    static void _handleRebootPost();
+    static void _performReboot();
     static void _handleHealth();
     static void _handleNotFound();
 #if !ESP8266BASE_PROFILE_MQTT_TERMINAL

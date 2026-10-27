@@ -2,6 +2,7 @@
 #if ESP8266BASE_USE_NTP
 #include "Esp8266BaseNTP.h"
 #include "Esp8266BaseNTPPacket.h"
+#include "Esp8266BaseNtpCore.h"
 extern "C" {
 #include <osapi.h>
 }
@@ -17,261 +18,329 @@ extern "C" {
 #include <sntp.h>
 #include <sys/time.h>
 #include <time.h>
+#include <stdlib.h>
+
+namespace core = Esp8266BaseNtpCore;
 
 // ----------------------------------------------------------------------------
 // 静态成员定义
 // ----------------------------------------------------------------------------
-bool     Esp8266BaseNTP::_synced      = false;
+bool     Esp8266BaseNTP::_clockTrusted = false;
+bool     Esp8266BaseNTP::_timeSuspect = false;
 bool     Esp8266BaseNTP::_logSwitched = false;
-uint32_t Esp8266BaseNTP::_lastCheckMs = 0;
-uint32_t Esp8266BaseNTP::_startedMs = 0;
-uint32_t Esp8266BaseNTP::_lastPendingLogMs = 0;
-uint32_t Esp8266BaseNTP::_nextManualMs = 0;
-uint32_t Esp8266BaseNTP::_manualSentMs = 0;
-uint8_t  Esp8266BaseNTP::_manualServer = 0;
-bool     Esp8266BaseNTP::_manualWaiting = false;
 bool     Esp8266BaseNTP::_uncertaintyMeasured = false;
+bool     Esp8266BaseNTP::_waiting = false;
+uint8_t  Esp8266BaseNTP::_mode = static_cast<uint8_t>(Mode::ACQUIRE);
+uint8_t  Esp8266BaseNTP::_serverIndex = 0;
+uint8_t  Esp8266BaseNTP::_attempts = 0;
 uint16_t Esp8266BaseNTP::_estimatedUncertaintyMs = 0;
+uint32_t Esp8266BaseNTP::_startedMs = 0;
+uint32_t Esp8266BaseNTP::_lastCheckMs = 0;
+uint32_t Esp8266BaseNTP::_lastPendingLogMs = 0;
+uint32_t Esp8266BaseNTP::_nextActionMs = 0;
+uint32_t Esp8266BaseNTP::_sentMs = 0;
 uint32_t Esp8266BaseNTP::_lastSyncRttMs = 0;
 
 static WiFiUDP _ntpUdp;
-static IPAddress _manualIp;
+static IPAddress _serverIp[2];          // 启动期解析并缓存，运行期校验零 DNS
+static uint8_t _nonce[8];
+static core::Sample _sample[2];
 static const uint16_t NTP_PORT = 123;
 static const uint16_t NTP_LOCAL_PORT = 2390;
-static uint8_t _manualNonce[8];
+static const uint32_t NTP_RESPONSE_TIMEOUT_MS = 3000;
 
-// NTP 服务器列表（全部在 Flash）
+// NTP 服务器名（全部在 Flash）
 static const char NTP_S1[] PROGMEM = ESP8266BASE_NTP_SERVER_1;
 static const char NTP_S2[] PROGMEM = ESP8266BASE_NTP_SERVER_2;
 static const char NTP_S3[] PROGMEM = ESP8266BASE_NTP_SERVER_3;
 static const char* const NTP_SERVERS[] PROGMEM = { NTP_S1, NTP_S2, NTP_S3 };
-static const uint8_t NTP_SERVER_COUNT = sizeof(NTP_SERVERS) / sizeof(NTP_SERVERS[0]);
-static char _ntpServer1[24];
-static char _ntpServer2[24];
-static char _ntpServer3[24];
-
-static void _formatIP(const IPAddress& ip, char* out, size_t len) {
-    if (!out || len == 0) return;
-    snprintf(out, len, "%u.%u.%u.%u",
-             (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2], (unsigned)ip[3]);
-}
 
 // ----------------------------------------------------------------------------
-// begin
+// begin — WiFi（重）连接后触发；设时区、拒绝 DHCP 时间源，幂等
 // ----------------------------------------------------------------------------
 bool Esp8266BaseNTP::begin() {
-    // configTime 可以在 WiFi 连接前调用；SNTP 客户端会在有网络时自动同步
-    // 第二参数 daylightOffset_sec = 0（不支持夏令时）
-    strncpy_P(_ntpServer1, NTP_S1, sizeof(_ntpServer1) - 1); _ntpServer1[sizeof(_ntpServer1)-1] = '\0';
-    strncpy_P(_ntpServer2, NTP_S2, sizeof(_ntpServer2) - 1); _ntpServer2[sizeof(_ntpServer2)-1] = '\0';
-    strncpy_P(_ntpServer3, NTP_S3, sizeof(_ntpServer3) - 1); _ntpServer3[sizeof(_ntpServer3)-1] = '\0';
+    char tz[12];
+    core::formatPosixTz(tz, sizeof(tz), ESP8266BASE_NTP_TIMEZONE);
+    setenv("TZ", tz, 1);  // POSIX 与习惯相反：UTC+8 -> UTC-8
+    tzset();
+    // 纵深防御：本固件从不 sntp_init/configTime，lwIP SNTP 根本不运行；
+    // 这里再显式关闭“从 DHCP 拿 NTP”，防止任何后续路径误启用。
+    sntp_servermode_dhcp(0);
 
-    configTime(ESP8266BASE_NTP_TIMEZONE, 0, _ntpServer1, _ntpServer2, _ntpServer3);
-    _synced = false;
-    _logSwitched = false;
-    _lastCheckMs = 0;
-    _lastPendingLogMs = 0;
     _startedMs = millis();
-    _nextManualMs = _startedMs + 1000UL;
-    _manualSentMs = 0;
-    _manualServer = 0;
-    _manualWaiting = false;
-    _uncertaintyMeasured = false;
-    _estimatedUncertaintyMs = 0;
-    _lastSyncRttMs = 0;
-    _ntpUdp.stop();
+    _lastPendingLogMs = 0;
+    _lastCheckMs = 0;
+    _waiting = false;
+    _serverIndex = 0;
+    if (!_clockTrusted) _attempts = 0;  // 重连后给未获信阶段一个新鲜退避
+    // 每次（重）连接刷新一次解析缓存：未获信时供双源采集；已获信后让重连的首次
+    // 校验重新 DNS（此刻 MQTT 传输尚未建立），避免漫游到异构网络后旧 IP 永久失效，
+    // 之后的周期校验继续复用本轮解析、不再 DNS。
+    _serverIp[0] = IPAddress();
+    _serverIp[1] = IPAddress();
+    // 已获可信时间后重连：不重新设钟，安排一次运行期校验即可。
+    _nextActionMs = _startedMs + 1000UL;
 
-    ESP8266BASE_LOG_I_P("NTP ", "ntp_client_started timezone=UTC+%d servers=%s,%s,%s check_interval=5s manual_udp=yes",
-                      ESP8266BASE_NTP_TIMEZONE / 3600, _ntpServer1, _ntpServer2, _ntpServer3);
+    ESP8266BASE_LOG_I_P("NTP ", "ntp_client_started timezone=%s servers=%s,%s set_clock=dual_source_consensus dhcp_ntp=off trusted=%s",
+                      tz, ESP8266BASE_NTP_SERVER_1, ESP8266BASE_NTP_SERVER_2,
+                      _clockTrusted ? "yes" : "no");
     return true;
 }
 
 // ----------------------------------------------------------------------------
-// handle — 每轮检查同步状态（每 5 秒检查一次，同步后降频）
+// handle
 // ----------------------------------------------------------------------------
 void Esp8266BaseNTP::handle() {
-    uint32_t now = millis();
-    if (_synced && !isSynced()) {
-        _synced = false;
-        _uncertaintyMeasured = false;
-        _nextManualMs = now;
-        _lastCheckMs = now - 5000UL;
-    }
-    if (!_synced && _pollManual(now)) {
+    const uint32_t now = millis();
+
+    // 在途请求：每次 loop 都 poll/判超时，RTT 需要毫秒精度，绝不能被下面的
+    // 1 秒空闲节流量化（否则 RTT 会被高估到约 1s 而撞上 500ms 信任门）。
+    if (_waiting) {
+        if (_pollResponse()) {
+            _advanceOrFinish(now);
+            return;
+        }
+        if (now - _sentMs >= NTP_RESPONSE_TIMEOUT_MS)
+            _abortCycle(now, "response_timeout");
         return;
     }
 
-    // 未同步前每 5 秒检查，同步后每小时重新验证
-    uint32_t interval = _synced
-        ? (uint32_t)ESP8266BASE_NTP_SYNC_INTERVAL * 1000UL
-        : 5000UL;
-
-    if (now - _lastCheckMs < interval) return;
+    if (now - _lastCheckMs < 1000UL) return;  // 空闲调度 1s 节流
     _lastCheckMs = now;
 
-    time_t t = time(nullptr);
-    if (t < 1000000000UL || static_cast<uint64_t>(t) > UINT32_MAX) {
-        _sendManual(now);
-        if (!_synced && (now - _lastPendingLogMs >= 30000UL || _lastPendingLogMs == 0)) {
-            _lastPendingLogMs = now;
-            ESP8266BASE_LOG_W_P("NTP ", "ntp_sync_pending elapsed=%lus raw_time=%lu sntp_enabled=%s reach=%03o/%03o/%03o manual_waiting=%s next_check=5s",
-                              (unsigned long)((now - _startedMs) / 1000UL),
-                              (unsigned long)t,
-                              sntp_enabled() ? "yes" : "no",
-                              (unsigned)sntp_getreachability(0),
-                              (unsigned)sntp_getreachability(1),
-                              (unsigned)sntp_getreachability(2),
-                              _manualWaiting ? "yes" : "no");
-        }
-        return;  // 未同步（2001 年以前的时间戳认为无效）
-    }
-
-    if (!_synced) {
-        _finishSync(t);
+    if (_isDue(now, _nextActionMs)) {
+        _startCycle(now, _clockTrusted ? Mode::VERIFY : Mode::ACQUIRE);
+    } else if (!_clockTrusted &&
+               (now - _lastPendingLogMs >= 30000UL || _lastPendingLogMs == 0)) {
+        _lastPendingLogMs = now;
+        ESP8266BASE_LOG_W_P("NTP ", "ntp_trust_pending elapsed=%lus attempts=%u",
+                          (unsigned long)((now - _startedMs) / 1000UL),
+                          static_cast<unsigned>(_attempts));
     }
 }
 
 void Esp8266BaseNTP::reset() {
     _ntpUdp.stop();
-    _synced = false;
-    _logSwitched = false;
-    _lastCheckMs = 0;
-    _lastPendingLogMs = 0;
-    _startedMs = 0;
-    _nextManualMs = 0;
-    _manualSentMs = 0;
-    _manualServer = 0;
-    _manualWaiting = false;
-    _uncertaintyMeasured = false;
-    _estimatedUncertaintyMs = 0;
-    _lastSyncRttMs = 0;
-    ESP8266BASE_LOG_I_P("NTP ", "ntp_client_reset reason=wifi_disconnected");
+    _waiting = false;
+    // 关键：不清除 _clockTrusted/_timeSuspect。墙钟继续走，重连不重新设钟。
+    ESP8266BASE_LOG_I_P("NTP ", "ntp_client_reset reason=wifi_disconnected trusted=%s",
+                      _clockTrusted ? "kept" : "not_yet");
 }
 
-bool Esp8266BaseNTP::_pollManual(uint32_t now) {
-    if (_manualWaiting && now - _manualSentMs >= 3000UL) {
-        char ip[16];
-        _formatIP(_manualIp, ip, sizeof(ip));
-        ESP8266BASE_LOG_W_P("NTP ", "manual_ntp_timeout server_index=%u ip=%s timeout=3s",
-                          (unsigned)_manualServer, ip);
-        _manualWaiting = false;
-        _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
-        _nextManualMs = now + 2000UL;
-    }
-    int packetSize = _ntpUdp.parsePacket();
-    if (packetSize >= 48) {
-        IPAddress remoteIp = _ntpUdp.remoteIP();
-        uint16_t remotePort = _ntpUdp.remotePort();
-        uint8_t pkt[48];
-        if (_ntpUdp.read(pkt, sizeof(pkt)) != sizeof(pkt)) return false;
-        uint8_t mode = pkt[0] & 0x07;
-        uint8_t leap = (pkt[0] >> 6) & 0x03;
-        uint8_t stratum = pkt[1];
-        if (!_manualWaiting || remoteIp != _manualIp || remotePort != NTP_PORT ||
-            mode != 4 || leap == 3 || stratum == 0 || stratum > 15 ||
-            ((pkt[0] >> 3) & 7) != 3 ||
-            !Esp8266BaseNTPInternal::matchesRequest(pkt, _manualNonce)) {
-            char remote[16];
-            char expected[16];
-            _formatIP(remoteIp, remote, sizeof(remote));
-            _formatIP(_manualIp, expected, sizeof(expected));
-            ESP8266BASE_LOG_W_P("NTP ", "manual_ntp_packet_rejected remote=%s port=%u expected=%s mode=%u leap=%u stratum=%u waiting=%s",
-                              remote, (unsigned)remotePort, expected,
-                              (unsigned)mode, (unsigned)leap, (unsigned)stratum,
-                              _manualWaiting ? "yes" : "no");
-            return false;
-        }
-        const uint64_t receivedUs = Esp8266BaseNTPInternal::timestampMicros(pkt + 32);
-        const uint64_t transmittedUs = Esp8266BaseNTPInternal::timestampMicros(pkt + 40);
-        if (transmittedUs >= 1000000000ULL * 1000000ULL &&
-            (receivedUs == 0 || transmittedUs >= receivedUs)) {
-            const uint32_t rttMs = now - _manualSentMs;
-            const uint64_t serverProcessingUs = receivedUs == 0
-                ? 0
-                : transmittedUs - receivedUs;
-            const uint64_t rttUs = (uint64_t)rttMs * 1000ULL;
-            const uint64_t networkUs = rttUs > serverProcessingUs
-                ? rttUs - serverProcessingUs
-                : 0;
-            // 主动请求在本地尚无可信 UTC 时无法构造完整 T1/T4 UTC，使用
-            // NTP server receive/transmit 与本地单调 RTT 估算单程延迟。保留
-            // RTT/uncertainty 证据，不把该估计描述成严格误差上界。
-            const uint64_t currentUs = transmittedUs + networkUs / 2ULL;
-            timeval tv;
-            tv.tv_sec = (time_t)(currentUs / 1000000ULL);
-            tv.tv_usec = (suseconds_t)(currentUs % 1000000ULL);
-            if (settimeofday(&tv, nullptr) != 0) return false;
-            _manualWaiting = false;
-            _lastSyncRttMs = rttMs;
-            const uint32_t uncertainty = (uint32_t)((networkUs + 1999ULL) / 2000ULL) + 1UL;
-            _estimatedUncertaintyMs = (uint16_t)(uncertainty > 65535UL ? 65535UL : uncertainty);
-            _uncertaintyMeasured = true;
-            char ip[16];
-            _formatIP(_manualIp, ip, sizeof(ip));
-            ESP8266BASE_LOG_I_P("NTP ", "manual_ntp_synchronized server_index=%u ip=%s rtt=%lums uncertainty_estimate=%ums",
-                              (unsigned)_manualServer,
-                              ip,
-                              (unsigned long)rttMs,
-                              (unsigned)_estimatedUncertaintyMs);
-            _finishSync(time(nullptr));
-            return true;
-        }
-    } else if (packetSize > 0) {
-        while (_ntpUdp.available()) _ntpUdp.read();
-    }
-
-    return false;
-}
-
-void Esp8266BaseNTP::_sendManual(uint32_t now) {
-    if (_manualWaiting || !_isDue(now, _nextManualMs)) return;
-
-    char server[24];
-    strncpy_P(server, (PGM_P)pgm_read_ptr(&NTP_SERVERS[_manualServer]), sizeof(server) - 1);
-    server[sizeof(server) - 1] = '\0';
-
-#if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::feed();
-#endif
-    int dnsOk = WiFi.hostByName(server, _manualIp);
-#if ESP8266BASE_USE_WATCHDOG
-    Esp8266BaseWatchdog::feed();
-#endif
-    if (dnsOk != 1 || !_manualIp.isSet()) {
-        ESP8266BASE_LOG_W_P("NTP ", "manual_ntp_dns_failed server=%s", server);
-        _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
-        _nextManualMs = millis() + 30000UL;
+// ----------------------------------------------------------------------------
+// 双源采集状态机
+// ----------------------------------------------------------------------------
+void Esp8266BaseNTP::_startCycle(uint32_t now, Mode mode) {
+    _mode = static_cast<uint8_t>(mode);
+    _serverIndex = 0;
+    _sample[0] = core::Sample{};
+    _sample[1] = core::Sample{};
+    if (!_ntpUdp.begin(NTP_LOCAL_PORT)) {
+        _abortCycle(now, "udp_bind_failed");
         return;
+    }
+    _requestServer(0, now);
+}
+
+const char* Esp8266BaseNTP::_serverName(uint8_t index) {
+    static char name[32];
+    strncpy_P(name, reinterpret_cast<const char*>(pgm_read_ptr(&NTP_SERVERS[index])),
+              sizeof(name) - 1);
+    name[sizeof(name) - 1] = '\0';
+    return name;
+}
+
+bool Esp8266BaseNTP::_requestServer(uint8_t index, uint32_t now) {
+    if (index >= 2) return false;
+    const char* server = _serverName(index);
+
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+    bool resolved;
+    if (static_cast<Mode>(_mode) == Mode::VERIFY && _serverIp[index].isSet()) {
+        resolved = true;  // 运行期校验复用启动期解析的 IP，避免 TLS 长连接期间 DNS 阻塞
+    } else {
+        resolved = WiFi.hostByName(server, _serverIp[index]) == 1 && _serverIp[index].isSet();
+    }
+#if ESP8266BASE_USE_WATCHDOG
+    Esp8266BaseWatchdog::feed();
+#endif
+    if (!resolved) {
+        ESP8266BASE_LOG_W_P("NTP ", "ntp_dns_failed server=%s index=%u", server,
+                          static_cast<unsigned>(index));
+        _abortCycle(now, "dns_failed");
+        return false;
     }
 
     uint8_t pkt[48];
     memset(pkt, 0, sizeof(pkt));
     pkt[0] = 0x1B;  // LI=0, VN=3, Mode=3(client)
-
-    // The server echoes this opaque client timestamp in Originate Timestamp.
-    // Matching it correlates the response; it does not authenticate NTP.
     const uint32_t nonceHigh = os_random();
     const uint32_t nonceLow = os_random();
-    memcpy(_manualNonce, &nonceHigh, sizeof(nonceHigh));
-    memcpy(_manualNonce + 4, &nonceLow, sizeof(nonceLow));
-    _manualNonce[0] |= 1U;
-    memcpy(pkt + 40, _manualNonce, sizeof(_manualNonce));
-    const bool packetReady = _ntpUdp.begin(NTP_LOCAL_PORT) &&
-                             _ntpUdp.beginPacket(_manualIp, NTP_PORT) &&
-                             _ntpUdp.write(pkt, sizeof(pkt)) == sizeof(pkt);
-    char ip[16];
-    _formatIP(_manualIp, ip, sizeof(ip));
-    _manualSentMs = millis();
+    memcpy(_nonce, &nonceHigh, sizeof(nonceHigh));
+    memcpy(_nonce + 4, &nonceLow, sizeof(nonceLow));
+    _nonce[0] |= 1U;
+    memcpy(pkt + 40, _nonce, sizeof(_nonce));  // 服务器回显到 Originate(偏移24)做关联
+
+    const bool packetReady =
+        _ntpUdp.beginPacket(_serverIp[index], NTP_PORT) &&
+        _ntpUdp.write(pkt, sizeof(pkt)) == sizeof(pkt);
     if (packetReady && _ntpUdp.endPacket()) {
-        _manualWaiting = true;
-        ESP8266BASE_LOG_I_P("NTP ", "manual_ntp_request server=%s ip=%s",
-                          server, ip);
-    } else {
-        ESP8266BASE_LOG_W_P("NTP ", "manual_ntp_send_failed server=%s ip=%s",
-                          server, ip);
-        _manualServer = (_manualServer + 1) % NTP_SERVER_COUNT;
-        _nextManualMs = millis() + 5000UL;
+        _sentMs = millis();  // RTT 从实际发出起算，排除 DNS 与组包耗时
+        _waiting = true;
+        _serverIndex = index;
+        ESP8266BASE_LOG_I_P("NTP ", "ntp_request server=%s ip=%s index=%u mode=%s",
+                          server, _serverIp[index].toString().c_str(),
+                          static_cast<unsigned>(index),
+                          static_cast<Mode>(_mode) == Mode::VERIFY ? "verify" : "acquire");
+        return true;
     }
+    ESP8266BASE_LOG_W_P("NTP ", "ntp_send_failed server=%s", server);
+    _abortCycle(now, "send_failed");
+    return false;
+}
+
+bool Esp8266BaseNTP::_pollResponse() {
+    const uint32_t now = millis();  // 实时采样，避免沿用 handle 入口时刻而高估 RTT
+    // 超窗的迟到包不采纳（超时判定先于任何收包）。
+    if (now - _sentMs >= NTP_RESPONSE_TIMEOUT_MS) return false;
+    const int packetSize = _ntpUdp.parsePacket();
+    if (packetSize < 48) return false;
+    const IPAddress remoteIp = _ntpUdp.remoteIP();
+    const uint16_t remotePort = _ntpUdp.remotePort();
+    uint8_t pkt[48];
+    if (_ntpUdp.read(pkt, sizeof(pkt)) != sizeof(pkt)) return false;
+
+    const uint8_t mode = pkt[0] & 0x07;
+    const uint8_t leap = (pkt[0] >> 6) & 0x03;
+    const uint8_t stratum = pkt[1];
+    const uint8_t index = _serverIndex;
+    if (remoteIp != _serverIp[index] || remotePort != NTP_PORT || mode != 4 ||
+        leap == 3 || stratum == 0 || stratum > 15 || ((pkt[0] >> 3) & 7) != 3 ||
+        !Esp8266BaseNTPInternal::matchesRequest(pkt, _nonce)) {
+        ESP8266BASE_LOG_W_P("NTP ", "ntp_packet_rejected remote=%s port=%u expected=%s mode=%u leap=%u stratum=%u",
+                          remoteIp.toString().c_str(), static_cast<unsigned>(remotePort),
+                          _serverIp[index].toString().c_str(), static_cast<unsigned>(mode),
+                          static_cast<unsigned>(leap), static_cast<unsigned>(stratum));
+        return false;  // 非当前等待源的合法响应：丢弃，继续等超时
+    }
+
+    const uint64_t receivedUs = Esp8266BaseNTPInternal::timestampMicros(pkt + 32);
+    const uint64_t transmittedUs = Esp8266BaseNTPInternal::timestampMicros(pkt + 40);
+    if (!(transmittedUs >= 1000000000ULL * 1000000ULL &&
+          (receivedUs == 0 || transmittedUs >= receivedUs)))
+        return false;
+
+    const uint32_t rttMs = now - _sentMs;
+    const uint64_t rttUs = uint64_t(rttMs) * 1000ULL;
+    const uint64_t serverProcUs = receivedUs == 0 ? 0 : transmittedUs - receivedUs;
+    const uint64_t networkUs = rttUs > serverProcUs ? rttUs - serverProcUs : 0;
+    const uint64_t estimateUs = transmittedUs + networkUs / 2ULL;
+
+    _sample[index] = core::Sample{
+        static_cast<uint32_t>(_serverIp[index]), now,
+        static_cast<uint32_t>(estimateUs / 1000000ULL),
+        static_cast<uint16_t>((estimateUs % 1000000ULL) / 1000ULL),
+        static_cast<uint16_t>(rttMs)};
+    _waiting = false;
+    return true;
+}
+
+void Esp8266BaseNTP::_advanceOrFinish(uint32_t now) {
+    if (_serverIndex == 0) {
+        _requestServer(1, now);
+        return;
+    }
+    if (static_cast<Mode>(_mode) == Mode::ACQUIRE)
+        _finishAcquire(now);
+    else
+        _finishVerify(now);
+}
+
+void Esp8266BaseNTP::_finishAcquire(uint32_t now) {
+    uint64_t trustedAtB = 0;
+    const core::Verdict verdict =
+        core::evaluateAcquisition(_sample[0], _sample[1], trustedAtB);
+    if (verdict != core::Verdict::TRUSTED) {
+        _abortCycle(now, "sources_untrusted");
+        return;
+    }
+
+    // 把可信时间从样本 b 接收时刻推进到设置瞬间再 settimeofday。
+    const uint64_t setUs = trustedAtB + uint64_t(now - _sample[1].atMs) * 1000ULL;
+    timeval tv;
+    tv.tv_sec = static_cast<time_t>(setUs / 1000000ULL);
+    tv.tv_usec = static_cast<suseconds_t>(setUs % 1000000ULL);
+    if (settimeofday(&tv, nullptr) != 0) {
+        _abortCycle(now, "settime_failed");
+        return;
+    }
+
+    _clockTrusted = true;
+    _timeSuspect = false;
+    _uncertaintyMeasured = true;
+    _lastSyncRttMs = (uint32_t(_sample[0].rttMs) + _sample[1].rttMs) / 2U;
+    _estimatedUncertaintyMs =
+        core::agreeWindowMs(_sample[0].rttMs, _sample[1].rttMs);
+    _attempts = 0;
+    _nextActionMs = now + uint32_t(ESP8266BASE_NTP_SYNC_INTERVAL) * 1000UL;
+    _finishSync(time(nullptr));
+    ESP8266BASE_LOG_I_P("NTP ", "ntp_trusted rtt0=%lums rtt1=%lums agree=%ums",
+                      static_cast<unsigned long>(_sample[0].rttMs),
+                      static_cast<unsigned long>(_sample[1].rttMs),
+                      static_cast<unsigned>(_estimatedUncertaintyMs));
+}
+
+void Esp8266BaseNTP::_finishVerify(uint32_t now) {
+    timeval tv;
+    gettimeofday(&tv, nullptr);
+    const uint64_t localUs =
+        uint64_t(tv.tv_sec) * 1000000ULL + static_cast<uint64_t>(tv.tv_usec);
+    uint64_t trustedNow = 0;
+    const core::Verdict verdict =
+        core::evaluateVerification(_sample[0], _sample[1], localUs, now, trustedNow);
+
+    _attempts = 0;
+    _nextActionMs = now + uint32_t(ESP8266BASE_NTP_SYNC_INTERVAL) * 1000UL;
+    const long deltaMs = static_cast<long>((trustedNow > localUs ? trustedNow - localUs
+                                                                : localUs - trustedNow) /
+                                           1000ULL);
+    if (verdict == core::Verdict::SUSPECT) {
+        _timeSuspect = true;
+        // 只标记/留证，绝不回拨或前拨墙钟（回拨会永久冻结命令账本）。
+        ESP8266BASE_LOG_W_P("NTP ", "ntp_time_suspect clock_delta_ms=%ld (clock left unchanged)",
+                          deltaMs);
+    } else if (verdict == core::Verdict::TRUSTED) {
+        if (_timeSuspect) _timeSuspect = false;
+        ESP8266BASE_LOG_I_P("NTP ", "ntp_time_verified clock_delta_ms=%ld", deltaMs);
+    } else {
+        ESP8266BASE_LOG_W_P("NTP ", "ntp_verify_inconclusive (clock left unchanged)");
+    }
+    _ntpUdp.stop();  // 周期校验只在采集的几秒内占用 UDP:2390，结束立即释放
+}
+
+void Esp8266BaseNTP::_abortCycle(uint32_t now, const char* reason) {
+    _waiting = false;
+    _ntpUdp.stop();  // 退避/失败期间不常驻监听，下轮 _startCycle 重新 begin
+    _sample[0] = core::Sample{};
+    _sample[1] = core::Sample{};
+    if (static_cast<Mode>(_mode) == Mode::VERIFY) {
+        // 运行期校验遇网络/DNS 问题：不是不信任，下个正常周期再校验，不快速重试。
+        _attempts = 0;
+        _nextActionMs = now + uint32_t(ESP8266BASE_NTP_SYNC_INTERVAL) * 1000UL;
+        ESP8266BASE_LOG_W_P("NTP ", "ntp_verify_aborted reason=%s", reason ? reason : "unknown");
+        return;
+    }
+    if (_attempts < 0xFFU) ++_attempts;
+    uint8_t shift = _attempts > 0 ? static_cast<uint8_t>(_attempts - 1) : 0;
+    if (shift > 5) shift = 5;  // 2,4,8,16,32,64(封顶 60)
+    uint32_t backoff = 2000UL << shift;
+    if (backoff > 60000UL) backoff = 60000UL;
+    _nextActionMs = now + backoff;
+    ESP8266BASE_LOG_W_P("NTP ", "ntp_acquire_rejected reason=%s retry_in=%lums attempt=%u",
+                      reason ? reason : "unknown", static_cast<unsigned long>(backoff),
+                      static_cast<unsigned>(_attempts));
 }
 
 bool Esp8266BaseNTP::_isDue(uint32_t now, uint32_t due) {
@@ -280,8 +349,7 @@ bool Esp8266BaseNTP::_isDue(uint32_t now, uint32_t due) {
 
 void Esp8266BaseNTP::_finishSync(time_t t) {
     _ntpUdp.stop();
-    _manualWaiting = false;
-    _synced = true;
+    _waiting = false;
 #if ESP8266BASE_USE_JOURNAL
     const uint32_t epoch = static_cast<uint32_t>(t);
     Esp8266BaseJournal::record(JNL_NTP_SYNC, 0, 0,
@@ -304,9 +372,7 @@ void Esp8266BaseNTP::_finishSync(time_t t) {
     }
 
     ESP8266BASE_LOG_I_P("NTP ", "time_synchronized actual_time=%s uptime_ms=%lu boot_time=%s",
-                      nowBuf, (unsigned long)uptimeMs, bootBuf);
-    ESP8266BASE_LOG_I_P("NTP ", "time_mapping boot_millis=0 actual_time=%s current_millis=%lu current_time=%s",
-                      bootBuf, (unsigned long)uptimeMs, nowBuf);
+                      nowBuf, static_cast<unsigned long>(uptimeMs), bootBuf);
 
     if (!_logSwitched) {
         _logSwitched = true;
@@ -319,11 +385,11 @@ void Esp8266BaseNTP::_finishSync(time_t t) {
 // 公开查询
 // ----------------------------------------------------------------------------
 bool Esp8266BaseNTP::isSynced() {
-    return timestamp() != 0;
+    return _clockTrusted;
 }
 
 bool Esp8266BaseNTP::hasMeasuredUncertainty() {
-    return isSynced() && _uncertaintyMeasured;
+    return _clockTrusted && _uncertaintyMeasured;
 }
 
 uint32_t Esp8266BaseNTP::lastSyncRttMs() {
@@ -336,8 +402,10 @@ uint16_t Esp8266BaseNTP::estimatedUncertaintyMs() {
 
 uint32_t Esp8266BaseNTP::timestamp() {
     const time_t current = time(nullptr);
-    return _synced && current >= 1000000000UL && static_cast<uint64_t>(current) <= UINT32_MAX
-        ? static_cast<uint32_t>(current) : 0;
+    return _clockTrusted && current >= 1000000000UL &&
+                   static_cast<uint64_t>(current) <= UINT32_MAX
+               ? static_cast<uint32_t>(current)
+               : 0;
 }
 
 bool Esp8266BaseNTP::formatTo(char* out, size_t len, const char* fmt) {
@@ -349,13 +417,8 @@ bool Esp8266BaseNTP::formatTo(char* out, size_t len, const char* fmt) {
     return tm_info && strftime(out, len, fmt, tm_info) != 0;
 }
 
-// ----------------------------------------------------------------------------
-// Log 时间回调（静态，注入 Esp8266BaseLog::setTimeProvider）
-// 返回指向静态缓冲的指针（非重入，适合 ESP8266 Arduino 单线程日志路径）。
-// Log hook 若需要异步保存 timestamp，必须在回调内立即复制字符串。
-// ----------------------------------------------------------------------------
 const char* Esp8266BaseNTP::_timeStr() {
-    static char buf[20];  // "YYYY-MM-DD HH:MM:SS\0" = 20 字节
+    static char buf[20];
     if (!isSynced()) {
         snprintf(buf, sizeof(buf), "%lu", static_cast<unsigned long>(millis()));
         return buf;

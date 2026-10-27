@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -242,26 +245,84 @@ def test_ntp_manual_packet_validation() -> None:
     ntp_cpp = read("src/Esp8266BaseNTP.cpp")
     networking = read("docs/08_networking.md")
     api = read("docs/03_api_reference.md")
-    require_token(ntp_cpp, "remoteIp != _manualIp", "NTP manual response IP validation")
-    require_token(ntp_cpp, "remotePort != NTP_PORT", "NTP manual response port validation")
+    require_token(ntp_cpp, "remoteIp != _serverIp[index]", "NTP response IP validation")
+    require_token(ntp_cpp, "remotePort != NTP_PORT", "NTP response port validation")
     require_token(ntp_cpp, "mode != 4", "NTP manual server mode validation")
     require_token(ntp_cpp, "stratum == 0 || stratum > 15", "NTP manual stratum validation")
-    require_token(ntp_cpp, "manual_ntp_packet_rejected", "NTP invalid manual packet log")
-    require_token(ntp_cpp, "!_isDue(now, _nextManualMs)", "wrap-safe NTP manual retry deadline")
+    require_token(ntp_cpp, "ntp_packet_rejected", "NTP invalid manual packet log")
     require_token(ntp_cpp, "static_cast<int32_t>(now - due) >= 0",
                   "NTP retry signed delta comparison")
     if millis_due(0xFFFFFFF0, 0x00000010) or not millis_due(0x00000020, 0x00000010):
-        fail("NTP manual retry deadline must remain correct across millis wrap")
-    require_token(ntp_cpp, "Esp8266BaseNTPInternal::matchesRequest(pkt, _manualNonce)", "NTP response must match current request")
-    require_token(ntp_cpp, "memcpy(pkt + 40, _manualNonce", "NTP request correlation timestamp")
-    poll = ntp_cpp[ntp_cpp.index("bool Esp8266BaseNTP::_pollManual"):ntp_cpp.index("void Esp8266BaseNTP::_sendManual")]
-    if poll.index("now - _manualSentMs >= 3000UL") > poll.index("parsePacket()"):
-        fail("NTP request timeout must be checked before any received packet")
-    send = ntp_cpp[ntp_cpp.index("void Esp8266BaseNTP::_sendManual"):ntp_cpp.index("bool Esp8266BaseNTP::_isDue")]
-    if not send.index("hostByName") < send.index("_manualSentMs = millis()") < send.index("endPacket()"):
-        fail("NTP RTT must exclude DNS and begin at packet transmission")
-    require_token(networking, "主动 UDP NTP 只接受当前等待服务器", "NTP manual validation doc")
+        fail("NTP retry deadline must remain correct across millis wrap")
+    require_token(ntp_cpp, "Esp8266BaseNTPInternal::matchesRequest(pkt, _nonce)",
+                  "NTP response must match current request")
+    require_token(ntp_cpp, "memcpy(pkt + 40, _nonce", "NTP request correlation timestamp")
+    poll = ntp_cpp[ntp_cpp.index("bool Esp8266BaseNTP::_pollResponse"):
+                   ntp_cpp.index("void Esp8266BaseNTP::_advanceOrFinish")]
+    if not poll.index("NTP_RESPONSE_TIMEOUT_MS") < poll.index("parsePacket()"):
+        fail("NTP timeout must be checked before parsing a late packet")
+    send = ntp_cpp[ntp_cpp.index("bool Esp8266BaseNTP::_requestServer"):
+                   ntp_cpp.index("bool Esp8266BaseNTP::_pollResponse")]
+    if not send.index("hostByName") < send.index("endPacket()"):
+        fail("NTP DNS must resolve before the packet is sent")
+    if not send.index("endPacket()") < send.index("_sentMs = millis()"):
+        fail("NTP RTT origin must be sampled right after endPacket, excluding DNS")
+    require_token(networking, "只接受当前等待服务器", "NTP manual validation doc")
     require_token(api, "校验响应来源 IP、端口、mode、stratum", "API NTP validation doc")
+
+
+def test_ntp_trust_core() -> None:
+    """可信双源对时：结构禁令 + 纯核 host 实编译断言。"""
+    core_h = read("src/Esp8266BaseNtpCore.h")
+    ntp_cpp = read("src/Esp8266BaseNTP.cpp")
+
+    # 唯一设钟权威：业务路径不得启用 lwIP 内置 SNTP/DHCP 时间源。
+    forbid_token(ntp_cpp, "configTime(", "configTime/lwIP SNTP clock source")
+    forbid_token(ntp_cpp, "sntp_init()", "sntp_init clock source")
+    forbid_token(ntp_cpp, "sntp_setservername(", "lwIP sntp server configuration")
+    require_token(ntp_cpp, "sntp_servermode_dhcp(0)", "DHCP option 42 NTP disabled")
+
+    # 纯核必须具备：不同 IP、RTT 门、绝对年份窗、双源一致窗。
+    require_token(core_h, "a.serverIp4 == b.serverIp4", "same-server detection")
+    require_token(core_h, "RTT_GATE_MS", "RTT gate constant")
+    require_token(core_h, "MIN_PLAUSIBLE_UNIX_SEC", "plausibility floor constant")
+    require_token(core_h, "normalizeToLaterUs", "common-instant normalization")
+
+    # settimeofday 只允许出现在启动期采集收尾一次；运行期校验严禁改钟。
+    acquire = ntp_cpp[ntp_cpp.index("void Esp8266BaseNTP::_finishAcquire"):
+                      ntp_cpp.index("void Esp8266BaseNTP::_finishVerify")]
+    require_token(acquire, "settimeofday(&tv", "startup-only settimeofday")
+    verify = ntp_cpp[ntp_cpp.index("void Esp8266BaseNTP::_finishVerify"):
+                     ntp_cpp.index("void Esp8266BaseNTP::_abortCycle")]
+    forbid_token(verify, "settimeofday", "runtime clock adjustment")
+
+    # WiFi 断开 reset 不得清除已可信闘锁。
+    reset_seg = ntp_cpp[ntp_cpp.index("void Esp8266BaseNTP::reset"):
+                        ntp_cpp.index("void Esp8266BaseNTP::_startCycle")]
+    forbid_token(reset_seg, "_clockTrusted =", "reset must not clear the trust latch")
+    require_token(reset_seg, "不清除 _clockTrusted", "reset latch comment")
+
+    # 在途响应的 poll/超时必须在 1s 空闲节流之前，否则 RTT 被量化到约 1s、撞 500ms 门。
+    handle_seg = ntp_cpp[ntp_cpp.index("void Esp8266BaseNTP::handle"):
+                        ntp_cpp.index("void Esp8266BaseNTP::reset")]
+    if not handle_seg.index("if (_waiting)") < handle_seg.index("_lastCheckMs < 1000UL"):
+        fail("in-flight NTP poll must run every loop before the 1s idle throttle")
+
+    # 纯核 host 实编译 + 断言（与固件共用同一份 NtpCore.h）。
+    cxx = shutil.which("clang++") or shutil.which("g++")
+    if not cxx:
+        fail("no C++ compiler available for NTP core host test")
+    with tempfile.TemporaryDirectory() as tmp:
+        binary = Path(tmp) / "ntp_core_test"
+        compiled = subprocess.run(
+            [cxx, "-std=c++17", "-Wall", "-Wextra",
+             str(ROOT / "tools/ntp_core_host_test.cpp"), "-o", str(binary)],
+            capture_output=True, text=True)
+        if compiled.returncode != 0:
+            fail("NTP core host test compile error:\n" + compiled.stderr)
+        ran = subprocess.run([str(binary)], capture_output=True, text=True)
+        if ran.returncode != 0:
+            fail("NTP core host test failed:\n" + ran.stdout + ran.stderr)
 
 
 def test_config_deferred_rules() -> None:
@@ -1254,8 +1315,26 @@ def test_web_home_contract() -> None:
     require_token(maintainer, "System 页面可通过 `/logs/clear` 清空日志", "maintainer log clear location")
     if "Clear Log" in web_cpp:
         fail("Logs page must not keep the old Clear Log action")
-    if "GET  /reboot" in architecture or "| `/reboot` | GET" in api or "| `/reboot` | GET" in web_doc:
-        fail("GET /reboot must not remain; System page is GET /system")
+    # Reboot safety: GET only renders a confirm page and must never restart;
+    # POST requires the per-boot CSRF token plus explicit confirm=1; the shared
+    # reboot body invokes emergency-stop before sending any response.
+    reboot_get = web_cpp[web_cpp.index('void Esp8266BaseWeb::_handleRebootGet'):
+                         web_cpp.index('void Esp8266BaseWeb::_performReboot')]
+    for bad in ('_performReboot', 'ESP.restart'):
+        if bad in reboot_get:
+            fail('GET /reboot must never perform the restart: ' + bad)
+    require_token(reboot_get, 'WEB_REBOOT_CONFIRM_HEAD', 'GET /reboot confirm page')
+    perform_seg = web_cpp[web_cpp.index('void Esp8266BaseWeb::_performReboot'):
+                          web_cpp.index('void Esp8266BaseWeb::_handleRebootPost')]
+    if perform_seg.index('invokeEmergencyStop') >= perform_seg.index('sendHeader'):
+        fail('reboot must invoke emergency-stop before any response')
+    reboot_post = web_cpp[web_cpp.index('void Esp8266BaseWeb::_handleRebootPost'):]
+    require_token(reboot_post, '_verifyFormToken()', 'reboot POST CSRF check')
+    require_token(reboot_post, 'arg("confirm") != "1"', 'reboot POST explicit confirm')
+    require_token(reboot_post, '_performReboot();', 'reboot POST performs reboot')
+    require_token(web_cpp, 'uri == "/reboot" && method == HTTP_GET', 'terminal reboot GET route')
+    require_token(web_cpp, '_server.on("/reboot", HTTP_POST, _handleRebootPost);',
+                  'full profile reboot POST registration')
     for text, label in [(web_cpp, "web_cpp"), (web_h, "web_h"), (api, "api"), (web_doc, "web_doc")]:
         for old in ["Esp8266BaseWebBuiltinLabel::WIFI", "Esp8266BaseWebBuiltinLabel::OTA",
                     "Esp8266BaseWebBuiltinLabel::AUTH", "Esp8266BaseWebBuiltinLabel::REBOOT",
@@ -1333,6 +1412,7 @@ def main() -> None:
     test_log_file_buffer_rules()
     test_wifi_retry_rules()
     test_ntp_manual_packet_validation()
+    test_ntp_trust_core()
     test_config_deferred_rules()
     test_restart_count_skips_deep_sleep_wake()
     test_log_segment_paths()

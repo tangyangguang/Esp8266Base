@@ -295,7 +295,7 @@ void Esp8266Base::handle() {
     }
 #endif
 
-    // 4. NTP handle（同步状态检查，每 5s 一次；DNS/等待有界，给 8s 记账上限）
+    // 4. NTP handle（双源采集秒级轮询；DNS 有界，给 8s 记账上限）
 #if ESP8266BASE_USE_NTP
     if (_ntpWasTriggered) {
 #if ESP8266BASE_USE_WATCHDOG

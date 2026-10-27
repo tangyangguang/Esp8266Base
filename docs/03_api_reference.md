@@ -518,18 +518,19 @@ static bool isRunning();
 | `/api/system/hostname` | GET | 查询 hostname JSON（需要 Basic Auth） |
 | `/api/system/hostname` | POST | 保存 hostname 表单参数 `hostname`（需要 Basic Auth，重启生效） |
 | `/logs/clear` | POST | 清空文件日志（需要 Basic Auth，入口在 System 页面） |
-| `/reboot` | POST | flush Config 后重启 |
+| `/reboot` | GET | 重启二次确认页（需要 Basic Auth；纯 HTML、无 JavaScript；GET 只展示确认表单，绝不触发重启） |
+| `/reboot` | POST | 先调用已注册的 emergency-stop 安全回调立即断开受控输出，再 flush Config/日志后重启；需 Basic Auth + 每次启动表单令牌 + 显式 `confirm=1` |
 | `/health` | GET | 固定 JSON：firmware/version/uptime/heap/maxBlock/wifi/wifiSsid/wifiRssi/ip/ntp/MQTT 状态、attempt、last reason、TLS error code、WDT/OTA（无需认证；SSID 用于现场诊断，不含密码、broker、clientId、证书或错误长文本） |
 
 页面式路由和未知路径使用 Basic Auth 挑战；未知路径认证通过后返回 404。`/api/system/hostname` 未认证时返回 JSON 401，不发送 `WWW-Authenticate`，调用方需要显式提供 `Authorization` header。`/health` 保持免认证。
 
-`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 时只注册极小 `GET /` 引导、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`POST /ota` 和显式容量的应用路由。AP_CONFIG 下 `/` 为 `303 /wifi`，STA 下为 `303 ESP8266BASE_TERMINAL_HOME_PATH`（默认 `/health`）。完整系统首页、Logs、System、hostname、reboot 与 `GET /ota` 均不注册；容量为 0 时不保留对应应用路由数组。
+`ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 时只注册极小 `GET /` 引导、`GET/POST /wifi`、`GET/POST /auth`、`GET /health`、`GET/POST /reboot`、`POST /ota` 和显式容量的应用路由。AP_CONFIG 下 `/` 为 `303 /wifi`，STA 下为 `303 ESP8266BASE_TERMINAL_HOME_PATH`（默认 `/health`）。完整系统首页、Logs、System、hostname 与 `GET /ota` 均不注册；`/reboot` 例外，两个 profile 都提供：terminal 在 `/wifi` 页提供“重启设备”入口，`GET /reboot` 返回零 JavaScript 的二次确认页，`POST /reboot` 需 Basic Auth + 启动令牌 + `confirm=1`，且在回复、落盘与复位之前先执行 emergency-stop 安全回调。容量为 0 时不保留对应应用路由数组。
 
 Web 和 OTA 完整行为见 `docs/06_web_ota.md`。
 
 系统首页用 Connection、Runtime、Firmware、Time 四组展示状态。Connection 显示 `Hostname/WiFi/SSID/IP/RSSI(dBm)/STA MAC`；Runtime 显示 `Free heap/Max block/Restart count`，其中 `Restart count` 来自 `eb_boot_count`，deep sleep 唤醒不递增；启用 Watchdog 时显示 `WDT resets`，值为 `N since clear`，表示上次手动清零或恢复出厂后的看门狗重启次数，启用 Sleep 时显示 `Wake reason` 英文状态和简短中文说明；Time 显示 `Uptime/NTP/Now/Boot time`；Firmware 显示 `Firmware/Version/Chip ID/CPU/Flash/Sketch/OTA free`。`Chip ID` 使用 `ESP.getChipId()`，显示为 `ESP8266-XXXXXX`，不尝试识别具体模组型号。`Flash/Sketch/OTA free/Free heap/Max block` 等字节数统一保留两位小数；footer 常驻状态按 `Free heap: 31.42 KB · Up: 3h 12m · RSSI: -63 dBm` 顺序显示，`Up` 不显示秒，未连接 STA 时 `RSSI` 显示 `-`。`FOOTER_COMPACT` 在窄屏下会把入口按钮和状态信息分成两行并左对齐，避免状态行换行后靠右。`OTA free` 来自 `ESP.getFreeSketchSpace()`，表示当前分区和 Arduino Core 规则下允许写入 OTA 镜像的空间，不等同于固件分区总量减去当前 `Sketch`。
 
-`/wifi` GET 只回显已保存 SSID，密码输入始终为空且不会把已保存密码写入 HTML；重新保存时必须重输密码（开放网络保持为空）。WiFi 凭证保留合法的首尾空格。`/wifi` 和 `/auth` 的 GET 表单携带每次启动随机令牌，POST 必须同时通过 Basic Auth 与令牌校验。内置 WiFi、Reboot、OTA 表单都带重复提交保护；自定义页面也建议在表单 `onsubmit` 中调用 `once(this)`。
+`/wifi` GET 只回显已保存 SSID，密码输入始终为空且不会把已保存密码写入 HTML；重新保存时必须重输密码（开放网络保持为空）。WiFi 凭证保留合法的首尾空格。`/wifi` 和 `/auth` 的 GET 表单携带每次启动随机令牌，POST 必须同时通过 Basic Auth 与令牌校验。full profile 内置 WiFi、Reboot、OTA 表单都带 JavaScript 重复提交保护（`once(this)`）；terminal profile 的 Reboot 不使用 JavaScript，依靠独立的 GET 二次确认页加显式 `confirm=1` 参数防误触。
 `addPage()` / `addApi()` 必须在 `Esp8266Base::begin()` 后调用；过早调用会返回 `false` 并输出 WARN 日志。
 
 ### 使用示例
@@ -690,12 +691,12 @@ OTA 使用 `ESP.getFreeSketchSpace()` 作为写入空间，不使用 `UPDATE_SIZ
 ```cpp
 static bool begin();
 ```
-配置 NTP 服务器和时区，启动系统 SNTP 客户端，并启用库内主动 UDP NTP 查询。由 `Esp8266Base::handle()` 在 WiFi 首次连接时自动调用。主动 UDP NTP 只在等待响应期间接受数据包，并校验响应来源 IP、端口、mode、stratum；它解析 NTP receive/transmit 的秒和 32 位小数部分，以本地单调 RTT 扣除服务端处理时间后估算单程延迟，不再把时间截断到整秒。
+配置时区（POSIX TZ，UTC+8 内部按反号 `UTC-8`），并显式关闭 lwIP 从 DHCP option 42 获取 NTP；不再启动系统 SNTP（不调用 `configTime`/`sntp_init`），自研硬化 UDP 客户端是唯一设钟权威。由 `Esp8266Base::handle()` 在 WiFi 每次（重）连接时自动调用，幂等；已获可信时间后再次调用不会重新设钟。主动 UDP NTP 只接受当前等待服务器的响应，并校验响应来源 IP、端口、mode、stratum、leap indicator 与请求 nonce；解析 receive/transmit 的秒和 32 位小数，以本地单调 RTT 扣除服务端处理时间后估算单程延迟，不截断到整秒。
 
 ```cpp
 static void handle();
 ```
-检查同步状态。系统 SNTP 或库内主动 UDP NTP 任一路径成功后，都会设置系统时间，并自动调用 `Esp8266BaseLog::setTimeProvider()` 切换日志时间格式。首次同步会记录实际时间、启动后毫秒数和推算出的本次启动时间，便于换算同步前的日志。WiFi 断开后主入口会调用 `reset()` 释放 UDP socket；WiFi 重连后会重新 `begin()`。
+驱动对两个钉死权威源的顺序采集。**未获可信时间时为设钟模式**：两个源必须解析到不同 IP、各自 RTT ≤ 500ms、时间值落在合理年份窗（2023..2035）、并按本地单调钟归一到同一时刻后结果一致（一致窗与实测 RTT 挂钩，下限 250ms），才 `settimeofday` 一次并置位本次启动的已可信闘锁；任一条件不满足就丢弃整批并按 2s→60s 退避重新采集（fail-closed：此时 MQTT/TLS 不放行）。**已获可信时间后为只校验模式**：周期性对双源重新比对，发现双源一致时间与本地墙钟偏差超过 2s 只置可疑标志并记录 `ntp_time_suspect`，绝不回拨或前拨墙钟（回拨会永久冻结命令账本）。首次设钟会切换日志时间格式，并记录实际时间、启动后毫秒数和推算的本次启动时间。WiFi 断开调用 `reset()` 释放 UDP，但**不清除可信闘锁**；重连后不重新设钟，墙钟继续走。
 
 ```cpp
 static bool isSynced();
@@ -704,21 +705,22 @@ static bool hasMeasuredUncertainty();
 static uint32_t lastSyncRttMs();
 static uint16_t estimatedUncertaintyMs();
 ```
-`timestamp()` 返回当前 Unix 时间戳，未同步时返回 0。主动 UDP NTP 路径保留本次 RTT 和基于网络往返的保守误差估计，`hasMeasuredUncertainty()` 为 true 时另外两个值才有效；系统 SNTP 没有公开单次测量证据，因此明确返回 false/0，业务不得把格式上的毫秒当成已验证的毫秒准确度。该 uncertainty 是链路对称假设下的估计，不是硬实时误差保证。
+`isSynced()` 返回本次启动是否已获可信时间，是一次性闘锁，WiFi 掉线重连不会把它清回 false。`timestamp()` 返回当前 Unix 时间戳，未获可信时间时返回 0。双源设钟保留两源平均 RTT 和基于网络往返的保守一致窗估计，`hasMeasuredUncertainty()` 为 true 时另外两个值才有效；业务不得把格式上的毫秒当成已验证的毫秒准确度，该估计也不是硬实时误差保证。明文 NTP 的 nonce 主要防离线伪造；若本地网络把所有 UDP/123 重定向到同一台设备，不同 IP 门会拒绝采令，不同 IP + RTT 门 + 绝对年份窗是纵深防护，不宣称能抵御完全受控链路上的时间篡改。
 
 ```cpp
 static bool formatTo(char* out, size_t len, const char* fmt);
 ```
-使用 `strftime` 格式化当前时间。返回 `false` 表示未同步或 buf 太小。
+使用 `strftime` 格式化当前时间。返回 `false` 表示未获可信时间或 buf 太小。
 
 ### 默认配置
 
 | 参数 | 默认值 |
 |------|--------|
-| 时区偏移 | 28800（UTC+8，`ESP8266BASE_NTP_TIMEZONE`） |
-| NTP 服务器 | ntp.aliyun.com, ntp.tencent.com, cn.pool.ntp.org |
-| 重新同步间隔 | 3600s（`ESP8266BASE_NTP_SYNC_INTERVAL`） |
-| 主动 UDP 查询 | 未同步时自动轮询 3 个服务器，单次等待 3s |
+| 时区偏移 | 28800（UTC+8，`ESP8266BASE_NTP_TIMEZONE`，支持半小时/负偏移） |
+| NTP 权威源 | ntp.aliyun.com、ntp.tencent.com（必须两个、解析到不同 IP 且结果一致；已移除 cn.pool.ntp.org） |
+| 第三源 | 默认为空（`ESP8266BASE_NTP_SERVER_3` 空串），当前不参与信任判定，仅保留编译期覆盖 |
+| 运行期只校验间隔 | 3600s（`ESP8266BASE_NTP_SYNC_INTERVAL`）；复用启动期解析的 IP，不重新 DNS |
+| 双源采集门限 | 单源等待 3s、RTT ≤ 500ms、一致窗 = (RTTa+RTTb)/4 + 100ms（下限 250ms）、年份 2023..2035 |
 
 ### 使用示例
 
@@ -964,7 +966,8 @@ void loop() {
 | `ESP8266BASE_CFG_FORMAT_ON_FAIL` | `0` | LittleFS 挂载失败时是否自动格式化 |
 | `ESP8266BASE_NTP_TIMEZONE` | `28800` | 时区偏移秒（UTC+8 = 8×3600） |
 | `ESP8266BASE_NTP_SYNC_INTERVAL` | `3600` | NTP 重新同步间隔（秒） |
-| `ESP8266BASE_NTP_SERVER_1..3` | 中国镜像服务器 | NTP 服务器 |
+| `ESP8266BASE_NTP_SERVER_1..2` | ntp.aliyun.com / ntp.tencent.com | 双源一致才设钟，必须解析到不同 IP |
+| `ESP8266BASE_NTP_SERVER_3` | 空串 | 预留，默认不参与信任判定 |
 | `ESP8266BASE_WDT_TIMEOUT_MS` | `2500` | 看门狗超时毫秒 |
 | `ESP8266BASE_CFG_DEFERRED_SIZE` | `4` | deferred 写入队列长度 |
 | `ESP8266BASE_CFG_DEFERRED_FLUSH_INTERVAL_MS` | `5000` | deferred 写入最小刷盘间隔 ms |
@@ -1011,7 +1014,7 @@ static void formatRecord(...);         // ≤80 字符文本行（页面/raw 共
 
 ### 对时与发送边界
 
-NTP 在原有来源校验之外要求本次请求标识匹配，并在接收前执行 3 秒请求超时。`isSynced()` / `timestamp()` 不会把当前无效系统时钟当作已同步；`formatTo()` 格式化失败或缓冲不足返回 false。Web 流式发送补齐部分写入，失败关闭连接；每次 API 调用共用 30 秒发送预算，内置页面的 SDK 单次 write timeout 仍为 1500ms，不宣称整个请求可被抢占。详情见 [网络管理](08_networking.md)。
+NTP 不再启动 lwIP 系统 SNTP，并显式关闭 DHCP option 42 时间源，自研硬化 UDP 客户端是唯一设钟权威。每个源要求 8 字节随机请求标识匹配、来源 IP/端口匹配、NTP 版本 3、mode=4、leap/stratum 合法，并在接收前执行 3 秒请求超时；只有两个不同 IP 的源在 RTT ≤ 500ms、时间值合理且归一到同一单调时刻后结果一致时才设钟一次（见第 9 节）。设钟后运行期只周期性双源校验，发现偏差只置可疑标志、不改钟；WiFi 重连不清可信闘锁、不重新设钟。`isSynced()` / `timestamp()` 在未获可信时间时返回 false/0；`formatTo()` 格式化失败或缓冲不足返回 false。Web 流式发送补齐部分写入，失败关闭连接；每次 API 调用共用 30 秒发送预算，内置页面的 SDK 单次 write timeout 仍为 1500ms，不宣称整个请求可被抢占。详情见 [网络管理](08_networking.md)。
 
 
 ## MQTT 每次连接前准备 LWT
