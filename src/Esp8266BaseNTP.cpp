@@ -19,6 +19,7 @@ extern "C" {
 #include <sys/time.h>
 #include <time.h>
 #include <stdlib.h>
+#include <string.h>
 
 namespace core = Esp8266BaseNtpCore;
 
@@ -31,6 +32,7 @@ bool     Esp8266BaseNTP::_logSwitched = false;
 bool     Esp8266BaseNTP::_uncertaintyMeasured = false;
 bool     Esp8266BaseNTP::_waiting = false;
 bool     Esp8266BaseNTP::_activityActive = false;
+bool     Esp8266BaseNTP::_refreshResolverAfterReconnect = false;
 uint8_t  Esp8266BaseNTP::_mode = static_cast<uint8_t>(Mode::ACQUIRE);
 uint8_t  Esp8266BaseNTP::_serverIndex = 0;
 uint8_t  Esp8266BaseNTP::_attempts = 0;
@@ -73,12 +75,20 @@ bool Esp8266BaseNTP::begin() {
     _lastCheckMs = 0;
     _waiting = false;
     _serverIndex = 0;
-    if (!_clockTrusted) _attempts = 0;  // 重连后给未获信阶段一个新鲜退避
-    // 每次（重）连接刷新一次解析缓存：未获信时供双源采集；已获信后让重连的首次
-    // 校验重新 DNS（此刻 MQTT 传输尚未建立），避免漫游到异构网络后旧 IP 永久失效，
-    // 之后的周期校验继续复用本轮解析、不再 DNS。
-    _serverIp[0] = IPAddress();
-    _serverIp[1] = IPAddress();
+    if (!_clockTrusted) {
+        _attempts = 0;  // 重连后给未获信阶段一个新鲜退避
+        // 未获信：每次重连都重新解析，供双源采集。
+        _serverIp[0] = IPAddress();
+        _serverIp[1] = IPAddress();
+    } else if (_refreshResolverAfterReconnect) {
+        // 上一轮校验因网络/DNS/超时失败：重连后刷新一次解析（应对服务器 IP
+        // 变更或漫游到异构网络），然后清除标记。
+        _serverIp[0] = IPAddress();
+        _serverIp[1] = IPAddress();
+        _refreshResolverAfterReconnect = false;
+    }
+    // 已获信且上轮校验成功：复用缓存 IP，稳态重连零同步 DNS，避免弱网下
+    // hostByName 秒级阻塞卡住同循环其后的 Web 服务（对齐旧后台 SNTP）。
     // 已获可信时间后重连：不重新设钟，安排一次运行期校验即可。
     _nextActionMs = _startedMs + 1000UL;
 
@@ -356,6 +366,13 @@ void Esp8266BaseNTP::_abortCycle(uint32_t now, const char* reason) {
     _sample[1] = core::Sample{};
     if (static_cast<Mode>(_mode) == Mode::VERIFY) {
         // 运行期校验遇网络/DNS 问题：不是不信任，下个正常周期再校验，不快速重试。
+        // 网络类失败标记下一次 WiFi 重连刷新解析；时间不一致（sources_untrusted）
+        // 与服务器 IP 无关，不刷新。
+        if (reason && (strcmp(reason, "dns_failed") == 0 ||
+                       strcmp(reason, "send_failed") == 0 ||
+                       strcmp(reason, "response_timeout") == 0)) {
+            _refreshResolverAfterReconnect = true;
+        }
         _attempts = 0;
         _nextActionMs = now + uint32_t(ESP8266BASE_NTP_SYNC_INTERVAL) * 1000UL;
         ESP8266BASE_LOG_W_P("NTP ", "ntp_verify_aborted reason=%s", reason ? reason : "unknown");

@@ -79,6 +79,7 @@ private:
     static bool     _uncertaintyMeasured; // 1B
     static bool     _waiting;        // 1B：正在等待某个源的 UDP 应答
     static bool     _activityActive; // 1B：安全关键活动运行中，暂停 DNS/UDP
+    static bool     _refreshResolverAfterReconnect; // 1B：VERIFY 网络失败，下次重连重解析
     static uint8_t  _mode;           // 1B：Mode
     static uint8_t  _serverIndex;    // 1B：当前等待的源 0/1
     static uint8_t  _attempts;       // 1B：采集失败退避计数
