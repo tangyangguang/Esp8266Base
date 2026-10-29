@@ -55,6 +55,13 @@ public:
     // WiFi 断开时取消在途采集并释放 UDP；不清除已可信闘锁和已设墙钟。
     static void reset();
 
+    // 活动输出闸门：业务侧安全关键输出（如继电器）运行期间置 true，NTP 立即
+    // 安静释放在途 UDP，且在此期间不发起任何 DNS/UDP（弱网同步解析可能阻塞
+    // 主循环数秒，威胁本地单调时钟截止）；不清可信闘锁、不计失败退避。
+    // false 边沿安排约 200ms 后重新采集/校验一次。默认 false，行为同旧版。
+    static void setActivityActive(bool active);
+    static bool activityActive();
+
     static bool     isSynced();   // 本次启动是否已获可信时间（闘锁，重连不清）
     static uint32_t timestamp();  // Unix 时间戳，未可信返回 0
     static bool     formatTo(char* out, size_t len, const char* fmt); // strftime
@@ -71,6 +78,7 @@ private:
     static bool     _logSwitched;    // 1B：日志时间格式是否已切换
     static bool     _uncertaintyMeasured; // 1B
     static bool     _waiting;        // 1B：正在等待某个源的 UDP 应答
+    static bool     _activityActive; // 1B：安全关键活动运行中，暂停 DNS/UDP
     static uint8_t  _mode;           // 1B：Mode
     static uint8_t  _serverIndex;    // 1B：当前等待的源 0/1
     static uint8_t  _attempts;       // 1B：采集失败退避计数

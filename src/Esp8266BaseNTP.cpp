@@ -30,6 +30,7 @@ bool     Esp8266BaseNTP::_timeSuspect = false;
 bool     Esp8266BaseNTP::_logSwitched = false;
 bool     Esp8266BaseNTP::_uncertaintyMeasured = false;
 bool     Esp8266BaseNTP::_waiting = false;
+bool     Esp8266BaseNTP::_activityActive = false;
 uint8_t  Esp8266BaseNTP::_mode = static_cast<uint8_t>(Mode::ACQUIRE);
 uint8_t  Esp8266BaseNTP::_serverIndex = 0;
 uint8_t  Esp8266BaseNTP::_attempts = 0;
@@ -88,10 +89,37 @@ bool Esp8266BaseNTP::begin() {
 }
 
 // ----------------------------------------------------------------------------
+// 活动输出闸门
+// ----------------------------------------------------------------------------
+void Esp8266BaseNTP::setActivityActive(bool active) {
+    // 仅在状态边沿动作；连续多圈 true 不重复 stop UDP、不推进退避。
+    if (_activityActive == active) return;
+    _activityActive = active;
+    if (active) {
+        // 安静挂起：只释放可能在途的 UDP，绝不计一次失败或改变退避/可信闘锁。
+        if (_waiting) {
+            _ntpUdp.stop();
+            _waiting = false;
+        }
+    } else {
+        // 活动结束后尽快重新采集/校验一次（保留的 _nextActionMs 可能远在将来）。
+        _lastCheckMs = 0;
+        _nextActionMs = millis() + 200UL;
+    }
+}
+
+bool Esp8266BaseNTP::activityActive() { return _activityActive; }
+
+// ----------------------------------------------------------------------------
 // handle
 // ----------------------------------------------------------------------------
 void Esp8266BaseNTP::handle() {
     const uint32_t now = millis();
+
+    // 安全关键活动运行中：不发起 DNS/UDP，避免弱网同步解析阻塞主循环。
+    // 在途请求已在 true 边沿释放；这里直接返回，不采样 _lastCheckMs，
+    // 使 false 边沿安排的 200ms 采集不被 1s 节流推迟。
+    if (_activityActive) return;
 
     // 在途请求：每次 loop 都 poll/判超时，RTT 需要毫秒精度，绝不能被下面的
     // 1 秒空闲节流量化（否则 RTT 会被高估到约 1s 而撞上 500ms 信任门）。
@@ -122,6 +150,7 @@ void Esp8266BaseNTP::handle() {
 void Esp8266BaseNTP::reset() {
     _ntpUdp.stop();
     _waiting = false;
+    // 不触碰 _activityActive：它表达业务输出状态，与 WiFi 连接状态正交。
     // 关键：不清除 _clockTrusted/_timeSuspect。墙钟继续走，重连不重新设钟。
     ESP8266BASE_LOG_I_P("NTP ", "ntp_client_reset reason=wifi_disconnected trusted=%s",
                       _clockTrusted ? "kept" : "not_yet");
