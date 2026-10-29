@@ -65,7 +65,7 @@ Esp8266BaseWatchdog::setSafetyCallbacks(emergencyStop, restartGuard);
 - 没有固件 pending 标记的上电/外部/维护启动视为人工介入并打断连续链，但 RTC 尚存时不抹掉可信 24 小时计数；断电导致 RTC 丢失不计为自动重启；
 - 预算耗尽时先保证输出安全，写入 denied RTC 证据，不形成重启风暴。
 
-网络长期失败由 MQTT 恢复阶梯调用：普通重连 → radio reset → 在业务 guard 允许时请求 MCU 重启。
+网络长期失败由**本地链路**恢复阶梯驱动（`Esp8266Base` 主类，只认 STA 本地状态、不看云端）：普通重连 → CONNECTING 连续失败触发 radio reset（主类先有序关闭 Web/UDP/TCP socket 再 `WIFI_OFF→STA`）→ 连续本地不可达 30 分钟且至少 2 次 radio reset 后，在业务 guard 允许时请求 MCU 重启。MQTT 云端传输失败只在 MQTT 层退避，不拆电台、不直接升级重启；WiFi 关联正常但外网断时不重启。
 
 ## 六、RTC 与计数
 

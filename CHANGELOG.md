@@ -34,6 +34,21 @@
 
 没有内容的小节可以省略。
 
+## 2026-10-29（三）
+
+### 修复
+- **云端 MQTT 传输失败不再冷拆 WiFi 电台，修复弱信号下局域网长时间不可达与 radio reset 崩溃**。原实现中连续 6 次可恢复的云端传输失败（DNS/TCP/TLS 失败都计为 `TCP_DISCONNECTED`）即调用 `WiFi.mode(WIFI_OFF)` 完整重置电台；但该信号无法区分“云端不通”与“本地 WiFi 假在线”——路由器 WAN 断开、broker 不可达或纯弱信号外网丢包时，STA 本地关联可能仍正常，冷拆电台会砸掉可用的局域网，并在 −80dBm 下冷重连数十分钟。且切 `WIFI_OFF` 前未关闭活跃 PCB（Web :80 监听、mDNS/NTP socket），SDK `netif_remove` 时可能 use-after-free 崩溃（现场 `reset=exception`）。现：
+  - MQTT 云端失败**只在 MQTT 层退避重连**，不再请求/执行 radio reset，也不直接升级 MCU 重启。
+  - radio reset 改为分层所有权：`Esp8266BaseWiFi` 仅在 CONNECTING 连续失败时 `requestRadioReset()`，由 `Esp8266Base` 主类在同一主循环上下文先有序关闭上层网络（`Web::suspendForRadioReset()` 关监听、`WiFiUDP::stopAll()`、`WiFiClient::stopAll()`），再经唯一入口 `executeRadioReset()` 物理 `WIFI_OFF→STA`，消除活跃 PCB 下的拆除崩溃。
+  - 长期失联受控 MCU 重启阶梯从 MQTT 层迁到 `Esp8266Base` 主类，且只认 STA 本地状态：连续本地不可达 30 分钟（`ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS`）且窗口内本地 radio reset 增量 ≥2（`..._RADIO_RESETS`）才经 Watchdog 申请重启，guard/冷却/预算不变；**WiFi 关联正常但外网断时不 arm、不重启**；AP 配网态不 arm。
+
+### 行为变化 / 使用建议（含破坏性 API 变更）
+- **删除公共 API `Esp8266BaseWiFi::recoverStation()`** 及 MQTT 侧 radio/MCU 阶梯宏 `ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT`、`..._COOLDOWN_MS`、`ESP8266BASE_MQTT_MCU_RECOVERY_AFTER_MS`、`..._RADIO_RESETS`。云端失败不再能触发 WiFi 复位；如有业务曾依赖该语义，改为依赖本地链路自愈。
+- 新增 `Esp8266BaseWiFi::requestRadioReset/consumeRadioResetRequest/executeRadioReset/lastRadioResetSource` 与 `Esp8266BaseRadioResetSource`；新增 Web `suspendForRadioReset()/resumeAfterRadioReset()`（stop/begin 不删路由，保持 backlog=1）。
+- `recoveryReport().radioResetCount` 语义改为“本次云端恢复窗口内本地 radio reset 增量”，仅供诊断动作分类，不再代表 MQTT 触发的复位。
+- **`ESP8266BASE_WIFI_RETRY_SLOW` 默认 60000→10000**：掉关联后 3 次 2s 快重试进入 10s 慢重试，弱网恢复从分钟级压到十秒级，仍保留退避避免风暴。库根 `platformio.ini` 不再覆盖该值，旧的显式 60000 覆盖需业务自行评估。
+- 不新增 ping/网关假在线探测：SDK beacon 超时会让 `WiFi.status()` 离开 `WL_CONNECTED`，既有 CONNECTED 状态机即重连；deep-sleep 路径的 `WIFI_OFF` 不在本次有序停网范围内。
+
 ## 2026-10-29（二）
 
 ### 修复

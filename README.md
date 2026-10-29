@@ -189,8 +189,6 @@ build_flags =
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译 `Esp8266BaseMQTT` 可选模块；要求 NTP |
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 首次退避间隔 |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 指数退避上限 |
-| `ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT` | `6` | SDK 假在线时触发 WiFi radio 恢复的连续传输失败次数 |
-| `ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS` | `900000` | 上层触发 radio 恢复的最小间隔 ms |
 | `ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS` | `5000` | 受控下线等待 PUBACK、正常断开的单阶段超时 |
 | `ESP8266BASE_MQTT_TX_SLOTS` | `2` | 固定出站槽位；仅一个 QoS1 包在途 |
 | `ESP8266BASE_MQTT_MAX_TOPIC_BYTES` | `128` | topic 最大字节数，不含结尾 `NUL` |
@@ -217,7 +215,9 @@ build_flags =
 | `ESP8266BASE_WIFI_STA_SETTLE_MS` | `150` | 切换 STA/断开旧状态后，调用 `WiFi.begin()` 前的稳定等待 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST` | `2000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数，之后进入慢速重试 |
-| `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
+| `ESP8266BASE_WIFI_RETRY_SLOW` | `10000` | WiFi 慢速重试间隔 ms |
+| `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS` | `1800000` | 本地链路连续不可达多久后可申请受控 MCU 重启 |
+| `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS` | `2` | 上述窗口内本地 radio reset 增量阈值 |
 
 根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为默认构建入口；各示例目录提供独立的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
 
@@ -235,7 +235,7 @@ OTA 策略：`GET /ota` 页面、空 body `POST /ota` 两阶段准备和 multipa
 
 MQTT 连接配置必须在 `Esp8266Base::begin()` 前通过 `Esp8266BaseMQTT::configure()` 提供。host、clientId、用户名/密码和 LWT topic 会复制到固定缓冲；password 非空时 username 必须非空，LWT payload 非空时 willTopic 必须非空。`BearSSL::X509List` trust anchor 与可选 LWT payload 由业务长期持有并覆盖整个 MQTT 生命周期。配置可来自业务的私有构建配置或 `Esp8266BaseConfig`，库不新增 MQTT 持久化 key，也不接受不安全 TLS。不要把真实 broker 凭据写入仓库。
 
-MQTT Terminal 使用库内裁剪的 MQTT 3.1.1 同步 TLS 传输，不依赖 `espMqttClient`、异步 TCP、STL 容器或 `std::function`。出站默认只有两个固定槽位，每槽 topic 128B、payload 512B；业务可在完成静态 RAM 预算后把 payload 配置为 64～768B，超过 512B 的槽位内部拆成 512B head 和最多 256B tail。BearSSL RX/TX 固定为 4096/1024。WiFi SDK 连续报告已连接但传输连续失败时，MQTT 以 6 次失败和 15 分钟冷却请求 radio 恢复；持续 30 分钟且至少两次 radio reset 后，通过 Watchdog 请求有预算且受业务安全 guard 约束的 MCU 恢复。永久协议、凭据、ACL 和证书错误不进入恢复重启阶梯。
+MQTT Terminal 使用库内裁剪的 MQTT 3.1.1 同步 TLS 传输，不依赖 `espMqttClient`、异步 TCP、STL 容器或 `std::function`。出站默认只有两个固定槽位，每槽 topic 128B、payload 512B；业务可在完成静态 RAM 预算后把 payload 配置为 64～768B，超过 512B 的槽位内部拆成 512B head 和最多 256B tail。BearSSL RX/TX 固定为 4096/1024。云端传输失败只在 MQTT 层退避重连，不拆 WiFi 电台；WiFi radio reset 仅在本地链路 CONNECTING 连续失败时由状态机请求、主类有序停网后执行。本地链路持续不可达 30 分钟且至少两次 radio reset 后，由主类通过 Watchdog 请求有预算且受业务安全 guard 约束的 MCU 恢复；WiFi 关联正常但外网断时不触发。永久协议、凭据、ACL 和证书错误不进入恢复重启阶梯。
 
 `cleanSession=true` 时，传输断开完成后基础库会在业务断线回调之前清空固定槽位；新连接不会重放旧连接周期的 QoS 消息。`cleanSession=false` 时仅保留未确认的 QoS1 PUBLISH，重连后置 DUP 重发；SUBSCRIBE 和 QoS0 不跨连接。发生清理时日志记录 `session_queue_discarded` 和包数，不输出载荷。
 

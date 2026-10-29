@@ -35,7 +35,9 @@
 #endif
 
 #ifndef ESP8266BASE_WIFI_RETRY_SLOW
-#define ESP8266BASE_WIFI_RETRY_SLOW 60000        // ms：后续慢速重试间隔
+// 弱信号下旧值 60s 的慢重试空窗会让设备在掉关联后长时间无法恢复（局域网也不可达）。
+// 10s 仍保留退避、避免重连风暴，但把最坏恢复时间从分钟级压到十秒级。
+#define ESP8266BASE_WIFI_RETRY_SLOW 10000        // ms：后续慢速重试间隔
 #endif
 
 #ifndef ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT
@@ -55,8 +57,22 @@ static_assert(ESP8266BASE_WIFI_NO_SLEEP == 0 || ESP8266BASE_WIFI_NO_SLEEP == 1,
 #define ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS 100 // ms：WIFI_OFF 后的稳定等待
 #endif
 
+// 本地链路长期失联受控 MCU 重启阶梯（只认 STA 本地状态，与云端无关）：
+// 连续不可用达到该时长、且窗口内本地 radio reset 增量达标，才申请重启。
+#ifndef ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS
+#define ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS 1800000UL // 30min
+#endif
+#ifndef ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS
+#define ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS 2
+#endif
+
 static_assert(ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT <= 255,
               "ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT must fit uint8_t");
+
+// radio reset 请求来源（同时用于 JNL_RADIO_RESET 的 flags）
+enum class Esp8266BaseRadioResetSource : uint8_t {
+    STATE_MACHINE = 1,  // WiFi CONNECTING 连续失败 N 次，本地链路状态机自愈
+};
 
 // WiFi 状态枚举
 enum class Esp8266BaseWiFiState : uint8_t {
@@ -103,9 +119,15 @@ public:
     // 本次启动累计发起 STA 连接次数 / 完整 WiFi radio 重置次数
     static uint16_t attemptCount();
     static uint8_t radioResetCount();
-    // 当 SDK 仍报告 WL_CONNECTED、但上层传输持续失败时，完整重置 STA radio。
-    // 不重启 MCU、不改凭据、不进入 AP；无保存凭据或 AP 配网中返回 false。
-    static bool recoverStation();
+    static Esp8266BaseRadioResetSource lastRadioResetSource();
+
+    // radio reset 分层：任何模块都不得自行 WIFI_OFF。CONNECTING 连续失败时只在
+    // WiFi 层置“请求”，由 Esp8266Base 主类在同一主循环上下文先有序关闭上层网络
+    // （Web/UDP/TCP），再调用 executeRadioReset() 做唯一物理执行，避免活跃 PCB 下
+    // 切 WIFI_OFF 触发 netif_remove 崩溃，也避免云端故障误砸局域网。
+    static bool requestRadioReset(Esp8266BaseRadioResetSource source);
+    static bool consumeRadioResetRequest(Esp8266BaseRadioResetSource& source);
+    static void executeRadioReset(Esp8266BaseRadioResetSource source);
 
     // AP 模式的 SSID（格式：ESP8266-Config-XXXX）
     static const char* apSSID();
@@ -119,6 +141,8 @@ private:
     static uint8_t              _failuresSinceRadioReset; // 1B：距上次 radio reset 的连续失败次数
     static uint16_t             _attemptCount; // 2B：本次启动累计 WiFi.begin 次数
     static uint8_t              _radioResetCount; // 1B：本次启动完整 radio reset 次数
+    static uint8_t              _radioResetRequest; // 1B：0=无 pending，否则为 RadioResetSource
+    static Esp8266BaseRadioResetSource _lastRadioResetSource; // 最近一次 reset 来源
     static char                 _apSSID[28];   // 28B："ESP8266-Config-XXXX\0"
     static char                 _ip[16];       // 16B：点分十进制 IP
     static char                 _staSSID[64];  // 64B：缓存的 STA SSID，避免重连时重读 Flash
@@ -126,7 +150,6 @@ private:
 
     static void _startSTA(const char* ssid, const char* pass, bool keepAP = false);
     static void _beginSTA(const char* ssid, const char* pass, bool keepAP);
-    static void _resetRadioAndStartSTA();
     static void _startAP();
     static void _handleConnected();
     static void _scheduleRetry();

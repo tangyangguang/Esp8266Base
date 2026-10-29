@@ -28,7 +28,7 @@ static bool wifi=true, synced=true, transportOpen=false, transportSuccess=false;
 static unsigned calls=0, connects=0, recoveryFailures=0;
 static int lastTlsCode=0;
 static bool permanentCertificateError(int) { return false; }
-struct Esp8266BaseWiFi { static bool isConnected() { return wifi; } };
+struct Esp8266BaseWiFi { static bool isConnected() { return wifi; } static uint8_t radioResetCount() { return 0; } };
 struct Esp8266BaseNTP { static bool isSynced() { return synced; } };
 Esp8266BaseMQTTPrepareCallback Esp8266BaseMQTT::_prepareCallback=nullptr;
 bool Esp8266BaseMQTT::_configured=true, Esp8266BaseMQTT::_begun=false;
@@ -37,13 +37,17 @@ bool Esp8266BaseMQTT::_connectAttemptsEnabled=true;
 Esp8266BaseMQTTState Esp8266BaseMQTT::_state=Esp8266BaseMQTTState::BACKOFF;
 Esp8266BaseMQTTDisconnectReason Esp8266BaseMQTT::_lastReason=Esp8266BaseMQTTDisconnectReason::NONE;
 uint32_t Esp8266BaseMQTT::_attemptCount=0, Esp8266BaseMQTT::_retryAt=0, Esp8266BaseMQTT::_retryDelay=2000;
+bool Esp8266BaseMQTT::_recoveryActive=false;
+uint32_t Esp8266BaseMQTT::_recoveryStartedAt=0;
+uint8_t Esp8266BaseMQTT::_recoveryRadioResetBaseline=0;
+uint16_t Esp8266BaseMQTT::_recoveryFailureCount=0;
+Esp8266BaseMQTTRecoveryReport Esp8266BaseMQTT::_lastRecoveryReport={};
 char Esp8266BaseMQTT::_willTopic[129]="topic";
 const uint8_t* Esp8266BaseMQTT::_willPayload=nullptr;
 size_t Esp8266BaseMQTT::_willLength=0;
 uint8_t Esp8266BaseMQTT::_willQos=1;
 bool Esp8266BaseMQTT::_willRetain=true;
 void Esp8266BaseMQTT::_handleShutdown() {}
-void Esp8266BaseMQTT::_handleEscalatedRecovery(uint32_t) {}
 void Esp8266BaseMQTT::_disconnectForGate(Esp8266BaseMQTTState state) { _state=state; }
 void Esp8266BaseMQTT::_closeTransport(Esp8266BaseMQTTDisconnectReason,bool,bool) { transportOpen=false; }
 bool Esp8266BaseMQTT::_pumpTransport() { return true; }

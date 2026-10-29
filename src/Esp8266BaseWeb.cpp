@@ -681,6 +681,24 @@ bool Esp8266BaseWeb::isRunning() {
     return _running;
 }
 
+void Esp8266BaseWeb::suspendForRadioReset() {
+    if (!_running) return;
+    // stop() → WiFiServer::close() → tcp_close(listen pcb)，但不删除已注册路由/hook。
+    _server.stop();
+    _running = false;
+    ESP8266BASE_LOG_I_P("Web ", "web_listener_suspended_for_radio_reset");
+}
+
+void Esp8266BaseWeb::resumeAfterRadioReset() {
+    if (_running) return;
+    // 复用自定义 backlog=1（准入基线，见 begin()），不能用无参 begin()。
+    _server.close();
+    _server.getServer().begin(80, ESP8266BASE_WEB_TCP_BACKLOG);
+    _running = true;
+    ESP8266BASE_LOG_I_P("Web ", "web_listener_resumed_after_radio_reset backlog=%u",
+                      static_cast<unsigned>(ESP8266BASE_WEB_TCP_BACKLOG));
+}
+
 bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWebHandler handler) {
 #if ESP8266BASE_WEB_MAX_APP_PAGES == 0
     (void)title;

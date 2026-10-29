@@ -6,6 +6,9 @@
 #include "Esp8266BaseJournal.h"
 #endif
 #include <user_interface.h>
+// radio reset 有序停网需关闭全部 UDP/TCP PCB（stopAll）。
+#include <ESP8266WiFi.h>
+#include <WiFiUdp.h>
 
 #if ESP8266BASE_USE_CONFIG
 static uint32_t _loadBootCount(const char* invalidAction) {
@@ -74,6 +77,13 @@ bool Esp8266Base::_ntpWasTriggered = false;
 #endif
 #if ESP8266BASE_USE_MDNS
 bool Esp8266Base::_mdnsWasStarted  = false;
+#endif
+
+#if ESP8266BASE_USE_WATCHDOG
+bool     Esp8266Base::_linkOutageActive        = false;
+uint32_t Esp8266Base::_linkOutageStartedAt     = 0;
+uint8_t  Esp8266Base::_linkOutageRadioBaseline = 0;
+uint32_t Esp8266Base::_linkRestartRetryAt      = 0;
 #endif
 
 // ----------------------------------------------------------------------------
@@ -274,6 +284,11 @@ void Esp8266Base::handle() {
 #endif
     Esp8266BaseWiFi::handle();
 
+    // 2.2 radio reset 分层消费：WiFi 层只置请求；主类在同一主循环上下文先有序
+    // 关闭上层网络（Web/UDP/TCP socket），再物理切 WIFI_OFF，避免活跃 PCB 下
+    // netif 拆除崩溃。必须在 NTP/mDNS/Web/MQTT 之前完成。
+    _consumeRadioReset();
+
     // 2.5 Journal — 趋势采样与批下刷（每轮轻量检查）
 #if ESP8266BASE_USE_JOURNAL
 #if ESP8266BASE_USE_WATCHDOG
@@ -283,8 +298,13 @@ void Esp8266Base::handle() {
 #endif
 
     // 3. WiFi 连接后触发 NTP / mDNS；WiFi 掉线后重置 mDNS 标志以便重连后重启
-#if ESP8266BASE_USE_NTP || ESP8266BASE_USE_MDNS
     bool wifiNow = Esp8266BaseWiFi::isConnected();
+
+#if ESP8266BASE_USE_WATCHDOG
+    // 本地链路长期失联阶梯（只认 STA 本地状态；外网断但 WiFi 关联正常时不 arm）。
+    _handleLocalLinkRecovery(wifiNow);
+#else
+    (void)wifiNow;
 #endif
 #if ESP8266BASE_USE_NTP
     if (!_ntpWasTriggered && wifiNow) {
@@ -494,3 +514,79 @@ const char* Esp8266Base::resetReasonName() {
             return "unknown";
     }
 }
+
+// ----------------------------------------------------------------------------
+// radio reset 主类编排：WiFi 层只置请求，由这里在同一主循环上下文先有序关闭
+// 上层网络，再执行唯一的物理 WIFI_OFF。
+// ----------------------------------------------------------------------------
+void Esp8266Base::_consumeRadioReset() {
+    Esp8266BaseRadioResetSource source;
+    if (!Esp8266BaseWiFi::consumeRadioResetRequest(source)) return;
+
+    // radio reset 只在 CONNECTING（无 IP）时被请求：活动 MQTT TLS / OTA / 流式
+    // HTTP 连接不可能存在。仍确定性关闭 Web listen PCB（stopAll 关不到它）与全部
+    // UDP/TCP PCB，避免 WIFI_OFF→netif_remove 时活跃 PCB 触发 use-after-free 崩溃。
+#if ESP8266BASE_USE_WEB
+    Esp8266BaseWeb::suspendForRadioReset();
+#endif
+    WiFiUDP::stopAll();   // 关闭 NTP 等 WiFiUDP PCB（mDNS 用 Core 内部 UdpContext，
+                          // 不在此链表，其 socket 由 Core 的 netif 状态回调自重启）
+    WiFiClient::stopAll();// 关闭残留 accepted TCP 连接
+
+    Esp8266BaseWiFi::executeRadioReset(source);
+
+#if ESP8266BASE_USE_WEB
+    // stop()/begin() 不删除已注册路由；恢复自定义 backlog=1 监听，不等关联完成，
+    // 与开机时 Web 在联网前即监听的常态一致。
+    Esp8266BaseWeb::resumeAfterRadioReset();
+#endif
+}
+
+#if ESP8266BASE_USE_WATCHDOG
+// ----------------------------------------------------------------------------
+// 本地链路长期失联阶梯（替代旧 MQTT 传输失败阶梯）：
+// 只认 STA 本地状态。路由器关机/纯关联失败→持续无 IP + 本地 radio reset 累计→
+// 达 30min 且 ≥2 次 radio reset 才申请受控 MCU 重启（guard/cooldown/预算在
+// Watchdog）。WiFi 关联正常但外网断→isConnected 恒真，永不 arm，不重启。
+// ----------------------------------------------------------------------------
+void Esp8266Base::_handleLocalLinkRecovery(bool wifiConnected) {
+    if (wifiConnected) {
+        _linkOutageActive = false;
+        return;
+    }
+    // AP 配网态由 AP 提供本地服务，不属于失联。
+    if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG) return;
+
+    const uint32_t now = millis();
+    if (!_linkOutageActive) {
+        _linkOutageActive = true;
+        _linkOutageStartedAt = now;
+        _linkOutageRadioBaseline = Esp8266BaseWiFi::radioResetCount();
+        _linkRestartRetryAt = 0;
+        return;
+    }
+
+    const uint32_t outageMs = now - _linkOutageStartedAt;
+    const uint8_t radioResets =
+        (uint8_t)(Esp8266BaseWiFi::radioResetCount() - _linkOutageRadioBaseline);
+    // _linkRestartRetryAt==0 表示本窗口尚未申请过（arm 时置 0），应立即可申请；
+    // 不能直接 (now-0)<0 判断，否则 millis 越过 2^31 后会长期抑制首次申请。
+    if (outageMs < ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS ||
+        radioResets < ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS ||
+        (_linkRestartRetryAt != 0 && static_cast<int32_t>(now - _linkRestartRetryAt) < 0)) {
+        return;
+    }
+
+    const Esp8266BaseRestartDecision decision =
+        Esp8266BaseWatchdog::requestRestart(Esp8266BaseRecoveryCause::NETWORK_UNRECOVERABLE);
+    // guard（如继电器运行中）/cooldown/预算拒绝时低率重试，保持可观测。
+    _linkRestartRetryAt = now + 60000UL;
+    if (decision != Esp8266BaseRestartDecision::RESTARTING) {
+        ESP8266BASE_LOG_W_P("Net",
+                          "local_link_mcu_recovery_deferred decision=%u outage_s=%lu radio_resets=%u",
+                          static_cast<unsigned>(decision),
+                          static_cast<unsigned long>(outageMs / 1000UL),
+                          static_cast<unsigned>(radioResets));
+    }
+}
+#endif

@@ -86,13 +86,17 @@ station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 | 阶段 | 间隔 |
 |---|---|
 | 前几次快速重试 | `ESP8266BASE_WIFI_RETRY_FAST`，默认 2s |
-| 超过快速次数后 | `ESP8266BASE_WIFI_RETRY_SLOW`，默认 60s |
+| 超过快速次数后 | `ESP8266BASE_WIFI_RETRY_SLOW`，默认 10s |
 
 单次连接观察窗口为 `ESP8266BASE_WIFI_CONNECT_TIMEOUT`，默认 20s。每次切换到 STA 并断开旧状态后，会等待 `ESP8266BASE_WIFI_STA_SETTLE_MS`，默认 150ms，再调用 `WiFi.begin()`；这用于降低 ESP8266 上电后首轮连接停在 `WL_DISCONNECTED` 的概率。
 
 如果连接开始后持续停在 `WL_DISCONNECTED` 且超过 `ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS`，默认 7s，本库会记录 `station_connect_stuck_restarting` 并提前重启本轮 `WiFi.begin()`，避免 ESP8266 WiFi SDK 卡住时白等完整 20s。每个连接 attempt 最多做 1 次 stuck restart；如果重启后仍然卡住，会记录 `station_connect_stuck_retrying` 并进入快速重试，不再继续等满 20s。
 
-普通连接 attempt 连续失败达到 `ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT`（默认 6）时，本库执行一次有界的 WiFi radio 完整恢复：断开 STA、切换 `WIFI_OFF`、等待 `ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新调用 `WiFi.begin()`。这用于恢复路由器晚于终端启动或路由器重启时，ESP8266 SDK 可能长期停在 station 连接状态的问题。radio reset 不重启 MCU、不清除 Config、不进入 AP；已有业务仍按本地状态机运行。路由器持续不可用时，每 6 次失败最多执行一次 radio reset，连接成功后重新计数。
+普通连接 attempt 连续失败达到 `ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT`（默认 6）时，WiFi 层只**请求**一次 radio reset（`requestRadioReset(STATE_MACHINE)`），由 `Esp8266Base` 主类在同一主循环上下文先有序关闭上层网络（Web :80 监听、全部 UDP/TCP PCB），再执行唯一的物理恢复：断开 STA、切换 `WIFI_OFF`、等待 `ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新调用 `WiFi.begin()`。先停 socket 是为了避免活跃 PCB 在 `WIFI_OFF→netif_remove` 时触发 use-after-free 崩溃。这用于恢复路由器晚于终端启动或路由器重启时，ESP8266 SDK 可能长期停在 station 连接状态的问题。radio reset 不重启 MCU、不清除 Config、不进入 AP；已有业务仍按本地状态机运行。路由器持续不可用时，每 6 次失败最多一次 radio reset，连接成功后重新计数。
+
+**分层原则（设备只负责“设备↔路由器”这一段）**：WiFi radio reset 只由本地链路证据触发（CONNECTING 连续失败）。MQTT/TLS/DNS 等**云端传输失败不再拆电台**——STA 可能本地关联正常、只是路由器 WAN 或 broker 不可达，冷拆电台只会砸掉可用的局域网并在弱信号下冷重连极慢；云端失败只在 MQTT 层退避重连。
+
+**本地链路长期失联的受控 MCU 重启阶梯**：`Esp8266Base` 主类按 STA 本地状态（不看云端）维护失联窗口——连续 `!isConnected()`（非 AP 配网态）达到 `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS`（默认 30min）且窗口内本地 radio reset 增量达到 `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS`（默认 2），才通过 Watchdog 申请一次受 guard/冷却/预算约束的 `NETWORK_UNRECOVERABLE` 重启，拒绝后按 60s 低率重试。WiFi 关联正常但外网断时不 arm；路由器关机/纯关联失败时仍能按授权恢复。
 
 `/health` 的 `wifiSsid` / `wifiRssi` 表示当前 STA WiFi 名称和 RSSI(dBm)，`wifiAttempt` 和 `wifiRadioReset` 分别表示本次启动累计 `WiFi.begin()` 次数和 radio reset 次数，可在恢复后确认信号环境及是否走过升级恢复路径。该接口无需认证，因此 SSID 对同一局域网可见。
 
@@ -184,7 +188,7 @@ SUBACK return code `0x80` 会记录 `suback_rejected`，业务回调收到固定
 
 如果业务要求订阅确认后才算 ready，应在 SUBACK 不匹配、拒绝或其他应用握手失败时调用 `requestReconnect(true)`，成功完成订阅和初始证据后调用 `markConnectionReady()`。只有 application-ready 才清除连续恢复计数；CONNACK 本身不能证明业务链路可用。连续握手失败保持 2s→60s 有界指数退避。ready 后退避恢复初始值，之后普通断线从 2s 开始。异步 disconnect callback 与 `handle()` fallback 通过 `BACKOFF` 状态避免重复 schedule。
 
-DNS/TCP/TLS I/O、CONNACK server-unavailable 和应用 readiness 等可恢复失败累计达到 6 次后，MQTT 会请求一次 WiFi `WIFI_OFF → WIFI_STA` radio reset，即使 SDK 仍报告 `WL_CONNECTED`。radio reset 最短间隔 15 分钟。失败持续 30 分钟且至少经历 2 次 radio reset 后，MQTT 通过 Watchdog 请求有预算的 MCU 恢复；业务 `restartGuard` 可在执行器运行时延期。协议、标识、凭据、ACL 和证书指纹等永久错误不触发 radio/MCU 重启。
+DNS/TCP/TLS I/O、CONNACK server-unavailable 和应用 readiness 等可恢复失败只在 MQTT 层按 2s→60s 退避重连并累计进恢复窗口（用于 `markConnectionReady()` 生成的 `recoveryReport()` 诊断），**不再请求 WiFi radio reset，也不直接升级 MCU 重启**。本地链路 radio reset 与长期失联受控重启改由上一节的 WiFi 状态机和 `Esp8266Base` 本地阶梯负责。协议、标识、凭据、ACL 和证书指纹等永久错误同样不触发任何恢复重启。
 
 执行器运行期间可调用 `setConnectAttemptsEnabled(false)`，只暂停后续 DNS/TCP/TLS 新建连接；已经建立的 MQTT 会话仍保持并继续收发。运行结束恢复为 `true` 后沿既有退避时间继续。这个门禁用于避免同步建连阻塞本地截止，不修改 MQTT 协议、身份或 ACL。
 

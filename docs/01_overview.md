@@ -159,7 +159,7 @@ build_flags =
 | `ESP8266BASE_WIFI_STA_SETTLE_MS` | `150` | STA 切换后调用 `WiFi.begin()` 前的稳定等待 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST` | `2000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数 |
-| `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
+| `ESP8266BASE_WIFI_RETRY_SLOW` | `10000` | WiFi 慢速重试间隔 ms |
 
 根目录配置使用 `full_demo` 作为默认构建入口；单独编译示例时进入 `examples/<name>` 目录运行 `pio run -e esp12f`。上传统一使用 `460800` baud。
 

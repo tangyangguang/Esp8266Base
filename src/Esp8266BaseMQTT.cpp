@@ -146,11 +146,8 @@ Esp8266BaseMQTTDisconnectReason Esp8266BaseMQTT::_lastReason = Esp8266BaseMQTTDi
 uint32_t Esp8266BaseMQTT::_attemptCount = 0;
 uint32_t Esp8266BaseMQTT::_retryAt = 0;
 uint32_t Esp8266BaseMQTT::_retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;
-uint32_t Esp8266BaseMQTT::_lastWifiRecoveryAt = 0;
-uint8_t Esp8266BaseMQTT::_consecutiveTransportFailures = 0;
 bool Esp8266BaseMQTT::_recoveryActive = false;
 uint32_t Esp8266BaseMQTT::_recoveryStartedAt = 0;
-uint32_t Esp8266BaseMQTT::_restartRetryAt = 0;
 uint8_t Esp8266BaseMQTT::_recoveryRadioResetBaseline = 0;
 uint16_t Esp8266BaseMQTT::_recoveryFailureCount = 0;
 Esp8266BaseMQTTRecoveryReport Esp8266BaseMQTT::_lastRecoveryReport = {};
@@ -262,10 +259,8 @@ bool Esp8266BaseMQTT::begin() {
     client.setTimeout(ESP8266BASE_MQTT_CONNECT_TIMEOUT_MS);
     client.setNoDelay(true);
     _retryAt = millis();
-    _consecutiveTransportFailures = 0;
     _recoveryActive = false;
     _recoveryStartedAt = 0;
-    _restartRetryAt = 0;
     _recoveryRadioResetBaseline = Esp8266BaseWiFi::radioResetCount();
     _recoveryFailureCount = 0;
     _lastRecoveryReport = Esp8266BaseMQTTRecoveryReport{};
@@ -279,7 +274,6 @@ bool Esp8266BaseMQTT::begin() {
 void Esp8266BaseMQTT::handle() {
     if (!_begun || !_configured) return;
     if (_shutdownActive) return _handleShutdown();
-    _handleEscalatedRecovery(millis());
     if (!Esp8266BaseWiFi::isConnected()) return _disconnectForGate(Esp8266BaseMQTTState::WAITING_WIFI);
     if (!Esp8266BaseNTP::isSynced()) return _disconnectForGate(Esp8266BaseMQTTState::WAITING_TIME);
     if (_reconnectRequested) {
@@ -656,11 +650,9 @@ bool Esp8266BaseMQTT::markConnectionReady() {
                           static_cast<unsigned>(_recoveryFailureCount),
                           static_cast<unsigned>(radioResets));
     }
-    _consecutiveTransportFailures = 0;
     _recoveryFailureCount = 0;
     _recoveryActive = false;
     _recoveryStartedAt = 0;
-    _restartRetryAt = 0;
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::setApplicationReady(true);
 #endif
@@ -867,53 +859,16 @@ void Esp8266BaseMQTT::_noteRecoveryFailure(Esp8266BaseMQTTDisconnectReason reaso
         _recoveryActive = true;
         _recoveryStartedAt = now;
         _recoveryRadioResetBaseline = Esp8266BaseWiFi::radioResetCount();
-        _restartRetryAt = now;
 #if ESP8266BASE_USE_JOURNAL
         Esp8266BaseJournal::record(JNL_RECOVERY, 0, static_cast<int16_t>(reason), 0, 0);
 #endif
     }
-    if (_consecutiveTransportFailures < 0xFFU) ++_consecutiveTransportFailures;
     if (_recoveryFailureCount < 0xFFFFU) ++_recoveryFailureCount;
+    // 云端传输失败只在 MQTT 层退避重连，绝不拆 WiFi 电台：STA 可能本地链路正常，
+    // WIFI_OFF 会砸掉局域网且在弱信号下冷重连极慢；本地链路故障由 WiFi 状态机与
+    // Esp8266Base 主类的本地失联阶梯负责（见 requestRadioReset / consumeRadioResetRequest）。
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::setApplicationReady(false);
-#endif
-    const bool recoveryDue = _lastWifiRecoveryAt == 0U ||
-        static_cast<uint32_t>(now - _lastWifiRecoveryAt) >=
-            ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS;
-    if (ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT > 0 &&
-        _consecutiveTransportFailures >= ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT &&
-        recoveryDue && Esp8266BaseWiFi::recoverStation()) {
-        ESP8266BASE_LOG_W_P("MQTT",
-                          "transport_failures_triggered_wifi_recovery failures=%u cooldown_ms=%lu",
-                          static_cast<unsigned>(_consecutiveTransportFailures),
-                          static_cast<unsigned long>(ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS));
-        _consecutiveTransportFailures = 0;
-        _lastWifiRecoveryAt = now;
-        _state = Esp8266BaseMQTTState::WAITING_WIFI;
-    }
-}
-
-void Esp8266BaseMQTT::_handleEscalatedRecovery(uint32_t now) {
-#if ESP8266BASE_USE_WATCHDOG
-    if (!_recoveryActive ||
-        static_cast<uint32_t>(now - _recoveryStartedAt) < ESP8266BASE_MQTT_MCU_RECOVERY_AFTER_MS ||
-        static_cast<uint8_t>(Esp8266BaseWiFi::radioResetCount() - _recoveryRadioResetBaseline) <
-            ESP8266BASE_MQTT_MCU_RECOVERY_RADIO_RESETS ||
-        !_isDue(now, _restartRetryAt)) return;
-    const Esp8266BaseRestartDecision decision = Esp8266BaseWatchdog::requestRestart(
-        Esp8266BaseRecoveryCause::NETWORK_UNRECOVERABLE);
-    // Guard denial (for example an active relay run) is re-evaluated at a low
-    // rate. Budget/cooldown denial is also rate-limited and remains visible.
-    _restartRetryAt = now + 60000UL;
-    if (decision != Esp8266BaseRestartDecision::RESTARTING) {
-        ESP8266BASE_LOG_W_P("MQTT", "mcu_recovery_deferred decision=%u outage_s=%lu radio_resets=%u",
-                          static_cast<unsigned>(decision),
-                          static_cast<unsigned long>((now - _recoveryStartedAt) / 1000UL),
-                          static_cast<unsigned>(Esp8266BaseWiFi::radioResetCount() -
-                                                _recoveryRadioResetBaseline));
-    }
-#else
-    (void)now;
 #endif
 }
 

@@ -183,13 +183,29 @@ def test_wifi_retry_rules() -> None:
         wifi_h, "ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS")
     assert_eq(fast, 2000, "default fast retry")
     assert_eq(fast_count, 3, "default fast retry count")
-    assert_eq(slow, 60000, "default slow retry")
+    assert_eq(slow, 10000, "default slow retry")
     assert_eq(stuck, 7000, "default stuck disconnected restart")
     assert_eq(radio_reset_failures, 6, "default WiFi radio reset failure count")
     assert_eq(radio_reset_settle, 100, "default WiFi radio reset settle")
     assert_eq([retry_interval(i, fast_count, fast, slow) for i in range(1, 6)],
-              [2000, 2000, 2000, 60000, 60000],
+              [2000, 2000, 2000, 10000, 10000],
               "retry interval sequence")
+    # 本地失联阶梯阈值
+    local_after = parse_define_int(
+        wifi_h, "ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS")
+    local_resets = parse_define_int(
+        wifi_h, "ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS")
+    assert_eq(local_after, 1800000, "default local-link MCU recovery after")
+    assert_eq(local_resets, 2, "default local-link MCU recovery radio resets")
+    # 时间基：两次 radio reset 的最坏耗时必须小于本地阶梯时长，否则真失联时阶梯永不触发。
+    # 每组 6 连败最坏 ≈ 1 个 20s 观察窗 + stuck 提前重启余量，保守按 2*connect_timeout
+    # + 3*fast + 2*slow + settle；两组需严格小于 local_after。
+    connect_timeout = parse_define_int(
+        wifi_h, "ESP8266BASE_WIFI_CONNECT_TIMEOUT")
+    worst_two_resets = 2 * (2 * connect_timeout + 3 * fast + 2 * slow + 500)
+    if worst_two_resets >= local_after:
+        fail("two radio resets worst-case (%dms) must be < local MCU recovery (%dms)"
+             % (worst_two_resets, local_after))
     if "station_connect_stuck_restarting" not in wifi_cpp:
         fail("WiFi must log stuck disconnected restarts")
     if "station_connect_stuck_retrying" not in wifi_cpp:
@@ -210,6 +226,36 @@ def test_wifi_retry_rules() -> None:
                   "WiFi radio reset completion diagnostic")
     require_token(wifi_cpp, "_failuresSinceRadioReset >= ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT",
                   "WiFi radio reset failure threshold")
+    # radio reset 分层：WiFi 层只请求，主类消费并在有序停网后物理执行。
+    require_token(wifi_cpp, "requestRadioReset",
+                  "WiFi local failures must request (not directly perform) radio reset")
+    require_token(wifi_cpp, "executeRadioReset",
+                  "physical radio reset must be a single owner-gated entrypoint")
+    if "recoverStation" in wifi_cpp or "recoverStation" in read("src/Esp8266BaseWiFi.h"):
+        fail("upper-layer recoverStation() must be removed; radio reset is owner-orchestrated")
+    mqtt_cpp = read("src/Esp8266BaseMQTT.cpp")
+    mqtt_code = "\n".join(
+        line.split("//", 1)[0] for line in mqtt_cpp.splitlines())
+    if ("recoverStation" in mqtt_code or "WiFi.mode(" in mqtt_code
+            or "requestRadioReset" in mqtt_code):
+        fail("MQTT transport failures must never tear down or request the WiFi radio")
+    wifi_h_text = read("src/Esp8266BaseWiFi.h")
+    for upper in ("Esp8266BaseMQTT.h", "Esp8266BaseNTP.h", "Esp8266BaseWeb.h", "Esp8266BaseOTA.h"):
+        if ('#include "%s"' % upper) in wifi_cpp or ('#include "%s"' % upper) in wifi_h_text:
+            fail("Esp8266BaseWiFi must not include upper-layer module %s" % upper)
+    base_cpp = read("src/Esp8266Base.cpp")
+    require_token(base_cpp, "consumeRadioResetRequest",
+                  "owner must consume radio reset requests")
+    require_token(base_cpp, "executeRadioReset",
+                  "owner must perform the physical radio reset")
+    require_token(base_cpp, "WiFiUDP::stopAll()",
+                  "owner must close UDP PCBs before WIFI_OFF")
+    require_token(base_cpp, "WiFiClient::stopAll()",
+                  "owner must close TCP PCBs before WIFI_OFF")
+    require_token(base_cpp, "suspendForRadioReset",
+                  "owner must suspend the Web listener before WIFI_OFF")
+    require_token(base_cpp, "_handleLocalLinkRecovery",
+                  "owner must run the local-link outage MCU ladder")
     if "ESP.restart()" in wifi_cpp:
         fail("WiFi recovery must not reboot the MCU")
     web_cpp = read("src/Esp8266BaseWeb.cpp")

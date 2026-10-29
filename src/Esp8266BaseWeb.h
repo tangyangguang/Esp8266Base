@@ -91,6 +91,11 @@ public:
     static void handle();
     static bool isRunning();
 
+    // radio reset 前由 Esp8266Base 主类调用：关闭 :80 监听与活跃连接，释放 listen
+    // PCB（stopAll 关不到 listen）。stop()/begin() 不删除已注册路由，backlog 保持。
+    static void suspendForRadioReset();
+    static void resumeAfterRadioReset();
+
     // 注册应用自定义路由（begin() 之后调用）
     static bool addPage(const char* path, const char* title, Esp8266BaseWebHandler handler);
     static bool addApi (const char* path, Esp8266BaseWebHandler handler);

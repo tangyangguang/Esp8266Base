@@ -372,10 +372,13 @@ static void macAddressTo(char* out, size_t len);
 static Esp8266BaseWiFiState state();
 static uint16_t attemptCount();
 static uint8_t radioResetCount();
-static bool recoverStation();
+static Esp8266BaseRadioResetSource lastRadioResetSource();
+static bool requestRadioReset(Esp8266BaseRadioResetSource source);
+static bool consumeRadioResetRequest(Esp8266BaseRadioResetSource& source);
+static void executeRadioReset(Esp8266BaseRadioResetSource source);
 static const char* apSSID();
 ```
-状态查询。`ip()` 未连接时返回空字符串。`ssid()` 返回当前内存缓存中的 STA SSID。`rssi()` 仅连接后有效，未连接时返回 0。`macAddressTo()` 输出 STA MAC 地址。`attemptCount()` 与 `radioResetCount()` 返回本次启动累计 STA 连接次数和 WiFi radio 完整重置次数，计数饱和后不回绕。`recoverStation()` 供上层在 SDK 仍报 `WL_CONNECTED`、但传输连续失败时请求完整 radio 恢复；它不重启 MCU、不改凭据、不进入 AP。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
+状态查询。`ip()` 未连接时返回空字符串。`ssid()` 返回当前内存缓存中的 STA SSID。`rssi()` 仅连接后有效，未连接时返回 0。`macAddressTo()` 输出 STA MAC 地址。`attemptCount()` 与 `radioResetCount()` 返回本次启动累计 STA 连接次数和 WiFi radio 完整重置次数，计数饱和后不回绕。radio reset 采用分层所有权：任何模块都不得自行 `WIFI_OFF`；WiFi 状态机在 CONNECTING 连续失败时只调用 `requestRadioReset(STATE_MACHINE)` 置请求，`Esp8266Base` 主类在 `WiFi::handle()` 后通过 `consumeRadioResetRequest()` 取出，并在有序关闭上层网络后调用 `executeRadioReset()` 做唯一物理执行（关 Web 监听/UDP/TCP PCB → `WIFI_OFF→STA`）。`lastRadioResetSource()` 返回最近一次来源。云端（MQTT）传输失败不允许请求 radio reset。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
 
 ### 默认参数
 
@@ -386,13 +389,15 @@ static const char* apSSID();
 | `WL_DISCONNECTED` 卡住恢复 | 7000ms（`ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS`） |
 | 快速重试间隔 | 2000ms（`ESP8266BASE_WIFI_RETRY_FAST`） |
 | 快速重试次数 | 3（`ESP8266BASE_WIFI_RETRY_FAST_COUNT`） |
-| 慢速重试间隔 | 60000ms（`ESP8266BASE_WIFI_RETRY_SLOW`） |
+| 慢速重试间隔 | 10000ms（`ESP8266BASE_WIFI_RETRY_SLOW`） |
 | Radio reset 连续失败阈值 | 6（`ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT`） |
 | `WIFI_OFF` 稳定等待 | 100ms（`ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS`） |
+| 本地失联受控重启时长 | 1800000ms（`ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS`） |
+| 本地失联受控重启 radio reset 阈值 | 2（`ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS`） |
 | AP SSID | `ESP8266-Config-<ChipID后4位>` |
 | AP 密码 | 空（开放 AP） |
 
-连续失败达到 radio reset 阈值时，只重置 WiFi radio 并重新进入 STA，不重启 MCU、不清除凭证、不进入 AP。该恢复路径用于路由器晚启动或重启后普通 `disconnect + begin` 无法退出 ESP8266 SDK 卡滞状态的场景。
+连续失败达到 radio reset 阈值时，WiFi 层只置请求，由主类有序停网后重置 radio 并重新进入 STA，不重启 MCU、不清除凭证、不进入 AP。该恢复路径用于路由器晚启动或重启后普通 `disconnect + begin` 无法退出 ESP8266 SDK 卡滞状态的场景。本地 STA 连续不可达 30 分钟且期间至少 2 次 radio reset 时，主类才经 Watchdog 申请受 guard/预算约束的 MCU 重启；WiFi 关联正常但外网断时不触发。
 
 ---
 
@@ -610,7 +615,7 @@ static void resumeAfterShutdown();
 
 出站默认两个固定槽位，优先级为 `CRITICAL/EVIDENCE/STATE`，同优先级保持 FIFO；任意时刻只有一个 QoS1 包在途，匹配 PUBACK 后才发送下一包。业务按相同优先级顺序提交 runtime、overview 时，overview 必须等待 runtime 的 PUBACK。默认边界是 128B topic、512B 出站 payload、64B RX分块和768B单个入站payload，均可在允许范围内由构建期宏调整。出站 payload 可配置 64～768B；配置超过 512B 时，每个固定槽位由 512B head 和最多 256B tail 组成，发送时顺序写出，不创建大于 512B 的单个静态数组或额外完整 packet。
 
-`requestReconnect(true)` 用于把应用订阅/readiness 失败计入恢复周期，并在下一轮 `handle()` 释放传输；维护或受控生命周期重连使用默认 `false`。CONNACK 不视为应用 ready，只有 `markConnectionReady()` 清除连续恢复计数并恢复初始 2s 退避，同时生成固定大小的最近恢复快照。业务以已消费 serial 调用 `recoveryReport()`，可只持久化一次 duration/failureCycles/radioResetCount，不需要在基础库中注册动态回调。可恢复失败累计 6 次、且距上次恢复至少 15 分钟时调用 `recoverStation()` 退出 SDK 假在线；持续 30 分钟并经历至少 2 次 radio reset 后，通过 Watchdog 请求受 guard 与预算约束的 MCU 恢复。协议、身份、凭据、ACL 和 X509 校验错误不进入 radio/MCU 重启阶梯。
+`requestReconnect(true)` 用于把应用订阅/readiness 失败计入恢复周期，并在下一轮 `handle()` 释放传输；维护或受控生命周期重连使用默认 `false`。CONNACK 不视为应用 ready，只有 `markConnectionReady()` 清除连续恢复计数并恢复初始 2s 退避，同时生成固定大小的最近恢复快照。业务以已消费 serial 调用 `recoveryReport()`，可只持久化一次 duration/failureCycles/radioResetCount，不需要在基础库中注册动态回调；其中 `radioResetCount` 语义为本次云端恢复窗口内本地链路 radio reset 的增量（由 WiFi 全局计数差值得到），仅供诊断动作分类，**不再由 MQTT 触发 radio reset 或 MCU 重启**。可恢复的云端传输失败只在 MQTT 层退避重连；radio reset 与受 guard/预算约束的本地失联 MCU 恢复由 WiFi 状态机和 `Esp8266Base` 主类本地阶梯负责。协议、身份、凭据、ACL 和 X509 校验错误不进入任何恢复重启阶梯。
 
 `setConnectAttemptsEnabled(false)` 只禁止后续 DNS/TCP/TLS 新建连接，不主动断开已建立会话，也不停止该会话的 MQTT `loop()` 和收发；恢复为 `true` 后按既有退避时间继续。适用于执行器运行期间避免同步建连阻塞本地截止逻辑，不改变 Topic、消息、QoS 或认证契约。`connectAttemptsEnabled()` 返回当前门禁值。
 
@@ -951,8 +956,6 @@ void loop() {
 | `ESP8266BASE_USE_MQTT` | 跟随 `MQTT_TERMINAL` | 编译通用 TLS MQTT 模块；要求 NTP |
 | `ESP8266BASE_MQTT_RETRY_INITIAL_MS` | `2000` | MQTT 初始退避 ms |
 | `ESP8266BASE_MQTT_RETRY_MAX_MS` | `60000` | MQTT 退避上限 ms |
-| `ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT` | `6` | WiFi 假在线时触发 radio 恢复的连续传输失败次数 |
-| `ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS` | `900000` | 上层触发 WiFi radio 恢复的最小间隔 ms |
 | `ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS` | `5000` | 受控下线 PUBACK/正常断开单阶段超时 ms |
 | `ESP8266BASE_MQTT_TX_SLOTS` | `2` | 固定出站槽位，范围 1-4 |
 | `ESP8266BASE_MQTT_MAX_TOPIC_BYTES` | `128` | MQTT topic 上限 |
@@ -984,7 +987,9 @@ void loop() {
 | `ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS` | `7000` | STA 连接中持续 `WL_DISCONNECTED` 无进展时，提前重启本轮连接 |
 | `ESP8266BASE_WIFI_RETRY_FAST` | `2000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数 |
-| `ESP8266BASE_WIFI_RETRY_SLOW` | `60000` | WiFi 慢速重试间隔 ms |
+| `ESP8266BASE_WIFI_RETRY_SLOW` | `10000` | WiFi 慢速重试间隔 ms |
+| `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS` | `1800000` | 本地链路连续不可达多久后可申请受控 MCU 重启 ms |
+| `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS` | `2` | 上述窗口内本地 radio reset 增量阈值 |
 | `ESP8266BASE_SLEEP_MAX_DEEP_SEC` | `3600` | deepSleep 最大秒数上限 |
 
 ## 13. Esp8266BaseJournal — 断线现场诊断档案

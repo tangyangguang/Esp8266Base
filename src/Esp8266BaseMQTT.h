@@ -27,21 +27,9 @@ namespace BearSSL { class X509List; }
 #define ESP8266BASE_MQTT_CONNECT_TIMEOUT_MS 10000UL
 #endif
 
-#ifndef ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT
-#define ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT 6
-#endif
-
-#ifndef ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS
-#define ESP8266BASE_MQTT_WIFI_RECOVERY_COOLDOWN_MS 900000UL
-#endif
-
-#ifndef ESP8266BASE_MQTT_MCU_RECOVERY_AFTER_MS
-#define ESP8266BASE_MQTT_MCU_RECOVERY_AFTER_MS 1800000UL
-#endif
-
-#ifndef ESP8266BASE_MQTT_MCU_RECOVERY_RADIO_RESETS
-#define ESP8266BASE_MQTT_MCU_RECOVERY_RADIO_RESETS 2
-#endif
+// 注：旧版“MQTT 连续传输失败即拆 WiFi 电台 / 30min 升级 MCU 重启”阶梯已移除。
+// 云端传输失败只在 MQTT 层退避；本地链路 radio reset 与长期失联受控重启改由
+// Esp8266BaseWiFi 状态机和 Esp8266Base 主类的本地失联阶梯负责。
 
 #if ESP8266BASE_MQTT_RETRY_INITIAL_MS < 1000UL
 #error "ESP8266BASE_MQTT_RETRY_INITIAL_MS must be at least 1000"
@@ -52,10 +40,6 @@ namespace BearSSL { class X509List; }
 #if ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS == 0 || ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS > 0x7FFFFFFFUL
 #error "ESP8266BASE_MQTT_SHUTDOWN_TIMEOUT_MS must be between 1 and 2147483647"
 #endif
-#if ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT > 255
-#error "ESP8266BASE_MQTT_WIFI_RECOVERY_FAILURE_COUNT must fit uint8_t"
-#endif
-
 enum class Esp8266BaseMQTTState : uint8_t {
     UNCONFIGURED = 0,
     WAITING_WIFI,
@@ -249,11 +233,8 @@ private:
     static uint32_t _attemptCount;
     static uint32_t _retryAt;
     static uint32_t _retryDelay;
-    static uint32_t _lastWifiRecoveryAt;
-    static uint8_t _consecutiveTransportFailures;
     static bool _recoveryActive;
     static uint32_t _recoveryStartedAt;
-    static uint32_t _restartRetryAt;
     static uint8_t _recoveryRadioResetBaseline;
     static uint16_t _recoveryFailureCount;
     static Esp8266BaseMQTTRecoveryReport _lastRecoveryReport;
@@ -286,7 +267,6 @@ private:
     static bool _isDue(uint32_t now, uint32_t due);
     static bool _isRecoverable(Esp8266BaseMQTTDisconnectReason reason);
     static void _noteRecoveryFailure(Esp8266BaseMQTTDisconnectReason reason);
-    static void _handleEscalatedRecovery(uint32_t now);
     static void _handleShutdown();
     static void _startGracefulDisconnect();
     static void _finishShutdown(Esp8266BaseMQTTShutdownResult result);

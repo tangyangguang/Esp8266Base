@@ -124,7 +124,7 @@ Esp8266Base（主入口）
                                      ┌────────────┐
                                      │ CONNECTING │
                                      │ 前 3 次 2s  │
-                                     │ 之后 60s    │
+                                     │ 之后 10s    │
                                      └────────────┘
 ```
 
@@ -197,7 +197,7 @@ struct AppRoute {
 
 依赖方向固定为 `Esp8266Base → Esp8266BaseMQTT` 与 `Esp8266BaseOTA → Esp8266BaseMQTT`。MQTT 模块不调用 OTA、Web 或业务代码；业务只注册 connected/disconnected/message/SUBACK/publish acknowledgement/client error 普通函数指针。connected callback 每次成功连接都会触发，重新订阅由业务完成。
 
-业务握手失败通过 `requestReconnect(true)` 设置延迟处理标志并计入恢复周期，维护性重连使用默认 `false`；握手成功通过 `markConnectionReady()` 确认稳定。CONNACK 不重置 `_retryDelay` 或连续失败，ready 确认才恢复初始 2s。可恢复失败达到阈值后先重置 WiFi radio，长期失联再通过 Watchdog 请求受业务安全 guard 和 RTC 预算约束的 MCU 恢复；永久协议、凭据、ACL 和证书错误不升级。
+业务握手失败通过 `requestReconnect(true)` 设置延迟处理标志并计入恢复窗口，维护性重连使用默认 `false`；握手成功通过 `markConnectionReady()` 确认稳定并生成恢复诊断快照。CONNACK 不重置退避，ready 确认才恢复初始 2s。可恢复的云端传输失败**只在 MQTT 层退避重连，绝不拆 WiFi 电台**；WiFi radio reset 仅由本地链路状态机在 CONNECTING 连续失败时请求，长期本地失联再由 `Esp8266Base` 主类通过 Watchdog 请求受业务安全 guard 和 RTC 预算约束的 MCU 恢复；永久协议、凭据、ACL 和证书错误不升级。
 
 普通 MQTT 状态为 `UNCONFIGURED → WAITING_WIFI → WAITING_TIME → BACKOFF/CONNECTING → CONNECTED`。断线按 2s、4s、8s、16s、32s、60s 有界指数退避；WiFi 或 NTP 不就绪时回到门控状态。底层同步 BearSSL connect 在 ESP8266 上可能阻塞到单次网络超时，但外围不会忙循环。
 

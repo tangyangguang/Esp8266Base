@@ -106,4 +106,18 @@ private:
 #if ESP8266BASE_USE_MDNS
     static bool _mdnsWasStarted;   // 1B：WiFi 连接后 mDNS 已启动
 #endif
+
+    // radio reset 主类编排：WiFi 层只置请求，由主类先有序关闭上层网络再物理执行。
+    static void _consumeRadioReset();
+
+#if ESP8266BASE_USE_WATCHDOG
+    // 本地链路长期失联阶梯（只认 STA 本地状态，不看云端）：连续不可用达到时长且
+    // 期间本地 radio reset 增量达阈值，才申请受控 MCU 重启；guard/cooldown/预算在
+    // Watchdog 内。WiFi 关联正常但外网断时不 arm。
+    static bool     _linkOutageActive;       // 1B：当前是否处于本地失联窗口
+    static uint32_t _linkOutageStartedAt;    // 4B：窗口起点 millis
+    static uint8_t  _linkOutageRadioBaseline;// 1B：窗口起点 radioResetCount
+    static uint32_t _linkRestartRetryAt;     // 4B：拒绝后低率重试
+    static void _handleLocalLinkRecovery(bool wifiConnected);
+#endif
 };
