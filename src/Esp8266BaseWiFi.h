@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "Esp8266BaseLinkRecoveryCore.h"
+#include "Esp8266BaseRecoveryButtonCore.h"
 
 // ----------------------------------------------------------------------------
 // Esp8266BaseWiFi — STA 自动连接 + AP 配网
@@ -52,6 +53,52 @@ static_assert(ESP8266BASE_WIFI_NO_SLEEP == 0 || ESP8266BASE_WIFI_NO_SLEEP == 1,
 
 #ifndef ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS
 #define ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS 100 // ms：WIFI_OFF 后的稳定等待
+#endif
+
+// ----------------------------------------------------------------------------
+// WiFi 恢复键：正常运行期长按板载 BOOT/FLASH 键（默认 GPIO0，低电平有效）
+// 达到 holdMs，在保留已存凭证的前提下临时打开纯 AP 配网门户；门户内保存
+// 新凭证后经主类有序停网切回 STA，直接重启则仍连原 WiFi（触发态纯 RAM）。
+// 只在 begin() 离开上电窗口后武装，按住上电/复位仍是 ROM 下载模式，不冲突。
+// 不提供网页可视化配置、不持久化配置（与 ESP32 版的刻意简化差异）。
+// ----------------------------------------------------------------------------
+#ifndef ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED
+#define ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED 1
+#endif
+#ifndef ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO
+#define ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO 0
+#endif
+#ifndef ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS
+#define ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS 10000UL
+#endif
+#ifndef ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS
+#define ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS 50UL
+#endif
+
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED != 0 && \
+    ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED != 1
+#error "ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED must be 0 or 1"
+#endif
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO < 0 || \
+    ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO > 16
+#error "ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO must be in 0..16"
+#endif
+// GPIO6..11 接 Flash，禁止使用。注意 0/2/15 为 strapping、1/3 为串口、16 特殊，
+// 改到这些引脚时业务自行承担板级冲突；默认 0 只在运行期 pinMode，不影响下载模式。
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO >= 6 && \
+    ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO <= 11
+#error "ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO must not be a Flash pin (6..11)"
+#endif
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS < 1000UL || \
+    ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS > 60000UL
+#error "ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS must be in 1000..60000"
+#endif
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS < 10UL || \
+    ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS > 2000UL
+#error "ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS must be in 10..2000"
+#endif
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS >= ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS
+#error "ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS must be smaller than HOLD_MS"
 #endif
 
 // radio reset 节奏常量统一在 Esp8266BaseLinkRecoveryCore.h（纯核，可 host 单测）：
@@ -128,12 +175,25 @@ public:
         STUCK_RESTART = 2,
         // 断开当前关联并按 fast/slow + radio reset 阶梯退避（stuck retrying、20s 超时）。
         DISCONNECT_BACKOFF = 3,
+        // 恢复键长按：保留凭证，经主类有序停网后进入纯 AP 配网门户。
+        ENTER_RECOVERY_PORTAL = 4,
+        // 门户内保存新凭证：下一轮主循环有序停网后由 AP 切回 STA
+        //（不在 Web handler 内拆 AP netif，避免活 PCB use-after-free）。
+        EXIT_PORTAL = 5,
     };
     // 取出（并清零）一个待执行的运行期 STA 动作；无请求返回 NONE。
     static StationAction consumeStationAction();
 
     // AP 模式的 SSID（格式：ESP8266-Config-XXXX）
     static const char* apSSID();
+
+    // ---- WiFi 恢复键门户 ----
+    // 门户打开前一刻（主类已完成上层网络 teardown、尚未切换 AP）调用的业务
+    // 回调。用于强制断开执行器等本地安全动作；不得阻塞、不得做网络操作。
+    typedef void (*RecoveryPortalCallback)();
+    static void setRecoveryPortalCallback(RecoveryPortalCallback callback);
+    // 当前是否处于“恢复键打开的临时门户”（首启无凭证 AP 返回 false）。
+    static bool recoveryPortalActive();
 
     friend class Esp8266Base;
 
@@ -152,10 +212,16 @@ private:
     static char                 _ip[16];       // 16B：点分十进制 IP
     static char                 _staSSID[64];  // 64B：缓存的 STA SSID，避免重连时重读 Flash
     static char                 _staPass[64];  // 64B：缓存的 STA 密码
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED
+    static Esp8266BaseRecoveryButtonCore::RecoveryButtonCore _recoveryButton; // 12B（对齐）
+    static RecoveryPortalCallback _recoveryPortalCallback; // 4B：门户前业务安全回调
+#endif
+    static bool                 _recoveryPortalActive; // 1B：门户由恢复键（非首启）打开
 
     static void _startSTA(const char* ssid, const char* pass, bool keepAP = false);
     static void _beginSTA(const char* ssid, const char* pass, bool keepAP);
-    static void _startAP();
+    static void _startAP(bool recoveryTriggered = false);
+    static void _pollRecoveryButton();   // 仅数字读 + 登记动作，不动网
     static void _handleConnected();
     static void _scheduleRetry();
     // 唯一物理执行 radio reset，仅编排者 Esp8266Base（friend）在有序停网后调用。

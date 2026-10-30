@@ -216,12 +216,16 @@ build_flags =
 | `ESP8266BASE_WIFI_RETRY_FAST` | `2000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数，之后进入慢速重试 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `10000` | WiFi 慢速重试间隔 ms |
+| `ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED` | `1` | 运行期 WiFi 恢复键（长按进临时配网门户、保留凭证）；0/1 |
+| `ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO` | `0` | 恢复键 GPIO（低电平有效，0..16，禁止 6..11） |
+| `ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS` | `10000` | 长按触发时长 ms（1000..60000） |
+| `ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS` | `50` | 消抖时长 ms（10..2000，须小于长按） |
 
 radio reset 节奏（连续失败阈值 6、首次后 10min 绝对冷却、每失联窗口预算 3）与本地失联受控重启阶梯（30min 且 ≥2 次 radio reset）不是编译宏，统一在纯核 `src/Esp8266BaseLinkRecoveryCore.h` 以 `constexpr` 定义，详见 `docs/08_networking.md`。
 
 根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为默认构建入口；各示例目录提供独立的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
 
-WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。需要重新进入 AP 配网时，先清除 WiFi 凭证再重启。SSID 和密码按表单原值保存，包含合法的首尾空格，不做隐式裁剪。
+WiFi 策略：没有保存凭证时进入 AP 配网；已有凭证但连接失败时，设备保持 STA 模式并按退避间隔持续重连，不自动打开配置 AP。现场换路由器/改密码时，运行期长按 GPIO0（BOOT/FLASH 键）10 秒即可在**保留已存凭证**的前提下临时打开配网门户；门户保存新凭证后切回 STA，不保存直接重启则仍连原 WiFi。也可以清除 WiFi 凭证后重启重新配网。SSID 和密码按表单原值保存，包含合法的首尾空格，不做隐式裁剪。
 
 Web Auth 策略：认证用户名来自 `ESP8266BASE_WEB_AUTH_USER` 或 `Esp8266BaseWeb::setDefaultAuth()`；认证密码按 `ESP8266BASE_WEB_AUTH_PASS` → `setDefaultAuth()` → 设备已保存的 `eb_web_pass` 顺序确定，`setDefaultAuth()` 必须在 `Esp8266Base::begin()` 前调用。内置 `/wifi` 和 `/auth` 表单带每次启动随机请求令牌；`/auth` 保存后立即使用新密码，`clearAll()` 后恢复默认密码。
 

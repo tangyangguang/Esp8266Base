@@ -343,7 +343,7 @@ enum class Esp8266BaseWiFiState : uint8_t {
 ```cpp
 static bool begin();
 ```
-从 Config 读取凭证并缓存到内存，启动 WiFi 状态机（非阻塞）。无凭证时直接进入 AP_CONFIG；有凭证时只按 STA 模式持续退避重连，不自动打开配置 AP。需要进入 AP 配网时，应明确清除 WiFi 凭证后重启。
+从 Config 读取凭证并缓存到内存，启动 WiFi 状态机（非阻塞）。无凭证时直接进入 AP_CONFIG；有凭证时只按 STA 模式持续退避重连，不自动打开配置 AP。需要进入 AP 配网时，可明确清除 WiFi 凭证后重启，或由运行期恢复键长按（默认 GPIO0 10s）在保留凭证的前提下临时进入门户。
 
 ```cpp
 static void handle();
@@ -353,7 +353,7 @@ static void handle();
 ```cpp
 static bool connect(const char* ssid, const char* pass);
 ```
-保存新凭证到 Config 并更新内存缓存，立即尝试连接。Web `/wifi` POST 时调用。
+保存新凭证到 Config 并更新内存缓存，立即尝试连接。Web `/wifi` POST 时调用。STA 运行期换凭证登记 `RECONNECT` 动作由主类有序停网后执行；AP 配网态（首启或恢复门户）下只登记 `EXIT_PORTAL` 动作，由下一轮主循环在有序停网后关闭 AP 并重起 STA，避免在 HTTP handler 内带着活 PCB 拆 AP netif。
 
 写入 Config 前会校验凭证长度：SSID 必须为 1-32 字节，密码必须为 0-63 字节。超限会拒绝保存并记录 `connect_rejected reason=ssid_too_long` 或 `reason=password_too_long`，避免 Config 中保存的值与实际 `WiFi.begin()` 使用的截断值不一致。
 空密码合法，用于连接开放 WiFi；内置 `/wifi` 页面同样允许密码为空。
@@ -375,7 +375,13 @@ static uint8_t radioResetCount();
 static bool requestRadioReset();
 static bool consumeRadioResetRequest();
 static const char* apSSID();
+
+typedef void (*RecoveryPortalCallback)();
+static void setRecoveryPortalCallback(RecoveryPortalCallback callback);
+static bool recoveryPortalActive();
 ```
+
+`setRecoveryPortalCallback()` 注册一个裸函数指针（不得使用 `std::function`），在恢复键长按触发、主类已有序关闭上层网络但尚未切换到 AP 时同步调用一次。业务在此执行本地安全动作（如强制断开继电器），不得阻塞、不得发起网络/Web/MQTT/Config 操作。`recoveryPortalActive()` 仅在“恢复键打开的临时门户”期间为 true；首启无凭证 AP 为 false。
 状态查询。`ip()` 未连接时返回空字符串。`ssid()` 返回当前内存缓存中的 STA SSID。`rssi()` 仅连接后有效，未连接时返回 0。`macAddressTo()` 输出 STA MAC 地址。`attemptCount()` 与 `radioResetCount()` 返回本次启动累计 STA 连接次数和 WiFi radio 完整重置次数，计数饱和后不回绕。radio reset 采用分层所有权：任何模块都不得自行 `WIFI_OFF`；WiFi 状态机在重试调度内由纯核 `Esp8266BaseLinkRecoveryCore::RadioResetGate` 每次失败重评资格（本 boot 首次连续 6 败快触发，其后 10min 绝对冷却 + 每失联窗口 3 次预算），满足才 `requestRadioReset()` 置 bool 请求；`Esp8266Base` 主类在 `WiFi::handle()` 后通过 `consumeRadioResetRequest()` 取出，并在按序关闭上层网络后调用私有入口 `executeRadioReset()`（`friend Esp8266Base`）做唯一物理执行（停 mDNS `UdpContext`/Web 监听/UDP/TCP PCB → `WIFI_OFF→STA`）。云端（MQTT）传输失败不允许请求 radio reset。长期失联的受控 MCU 重启由纯核 `LinkRestartLadder` 决定（连续本地不可达 30min 且窗口内 ≥2 次 radio reset）。`apSSID()` 格式：`ESP8266-Config-XXXX`（后4位为 ChipID）。
 
 ### 默认参数
@@ -396,6 +402,12 @@ static const char* apSSID();
 | 本地失联受控重启 radio reset 阈值 | 2（`LINK_RESTART_MIN_RADIO_RESETS`，纯核） |
 | AP SSID | `ESP8266-Config-<ChipID后4位>` |
 | AP 密码 | 空（开放 AP） |
+| 恢复键使能 | 1（`ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED`，0/1） |
+| 恢复键 GPIO | 0（`ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO`，允许 0..16，禁止 6..11；0/2/15 strapping、1/3 串口需业务自行评估） |
+| 恢复键长按时长 | 10000ms（`ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS`，允许 1000..60000） |
+| 恢复键消抖时长 | 50ms（`ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS`，允许 10..2000，须小于长按时长） |
+
+运行期长按恢复键满长按时长（默认 GPIO0、10s，50ms 消抖，低电平有效）保留已存 WiFi 凭证并进入纯 AP 配网门户；只在正常启动后检测，按住上电/复位是 ROM 下载模式不触发。门户内 `/wifi` 保存新凭证后先返回 303，下一轮主循环有序停网再切回 STA；不保存直接重启仍连原 WiFi（触发态纯 RAM）。门户动作经 `StationAction::ENTER_RECOVERY_PORTAL/EXIT_PORTAL` 走与 radio reset 相同的分层所有权，AP 态下 radio reset 请求被丢弃。
 
 连续失败达到 radio reset 阈值时，WiFi 层只置请求，由主类有序停网后重置 radio 并重新进入 STA，不重启 MCU、不清除凭证、不进入 AP。该恢复路径用于路由器晚启动或重启后普通 `disconnect + begin` 无法退出 ESP8266 SDK 卡滞状态的场景。本地 STA 连续不可达 30 分钟且期间至少 2 次 radio reset 时，主类才经 Watchdog 申请受 guard/预算约束的 MCU 重启；WiFi 关联正常但外网断时不触发。
 

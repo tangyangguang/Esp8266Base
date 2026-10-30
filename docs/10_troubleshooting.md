@@ -56,6 +56,21 @@ station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 
 ---
 
+## 二·补、现场换路由器/改 WiFi 密码后如何重新配网
+
+现象：旧路由器已更换或密码已修改，设备持续 STA 重试，网页架在连不上的 WiFi 上无法访问。
+
+处理（不需要串口擦文件系统）：
+
+1. 设备正常运行期间，长按板载 BOOT/FLASH 键（默认 GPIO0）保持 10 秒，直到日志出现 `recovery_button_triggered ... credentials=preserved` 与 `recovery_portal_started`。
+2. 手机/电脑连入开放热点 `ESP8266-Config-XXXX`，浏览器访问 `http://192.168.4.1/wifi`（默认认证 `admin/admin`）。
+3. 提交新 SSID/密码：页面先返回 303，随后日志出现 `recovery_portal_exit_after_teardown` 与 `station_connected`，设备回到 STA 并连上新网络。
+4. 若进入门户后不保存，直接给设备重新上电：门户是纯 RAM 临时状态，设备仍按原凭证连接原 WiFi。
+
+注意：按住上电或复位是 ROM 下载模式，不会触发门户；短按、抖动和不足 10 秒的按住均不触发。门户期间设备不连云，业务侧应自行确保执行器处于安全态（库提供 `setRecoveryPortalCallback()` 钩子）。
+
+---
+
 ## 三、mDNS 访问慢或失败
 
 现象：

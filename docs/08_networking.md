@@ -52,6 +52,28 @@ config_ap_started ssid=ESP8266-Config-18E7 ip=192.168.4.1 channel=6
 
 连接 AP 后访问 `http://192.168.4.1/wifi` 保存 STA 凭证。
 
+### 运行期 WiFi 恢复键（保留凭证的临时配网门户）
+
+设备已保存凭证但现场更换了路由器或修改了密码时，持续 STA 重试期间网页不可达。此时不需要擦除文件系统：正常运行期间**长按板载 BOOT/FLASH 键（默认 GPIO0，低电平有效）满 10 秒**，即进入与首启相同的纯 AP 配网门户：
+
+```text
+recovery_button_triggered gpio=0 hold_ms=10000 action=start_config_portal credentials=preserved
+station_disconnect_backoff_after_teardown ...   # 若同轮恰有待执行 STA 动作，门户优先
+recovery_portal_enter_after_teardown ... credentials=preserved
+recovery_portal_started ssid=ESP8266-Config-18E7 ip=192.168.4.1 channel=6 credentials=preserved
+```
+
+语义：
+
+- **保留已存凭证**：门户是纯 RAM 临时状态，不删除 `eb_wifi_ssid/eb_wifi_pass`、不写任何触发标记。进入门户后不做任何操作直接重启，设备照常连接原 WiFi。
+- 门户内提交 `/wifi` 表单保存新凭证后，设备先在 AP 上发完 303，再在下一轮主循环经有序停网切回 STA 并连接新网络。
+- 只有**正常启动后**才开始检测：按住上电或复位仍是 ROM 下载模式，不会触发；50ms 消抖防误触；一次按住只触发一次；门户中按键无效。
+- 这是**人工显式物理入口**，不是“失败自动转 AP”，也不常驻 AP+STA；“有凭证连不上持续 STA 重试”的主策略不变。
+- 进入门户同样走 `_teardownUpperNetwork()`：mDNS/Web 监听/UDP/TCP PCB 全部有序关闭后才切换 opmode；退出门户保存凭证时也先停网再拆 AP netif，避免活 PCB 下 netif 摘除的 use-after-free。门户期间 radio reset 请求被丢弃（AP 态硬闸门）。
+- 编译期配置：`ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED`（默认 1）、`_GPIO`（默认 0，禁止 6..11）、`_HOLD_MS`（默认 10000，范围 1000..60000）、`_DEBOUNCE_MS`（默认 50，范围 10..2000，须小于 HOLD）。
+- 业务可通过 `Esp8266BaseWiFi::setRecoveryPortalCallback(cb)` 注册裸函数回调，在进入门户前一刻（已停网、未切 AP）执行本地安全动作（如强制断开继电器）；回调不得阻塞、不得做网络操作。`recoveryPortalActive()` 区分恢复键门户与首启无凭证 AP。
+- 边界：OTA 上传期间触发恢复键会终止本次上传连接，OTA 走既有失败回调。
+
 ---
 
 ## 四、有凭证时的连接策略
@@ -106,10 +128,12 @@ WiFi 状态机本身**绝不**在主循环里直接调用 `WiFi.disconnect()`/`W
 | `RECONNECT` | 已连接后掉线、退避到期、Web 更换凭证 | 用缓存/新凭证重起 STA |
 | `STUCK_RESTART` | 单 attempt 首次卡死 7s | 重起 STA，并保留 `_stuckRestarted=true` |
 | `DISCONNECT_BACKOFF` | 第二次卡死、20s 超时 | 断开关联后走 fast/slow + radio reset 阶梯退避 |
+| `ENTER_RECOVERY_PORTAL` | 恢复键长按 10s（人工，优先级最高，可抢占同轮其他动作） | 业务门户回调（如断开执行器）→开纯 AP 门户，凭证保留 |
+| `EXIT_PORTAL` | 门户 `/wifi` 保存新凭证 | `softAPdisconnect(true)` 后用新凭证重起 STA |
 
 `Esp8266Base` 主类在主循环 WiFi 段之后、NTP/mDNS/Web/MQTT 段之前消费该动作：先按 mDNS→Web 监听→全部 UDP→全部 TCP 的顺序关闭上层 PCB（`_teardownUpperNetwork()`），再由 friend-only 的 `executeStationAction()` 做唯一物理执行，随后恢复 Web :80 监听。
 
-之所以连普通 `WiFi.disconnect()` 都必须先停 socket：设备崩溃栈（弱网 RSSI≈-78dBm，异常 28 LoadStoreError）实测为 `wifi_station_disconnect→eagle_lwip_if_free→netif_remove→netif_set_down`，即弱网不一致状态下仅断开关联也可能让 SDK 摘除并释放 STA netif；若 MQTT/TLS、Web 的 PCB 仍存活就会 use-after-free，堆损坏还会表现为数秒主循环卡死并触发看门狗安全断开。boot 首连（`begin()` 时尚无上层 socket）与 AP 模式更换凭证（仅 AP netif）不走该分层。物理执行日志分别为 `station_reconnect_after_teardown`、`station_stuck_restart_after_teardown`、`station_disconnect_backoff_after_teardown`。
+之所以连普通 `WiFi.disconnect()` 都必须先停 socket：设备崩溃栈（弱网 RSSI≈-78dBm，异常 28 LoadStoreError）实测为 `wifi_station_disconnect→eagle_lwip_if_free→netif_remove→netif_set_down`，即弱网不一致状态下仅断开关联也可能让 SDK 摘除并释放 STA netif；若 MQTT/TLS、Web 的 PCB 仍存活就会 use-after-free，堆损坏还会表现为数秒主循环卡死并触发看门狗安全断开。boot 首连（`begin()` 时尚无上层 socket）与首启无凭证 AP 不走该分层；**门户内保存凭证（`EXIT_PORTAL`）刻意改为延迟到下一轮主循环走该分层**：`/wifi` POST 先在仍存活的 AP 上发完 303，再由主类停掉包括本次 HTTP 连接在内的 PCB 后拆 AP netif，不在 handler 内带着活 PCB 切换 opmode。物理执行日志分别为 `station_reconnect_after_teardown`、`station_stuck_restart_after_teardown`、`station_disconnect_backoff_after_teardown`、`recovery_portal_enter_after_teardown`、`recovery_portal_exit_after_teardown`。AP 配网态（首启与恢复门户）下 radio reset 请求一律丢弃（`station_radio_reset_request_discarded reason=ap_config_active`），防止电台重置拆掉门户。
 
 普通连接 attempt 连续失败达到 `RADIO_RESET_FAILURE_THRESHOLD`（默认 6）时，WiFi 层在重试调度 `_scheduleRetry()` 内每次失败都重新评估资格，满足才**请求**一次 radio reset（`requestRadioReset()`）；不满足则走与普通慢重试完全相同的布臂，绝不提前 return（否则会退化成无间隔重关联）。由 `Esp8266Base` 主类在同一主循环上下文先**按序**关闭上层网络——mDNS 自持 `UdpContext`（`Esp8266BaseMDNS::stop()`→`MDNS.end()`，它不在 `WiFiUDP::stopAll()` 链表里）、Web :80 监听、其余全部 UDP/TCP PCB——再执行唯一物理恢复：断开 STA、`WIFI_OFF`、等待 `RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新 `WiFi.begin()`。先停 socket 是为了避免活跃 PCB 在 `WIFI_OFF→netif_remove` 时触发 use-after-free 崩溃（边界：Core 的 netif 状态回调不会因 `MDNS.end()` 注销，WIFI_OFF 仍可能 queue 一次内部 mDNS restart，且已 accept 未读的 backlog TCP 无公开 API 可丢弃，这两类残留面靠真机长稳证据兜底）。
 
@@ -135,9 +159,11 @@ radio reset 是针对“ESP8266 SDK station 软卡死、不再重连”这一本
 
 需要重新配网时：
 
-- 调用 `Esp8266BaseWiFi::clearCredentials()` 后重启。
-- 或调用 `Esp8266BaseConfig::clearAll()` 恢复出厂并重启。
-- full_demo 中 GPIO0 长按 1 秒会清除全部配置并重启。
+- **运行期长按 GPIO0 满 10 秒（默认）**：保留全部已存配置，临时进入配网门户，保存新凭证即切回 STA；不保存直接重启仍连原 WiFi。适用于现场换路由器/改密码，是推荐的自救入口。
+- 调用 `Esp8266BaseWiFi::clearCredentials()` 后重启（仅清除 WiFi 凭证）。
+- 或调用 `Esp8266BaseConfig::clearAll()` 恢复出厂并重启（清除全部 `/cfg_*`）。
+
+full_demo 不再自定义按键行为；GPIO0 长按 10 秒恢复门户由库直接提供。
 
 ---
 

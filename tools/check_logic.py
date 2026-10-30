@@ -1125,6 +1125,122 @@ def test_small_http_replies() -> None:
         require_token(icon, token, "bounded icon response")
 
 
+def test_wifi_recovery_button() -> None:
+    wifi_h = read("src/Esp8266BaseWiFi.h")
+    wifi_cpp = read("src/Esp8266BaseWiFi.cpp")
+    core_h = read("src/Esp8266BaseRecoveryButtonCore.h")
+
+    # 默认编译配置：使能 / GPIO0 / 10000ms / 50ms。
+    assert_eq(parse_define_int(wifi_h, "ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED"), 1,
+              "recovery button default enabled")
+    assert_eq(parse_define_int(wifi_h, "ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO"), 0,
+              "recovery button default GPIO")
+    hold = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS")
+    debounce = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS")
+    assert_eq(hold, 10000, "recovery button default hold ms")
+    assert_eq(debounce, 50, "recovery button default debounce ms")
+
+    # 纯核：消抖 + 单次触发 + 回绕安全。
+    require_token(core_h, "triggeredThisPress", "recovery core one-shot latch")
+    require_token(core_h, "static_cast<int32_t>(nowMs - pressedMs)",
+                  "recovery core wrap-safe hold comparison")
+    require_token(core_h, "static_cast<int32_t>(nowMs - rawChangedMs)",
+                  "recovery core wrap-safe debounce comparison")
+
+    # 分层：handle() 切片内只允许调用轮询函数，轮询函数本身只能 digitalRead +
+    # 登记动作，绝不能直接 softAP/mode/disconnect/pinMode。
+    poll_start = wifi_cpp.index("void Esp8266BaseWiFi::_pollRecoveryButton()")
+    poll_end = wifi_cpp.index("void Esp8266BaseWiFi::handle()", poll_start)
+    poll_body = wifi_cpp[poll_start:poll_end]
+    require_token(poll_body, "digitalRead(ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO)",
+                  "recovery polling must sample the GPIO")
+    for forbidden, why in (
+        ("WiFi.mode", "recovery polling must not switch mode"),
+        ("softAP", "recovery polling must not manage softAP"),
+        ("WiFi.disconnect", "recovery polling must not disconnect"),
+        ("pinMode", "pinMode belongs to begin() only"),
+    ):
+        if forbidden in poll_body:
+            fail(why)
+    require_token(poll_body, "StationAction::ENTER_RECOVERY_PORTAL",
+                  "recovery polling must request the ENTER action")
+    # 检测必须在状态机 switch 之前，门户态不检测。
+    handle_start = wifi_cpp.index("void Esp8266BaseWiFi::handle()")
+    switch_pos = wifi_cpp.index("switch (_state)", handle_start)
+    call_pos = wifi_cpp.index("_pollRecoveryButton();", handle_start)
+    if not (handle_start < call_pos < switch_pos):
+        fail("recovery button polling must run before the state machine switch")
+    require_token(poll_body, "Esp8266BaseWiFiState::AP_CONFIG",
+                  "recovery polling must be disabled in AP_CONFIG")
+
+    # 进/出门户必须走 StationAction 分层，由主类 teardown 后物理执行。
+    require_token(wifi_h, "ENTER_RECOVERY_PORTAL = 4", "ENTER action enum")
+    require_token(wifi_h, "EXIT_PORTAL = 5", "EXIT action enum")
+    exec_start = wifi_cpp.index("void Esp8266BaseWiFi::executeStationAction")
+    exec_end = wifi_cpp.index("const char* Esp8266BaseWiFi::apSSID", exec_start)
+    exec_body = wifi_cpp[exec_start:exec_end]
+    require_token(exec_body, "StationAction::ENTER_RECOVERY_PORTAL",
+                  "execute handles ENTER")
+    require_token(exec_body, "StationAction::EXIT_PORTAL",
+                  "execute handles EXIT")
+    require_token(exec_body, "_startAP(true)", "ENTER physically starts the recovery portal")
+    require_token(exec_body, "WiFi.softAPdisconnect(true)",
+                  "EXIT tears down the AP after ordered socket teardown")
+    require_token(exec_body, "_recoveryPortalCallback",
+                  "ENTER invokes the registered pre-portal safety callback")
+    require_token(exec_body, "_radioResetRequest = false",
+                  "ENTER discards a pending radio reset request")
+
+    # connect() 的 AP 分支不得在 Web handler 内拆 AP netif，只登记 EXIT_PORTAL。
+    connect_start = wifi_cpp.index("bool Esp8266BaseWiFi::connect(")
+    connect_end = wifi_cpp.index("// ----------------------------------------------------------------------------\n// clearCredentials", connect_start)
+    connect_body = wifi_cpp[connect_start:connect_end]
+    ap_branch = connect_body[connect_body.index("Esp8266BaseWiFiState::AP_CONFIG"):]
+    if "softAPdisconnect" in ap_branch or "WiFi.mode" in ap_branch:
+        fail("connect() AP branch must not tear down the AP inside the HTTP handler")
+    require_token(ap_branch, "StationAction::EXIT_PORTAL",
+                  "connect() AP branch must enqueue EXIT_PORTAL")
+
+    # AP 态 radio reset 硬闸门。
+    consume_reset = wifi_cpp[wifi_cpp.index("bool Esp8266BaseWiFi::consumeRadioResetRequest"):
+                             wifi_cpp.index("void Esp8266BaseWiFi::executeStationAction")]
+    require_token(consume_reset, "reason=ap_config_active",
+                  "radio reset requests must be discarded in AP_CONFIG")
+
+    # 凭证保留：触发/门户日志必须明示 credentials=preserved；不允许删除 eb_wifi_*。
+    require_token(wifi_cpp, "action=start_config_portal credentials=preserved",
+                  "trigger log preserves credentials")
+    require_token(wifi_cpp, "recovery_portal_started", "portal start diagnostic")
+    require_token(wifi_cpp, "recovery_portal_exit_after_teardown", "portal exit diagnostic")
+    # 凭证不删除：connect() 保存 eb_wifi_*（setStr），门户路径不调用 clearCredentials。
+    if "clearCredentials()" in exec_body:
+        fail("portal enter/exit must not clear saved WiFi credentials")
+
+    # 公共 API：裸函数指针回调（禁止 std::function）与门户态查询。
+    require_token(wifi_h, "typedef void (*RecoveryPortalCallback)();",
+                  "pre-portal safety callback type")
+    require_token(wifi_h, "setRecoveryPortalCallback", "callback registration API")
+    require_token(wifi_h, "recoveryPortalActive", "portal state query API")
+    if "std::function" in wifi_h or "std::function" in wifi_cpp:
+        fail("recovery button must use a plain function pointer, not std::function")
+
+    # 纯核 host 实编译 + 断言。
+    cxx = shutil.which("clang++") or shutil.which("g++")
+    if not cxx:
+        fail("no C++ compiler available for recovery button core host test")
+    with tempfile.TemporaryDirectory() as tmp:
+        binary = Path(tmp) / "recovery_button_core_test"
+        compiled = subprocess.run(
+            [cxx, "-std=c++17", "-Wall", "-Wextra",
+             str(ROOT / "tools/recovery_button_core_host_test.cpp"), "-o", str(binary)],
+            capture_output=True, text=True)
+        if compiled.returncode != 0:
+            fail("recovery button core host test compile error:\n" + compiled.stderr)
+        ran = subprocess.run([str(binary)], capture_output=True, text=True)
+        if ran.returncode != 0:
+            fail("recovery button core host test failed:\n" + ran.stdout + ran.stderr)
+
+
 def main() -> None:
     test_small_http_replies()
     test_tls_handshake_admission()
@@ -1133,6 +1249,7 @@ def main() -> None:
     test_journal_heap_precision()
     test_log_file_buffer_rules()
     test_wifi_retry_rules()
+    test_wifi_recovery_button()
     test_ntp_manual_packet_validation()
     test_ntp_trust_core()
     test_config_deferred_rules()

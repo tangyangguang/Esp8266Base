@@ -34,6 +34,17 @@
 
 没有内容的小节可以省略。
 
+## 2026-10-30（二）
+
+### 新增
+- **WiFi 恢复键（GPIO0 长按进入临时配网门户）**：设备保存 WiFi 凭证后若现场更换路由器/修改密码，旧版本只能持续 STA 重试，网页不可达，需重放旧热点或串口擦文件系统。现在正常运行期间长按板载 BOOT/FLASH 键（默认 GPIO0，低电平有效）满 10 秒，即保留全部已存配置、临时打开纯 AP 配网门户（`ESP8266-Config-XXXX` / 192.168.4.1，复用既有 `/wifi` 页）。门户内提交新凭证后切回 STA；进入门户后不保存直接重启，仍连接原 WiFi——触发态是纯 RAM，不写 Config、不写 RTC。按住上电/复位仍是 ROM 下载模式，不冲突；50ms 消抖、一次按住只触发一次。编译期可配：`ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED`（默认 1）、`_GPIO`（默认 0，禁止 Flash 引脚 6..11）、`_HOLD_MS`（默认 10000，1000..60000）、`_DEBOUNCE_MS`（默认 50，10..2000，须小于 hold）。新增纯核 `Esp8266BaseRecoveryButtonCore`（零 Arduino 依赖，host 测试 `tools/recovery_button_core_host_test.cpp` 由 `tools/check_logic.py` 编译执行，含回绕用例）。
+- 新增业务安全钩子 `Esp8266BaseWiFi::setRecoveryPortalCallback(cb)`（裸函数指针，禁止 `std::function`）：进入门户前一刻、上层网络已有序关闭后、切换 AP 前同步调用，业务可在此强制断开执行器；回调不得阻塞或做网络操作。`Esp8266BaseWiFi::recoveryPortalActive()` 区分“恢复键门户”与“首启无凭证 AP”。
+
+### 行为变化 / 使用建议
+- **进/出门户都走 1.14.2 建立的有序停网分层**，不新增任何旁路：长按只登记 `StationAction::ENTER_RECOVERY_PORTAL`（人工动作，优先级可抢占同轮重连/退避），主类先关 mDNS/Web 监听/UDP/TCP PCB 再切 `WIFI_AP`；门户 `/wifi` POST 保存凭证后**不再在 HTTP handler 内直接 `softAPdisconnect/mode`**，改为先在仍存活的 AP 上发完 303、下一轮主循环经 `_teardownUpperNetwork()` 关闭含本次请求在内的全部 PCB 后执行 `EXIT_PORTAL` 切回 STA，消除“在活 AP netif 上切换 opmode”的 use-after-free 窗口。首启无凭证配网同样改走该延迟切回路径，303 现在可靠送达。AP 配网态（首启/恢复门户）下 radio reset 请求一律丢弃（`station_radio_reset_request_discarded reason=ap_config_active`），`WIFI_OFF→STA` 不会再拆掉正在服务的门户。
+- full_demo 移除自定义“GPIO0 长按 1 秒 clearAll 重启”：与库恢复键在同一引脚上语义冲突（1s 会先于 10s 触发）。需要“恢复出厂”仍可在业务代码显式调用 `Esp8266BaseConfig::clearAll()` 后重启；GPIO0 现在统一表示“保留凭证的临时配网”。
+- WiFi 模块常驻 RAM 增加 16B（消抖纯核 11B + 门户标志 1B + 回调指针 4B），门户瞬时堆与首启 AP 同模式（预算基线 ≥18KB），无新增堆分配/String/缓冲。
+
 ## 2026-10-30
 
 ### 修复 / 行为变化

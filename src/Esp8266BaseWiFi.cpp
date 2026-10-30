@@ -26,6 +26,11 @@ char                 Esp8266BaseWiFi::_apSSID[28]     = "";
 char                 Esp8266BaseWiFi::_ip[16]         = "";
 char                 Esp8266BaseWiFi::_staSSID[64]    = "";
 char                 Esp8266BaseWiFi::_staPass[64]    = "";
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED
+Esp8266BaseRecoveryButtonCore::RecoveryButtonCore Esp8266BaseWiFi::_recoveryButton;
+Esp8266BaseWiFi::RecoveryPortalCallback Esp8266BaseWiFi::_recoveryPortalCallback = nullptr;
+#endif
+bool                 Esp8266BaseWiFi::_recoveryPortalActive = false;
 
 static void _formatIP(const IPAddress& ip, char* out, size_t len) {
     if (!out || len == 0) return;
@@ -83,16 +88,54 @@ bool Esp8266BaseWiFi::begin() {
     } else {
         // 无凭证，直接进入 AP 配网
         ESP8266BASE_LOG_I_P("WiFi", "no_saved_wifi_credentials starting_config_ap ssid=%s", _apSSID);
-        _startAP();
+        _startAP(false);
     }
 
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED
+    // 仅在离开上电窗口后武装检测：按住上电/复位进 ROM 下载模式，不运行到此处，
+    // 因而不会与运行期长按冲突。GPIO0 模块板载上拉，INPUT 即可读到高电平。
+    pinMode(ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO, INPUT);
+    _recoveryButton.reset(millis());
+    ESP8266BASE_LOG_I_P("WiFi",
+                      "recovery_button_config enabled=yes gpio=%d hold_ms=%lu debounce_ms=%lu credentials=preserved",
+                      (int)ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO,
+                      (unsigned long)ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS,
+                      (unsigned long)ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS);
+#endif
+
     return true;
+}
+
+// ----------------------------------------------------------------------------
+// 恢复键轮询：只做数字读 + 消抖纯核；触发时仅登记动作，不动网
+// ----------------------------------------------------------------------------
+void Esp8266BaseWiFi::_pollRecoveryButton() {
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED
+    // 门户中不检测：门户只能通过保存新凭证或重启退出，长按无效。
+    if (_state == Esp8266BaseWiFiState::AP_CONFIG) return;
+    const uint32_t now = millis();
+    const bool rawPressed =
+        digitalRead(ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO) == LOW;
+    if (!_recoveryButton.update(rawPressed, now,
+                                ESP8266BASE_WIFI_RECOVERY_BUTTON_DEBOUNCE_MS,
+                                ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS)) {
+        return;
+    }
+    ESP8266BASE_LOG_W_P("WiFi",
+                      "recovery_button_triggered gpio=%d hold_ms=%lu action=start_config_portal credentials=preserved",
+                      (int)ESP8266BASE_WIFI_RECOVERY_BUTTON_GPIO,
+                      (unsigned long)ESP8266BASE_WIFI_RECOVERY_BUTTON_HOLD_MS);
+    _requestStationAction(StationAction::ENTER_RECOVERY_PORTAL);
+#endif
 }
 
 // ----------------------------------------------------------------------------
 // handle — 状态机推进（非阻塞）
 // ----------------------------------------------------------------------------
 void Esp8266BaseWiFi::handle() {
+    // 恢复键优先于本轮状态机其他动作检测（人工显式操作优先级最高）。
+    _pollRecoveryButton();
+
     switch (_state) {
 
         case Esp8266BaseWiFiState::CONNECTING: {
@@ -232,11 +275,17 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
     strncpy(_staPass, safePass, sizeof(_staPass) - 1);
     _staPass[sizeof(_staPass) - 1] = '\0';
 
-    // 若当前在 AP 模式，先关闭 AP（此时仅有 AP netif，无 STA 上层 socket）。
+    // 若当前在 AP 模式（首启配网或恢复键门户），不能在 HTTP handler 内直接
+    // softAPdisconnect/mode：此刻服务本请求的 accepted PCB 与 listen PCB 都挂在
+    // AP netif 上，opmode 变更会让 SDK 同步摘除 netif（与 1.14.2 修复的 STA 侧
+    // UAF 同原语族）。登记 EXIT_PORTAL，由主类下一轮先有序停网再物理切回 STA；
+    // 本响应（303）在仍然存活的 AP 上先发完。
     if (_state == Esp8266BaseWiFiState::AP_CONFIG) {
-        WiFi.softAPdisconnect(true);
-        delay(100);
-        _startSTA(_staSSID, _staPass);
+        _state = Esp8266BaseWiFiState::CONNECTING;
+        _connectStart = millis();
+        _retryAt = millis();
+        _stuckRestarted = false;
+        _stationAction = StationAction::EXIT_PORTAL;
     } else {
         // STA 运行期更换凭证：可能有 MQTT/Web socket 存活，登记立即重连动作，由主类
         // 先有序停网再用新凭证重起。同步复位 attempt 计时，避免旧凭证在途 attempt 的
@@ -325,12 +374,6 @@ bool Esp8266BaseWiFi::requestRadioReset() {
     return true;
 }
 
-bool Esp8266BaseWiFi::consumeRadioResetRequest() {
-    if (!_radioResetRequest) return false;
-    _radioResetRequest = false;
-    return true;
-}
-
 void Esp8266BaseWiFi::executeRadioReset() {
     const uint8_t status = (uint8_t)WiFi.status();
     ESP8266BASE_LOG_W_P("WiFi",
@@ -370,15 +413,35 @@ void Esp8266BaseWiFi::executeRadioReset() {
 }
 
 void Esp8266BaseWiFi::_requestStationAction(StationAction action) {
-    // 同一主循环内理论上只会有一个来源命中（switch 互斥）；仍做幂等保护：非 NONE 后
-    // 不被覆盖，保证登记的第一个动作不丢。
-    if (_stationAction == StationAction::NONE) _stationAction = action;
+    // 同一主循环内理论上只会有一个来源命中（switch 互斥）；仍做幂等保护：普通动作
+    // 先到不被覆盖。恢复键是人工显式运维操作，赋予最高优先级，可抢占本轮已登记的
+    // 重连/退避动作（长按每 10s 才产生一次，抢占不会造成重连风暴）。
+    if (_stationAction != StationAction::NONE &&
+        action != StationAction::ENTER_RECOVERY_PORTAL) return;
+    _stationAction = action;
 }
 
 Esp8266BaseWiFi::StationAction Esp8266BaseWiFi::consumeStationAction() {
     const StationAction action = _stationAction;
     _stationAction = StationAction::NONE;
     return action;
+}
+
+bool Esp8266BaseWiFi::consumeRadioResetRequest() {
+    if (!_radioResetRequest) return false;
+    // AP 配网态（首启/恢复键门户）绝不允许 radio reset：executeRadioReset()
+    // 会 WIFI_OFF→STA 直接拆掉刚建的 AP。门户动作待消费的窗口同样丢弃（纵深
+    // 防御：正常该窗口没有任何 requestRadioReset() 来源）。清掉陈旧请求，等
+    // 退出 AP 后重新评估。
+    if (_state == Esp8266BaseWiFiState::AP_CONFIG ||
+        _stationAction == StationAction::ENTER_RECOVERY_PORTAL ||
+        _stationAction == StationAction::EXIT_PORTAL) {
+        _radioResetRequest = false;
+        ESP8266BASE_LOG_W_P("WiFi", "station_radio_reset_request_discarded reason=ap_config_active");
+        return false;
+    }
+    _radioResetRequest = false;
+    return true;
 }
 
 void Esp8266BaseWiFi::executeStationAction(StationAction action) {
@@ -414,10 +477,46 @@ void Esp8266BaseWiFi::executeStationAction(StationAction action) {
         WiFi.disconnect(false, false);
         _scheduleRetry();
         break;
+    case StationAction::ENTER_RECOVERY_PORTAL: {
+        ESP8266BASE_LOG_W_P("WiFi",
+                          "recovery_portal_enter_after_teardown total_attempts=%u status=%s status_code=%u credentials=preserved",
+                          (unsigned)_attemptCount, _statusName(status), (unsigned)status);
+        // 业务安全回调（如继电器强制断开）在 teardown 之后、动网之前执行。
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED
+        if (_recoveryPortalCallback) _recoveryPortalCallback();
+#endif
+        // 清除可能与本动作同轮排队的 radio reset 请求，防止进门户后被立刻拆 AP。
+        _radioResetRequest = false;
+        _ip[0] = '\0';
+        _startAP(true);
+        break;
+    }
+    case StationAction::EXIT_PORTAL:
+        ESP8266BASE_LOG_W_P("WiFi",
+                          "recovery_portal_exit_after_teardown ssid=%s action=resume_sta credentials=preserved",
+                          _staSSID);
+        // 上层 PCB 已由主类关闭（含正在服务 /wifi POST 的连接），此处安全拆 AP netif。
+        WiFi.softAPdisconnect(true);
+        delay(100);
+        _recoveryPortalActive = false;
+        _startSTA(_staSSID, _staPass);
+        break;
     case StationAction::NONE:
     default:
         break;
     }
+}
+
+void Esp8266BaseWiFi::setRecoveryPortalCallback(RecoveryPortalCallback callback) {
+#if ESP8266BASE_WIFI_RECOVERY_BUTTON_ENABLED
+    _recoveryPortalCallback = callback;
+#else
+    (void)callback;
+#endif
+}
+
+bool Esp8266BaseWiFi::recoveryPortalActive() {
+    return _recoveryPortalActive;
 }
 
 const char* Esp8266BaseWiFi::apSSID() {
@@ -456,8 +555,10 @@ void Esp8266BaseWiFi::_beginSTA(const char* ssid, const char* pass, bool keepAP)
                       keepAP ? "yes" : "no", _statusName(status), (unsigned)status);
 }
 
-void Esp8266BaseWiFi::_startAP() {
-    // Clean state before switching to AP
+void Esp8266BaseWiFi::_startAP(bool recoveryTriggered) {
+    // Clean state before switching to AP. erase 默认 false 且 persistent(false)，
+    // 只清 SDK 当前连接状态，不删除 LittleFS 中的 eb_wifi_* 凭证、不写 SDK 扇区。
+    // 调用方必须已由主类关闭全部上层 socket（首启时本就不存在）。
     WiFi.disconnect(true);
     delay(100);
     WiFi.mode(WIFI_AP);
@@ -469,10 +570,22 @@ void Esp8266BaseWiFi::_startAP() {
 
     WiFi.softAP(_apSSID, nullptr, channel, hidden);
     _state = Esp8266BaseWiFiState::AP_CONFIG;
+    _connectStart = 0;
+    _retryAt = 0;
+    _retryCount = 0;
+    _stuckRestarted = false;
+    _stationAction = StationAction::NONE;
+    _recoveryPortalActive = recoveryTriggered;
     char apIp[16];
     _formatIP(WiFi.softAPIP(), apIp, sizeof(apIp));
-    ESP8266BASE_LOG_I_P("WiFi", "config_ap_started ssid=%s ip=%s channel=%d",
-                      _apSSID, apIp, channel);
+    if (recoveryTriggered) {
+        ESP8266BASE_LOG_W_P("WiFi",
+                          "recovery_portal_started ssid=%s ip=%s channel=%d credentials=preserved",
+                          _apSSID, apIp, channel);
+    } else {
+        ESP8266BASE_LOG_I_P("WiFi", "config_ap_started ssid=%s ip=%s channel=%d",
+                          _apSSID, apIp, channel);
+    }
 }
 
 void Esp8266BaseWiFi::_handleConnected() {

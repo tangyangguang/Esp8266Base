@@ -11,7 +11,7 @@
  *   mDNS     — http://esp8266base-full.local/
  *   Sleep    — 唤醒原因显示 + Web 触发深度睡眠
  *   Watchdog — WDT 重启计数显示 + Web 清零
- *   Button   — GPIO0 长按 1 秒清除全部 /cfg_* 配置并重启
+ *   Button   — GPIO0 运行期长按 10 秒打开 WiFi 恢复门户（保留凭证，库内能力）
  *   LED      — GPIO2 板载指示灯（低电平亮）：联网常亮，AP 慢闪，连接中快闪
  *
  * 首次使用：连接 AP "ESP8266-Config-XXXX" → http://192.168.4.1/ 配置 WiFi
@@ -27,15 +27,11 @@ static const char KEY_BOOT[] = "demo_boot";
 static const char KEY_VAL[]  = "demo_val";
 static const char DEFAULT_DEMO_VAL[] = "demo-default";
 
-// ESP-12F 常见板载资源：GPIO0 FLASH 键，GPIO2 蓝色 LED（active-low）
-static const uint8_t  BOARD_BUTTON_PIN = 0;
+// ESP-12F 常见板载资源：GPIO0 FLASH 键（库恢复键，长按 10s 进配网门户），GPIO2 LED
 static const uint8_t  BOARD_LED_PIN    = 2;
-static const uint32_t CLEAR_HOLD_MS    = 1000;
 
 // full_demo 自定义重启计数（库级 eb_boot_count 由 Esp8266Base 自动维护）
 static int32_t g_bootCount = 0;
-static uint32_t g_buttonDownAt = 0;
-static bool     g_clearFired   = false;
 static uint32_t g_ledLastMs    = 0;
 static bool     g_ledBlinkOn   = false;
 
@@ -56,7 +52,7 @@ static const char PAGE_DEMO[] PROGMEM =
     "<tr><td>mDNS</td><td id='dns'>-</td></tr>"
     "<tr><td>NTP Time</td><td id='ntp'>-</td></tr>"
     "<tr><td>Wake Reason</td><td id='wake'>-</td></tr>"
-    "<tr><td>Board Button</td><td>GPIO0 long press 1s clears config</td></tr>"
+    "<tr><td>Board Button</td><td>GPIO0 hold 10s opens WiFi recovery portal</td></tr>"
     "<tr><td>Board LED</td><td>GPIO2 active-low</td></tr>"
     "<tr><td>Restart Count (Config)</td><td id='bc'>-</td></tr>"
     "<tr><td>WDT Resets (Watchdog)</td><td id='wdt'>-</td></tr>"
@@ -369,47 +365,6 @@ static void updateBoardLed() {
     }
 }
 
-static void handleBoardButton() {
-    bool pressed = (digitalRead(BOARD_BUTTON_PIN) == LOW);
-    uint32_t now = millis();
-
-    if (!pressed) {
-        g_buttonDownAt = 0;
-        g_clearFired = false;
-        return;
-    }
-
-    if (g_buttonDownAt == 0) {
-        g_buttonDownAt = now;
-        return;
-    }
-
-    if (!g_clearFired && now - g_buttonDownAt >= CLEAR_HOLD_MS) {
-        g_clearFired = true;
-        setBoardLed(true);
-        ESP8266BASE_LOG_W("Btn ", "button_long_press_detected pin=GPIO0 duration=1s action=clear_all_config_and_restart");
-#if ESP8266BASE_USE_WATCHDOG
-        Esp8266BaseWatchdog::pause();
-#endif
-        if (!Esp8266BaseConfig::clearAll()) {
-            ESP8266BASE_LOG_E("Btn ", "config_clear_failed action=keep_running release_button_before_retry");
-#if ESP8266BASE_USE_WATCHDOG
-            Esp8266BaseWatchdog::resume();
-#endif
-            setBoardLed(false);
-            return;
-        }
-#if ESP8266BASE_USE_FILELOG
-        Esp8266BaseFileLog::flush();
-#endif
-        delay(300);
-#if ESP8266BASE_USE_RECORD_STORE
-        Esp8266BaseRecordStore::prepareMaintenance();
-#endif
-        ESP.restart();
-    }
-}
-
 // ----------------------------------------------------------------
 // setup / loop
 // ----------------------------------------------------------------
@@ -420,7 +375,7 @@ void setup() {
     Esp8266BaseLog::enableConfigAudit(true);
     Esp8266BaseLog::enableConfigReadAudit(false);
 
-    pinMode(BOARD_BUTTON_PIN, INPUT_PULLUP);
+    // GPIO0 恢复键由基础库在 begin() 中武装，应用不再占用。
     pinMode(BOARD_LED_PIN, OUTPUT);
     setBoardLed(false);
 
@@ -481,6 +436,5 @@ void setup() {
 
 void loop() {
     Esp8266Base::handle();
-    handleBoardButton();
     updateBoardLed();
 }
