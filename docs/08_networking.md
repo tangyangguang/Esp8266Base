@@ -119,21 +119,32 @@ station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 
 如果连接开始后持续停在 `WL_DISCONNECTED` 且超过 `ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS`，默认 7s，本库会记录 `station_connect_stuck_restarting` 并提前重启本轮 `WiFi.begin()`，避免 ESP8266 WiFi SDK 卡住时白等完整 20s。每个连接 attempt 最多做 1 次 stuck restart；如果重启后仍然卡住，会记录 `station_connect_stuck_retrying` 并进入快速重试，不再继续等满 20s。
 
+#### 弱信号射频选项
+
+- `ESP8266BASE_WIFI_NO_SLEEP=1`：显式 `WIFI_NONE_SLEEP`（电台常开），替代默认的 modem-sleep MIN。常供电的固定设备可借此减少弱信号下丢 beacon/deauth 与下行首包延迟，代价是 modem 常耗电增加（数十 mA 级），CPU 与 `loop()` 不受影响。
+- `ESP8266BASE_WIFI_OUTPUT_POWER_X10`（默认 0=不调用、沿用 SDK 默认；1..205=请求 0.0..20.5dBm，core 内按 0.25dBm 就近量化，205 即满功率）：在 `begin()` 调一次 `WiFi.setOutputPower()`，弱信号现场可拉满上行；不改变任何缓冲或状态机。
+
 #### 运行期重连/断开统一先有序停网
 
 WiFi 状态机本身**绝不**在主循环里直接调用 `WiFi.disconnect()`/`WiFi.mode()`/重起 STA，而是只登记一个带类型的动作 `Esp8266BaseWiFi::StationAction`：
 
 | 动作 | 触发 | 物理执行（停网后） |
 |---|---|---|
-| `RECONNECT` | 已连接后掉线、退避到期、Web 更换凭证 | 用缓存/新凭证重起 STA |
-| `STUCK_RESTART` | 单 attempt 首次卡死 7s | 重起 STA，并保留 `_stuckRestarted=true` |
-| `DISCONNECT_BACKOFF` | 第二次卡死、20s 超时 | 断开关联后走 fast/slow + radio reset 阶梯退避 |
+| `REATTACH` | **已连接后被动掉线的第一次重连** | 轻量：仅清已接受的数据 socket（UDP/TCP），保留 STA netif 与 Web :80 监听，只 `WiFi.begin()` 重发关联，不 disconnect/切 opmode |
+| `RECONNECT` | CONNECTING 退避到期、Web 运行期更换凭证 | 完整停网后用缓存/新凭证重起 STA |
+| `STUCK_RESTART` | 单 attempt 首次卡死 7s | 完整停网后重起 STA，并保留 `_stuckRestarted=true` |
+| `DISCONNECT_BACKOFF` | 第二次卡死、20s 超时 | 完整停网断开关联后走 fast/slow + radio reset 阶梯退避 |
 | `ENTER_RECOVERY_PORTAL` | 恢复键长按 10s（人工，优先级最高，可抢占同轮其他动作） | 业务门户回调（如断开执行器）→开纯 AP 门户，凭证保留 |
 | `EXIT_PORTAL` | 门户 `/wifi` 保存新凭证 | `softAPdisconnect(true)` 后用新凭证重起 STA |
 
-`Esp8266Base` 主类在主循环 WiFi 段之后、NTP/mDNS/Web/MQTT 段之前消费该动作：先按 mDNS→Web 监听→全部 UDP→全部 TCP 的顺序关闭上层 PCB（`_teardownUpperNetwork()`），再由 friend-only 的 `executeStationAction()` 做唯一物理执行，随后恢复 Web :80 监听。
+`Esp8266Base` 主类在主循环 WiFi 段之后、NTP/mDNS/Web/MQTT 段之前消费该动作，按动作分两种停网强度：
 
-之所以连普通 `WiFi.disconnect()` 都必须先停 socket：设备崩溃栈（弱网 RSSI≈-78dBm，异常 28 LoadStoreError）实测为 `wifi_station_disconnect→eagle_lwip_if_free→netif_remove→netif_set_down`，即弱网不一致状态下仅断开关联也可能让 SDK 摘除并释放 STA netif；若 MQTT/TLS、Web 的 PCB 仍存活就会 use-after-free，堆损坏还会表现为数秒主循环卡死并触发看门狗安全断开。boot 首连（`begin()` 时尚无上层 socket）与首启无凭证 AP 不走该分层；**门户内保存凭证（`EXIT_PORTAL`）刻意改为延迟到下一轮主循环走该分层**：`/wifi` POST 先在仍存活的 AP 上发完 303，再由主类停掉包括本次 HTTP 连接在内的 PCB 后拆 AP netif，不在 handler 内带着活 PCB 切换 opmode。物理执行日志分别为 `station_reconnect_after_teardown`、`station_stuck_restart_after_teardown`、`station_disconnect_backoff_after_teardown`、`recovery_portal_enter_after_teardown`、`recovery_portal_exit_after_teardown`。AP 配网态（首启与恢复门户）下 radio reset 请求一律丢弃（`station_radio_reset_request_discarded reason=ap_config_active`），防止电台重置拆掉门户。
+- **`REATTACH`（轻量）**：只调用 `_teardownDataConnections()`（`WiFiUDP::stopAll()` + `WiFiClient::stopAll()`，关不到 WiFiServer 监听 PCB），随后 `executeStationAction()` 仅以缓存凭证 `WiFi.begin()` 重发关联；**不** disconnect、**不**切 opmode、**不** suspend/resume Web 监听。已在 Arduino core 3.1.2 核实：该路径下 `enableSTA(true)` 因已在 STA 态立即返回、同配置仅 `wifi_station_connect()`，不会 `wifi_station_disconnect`，故不触发 `netif_remove`，弱信号抖动期间局域网 Web :80 持续可 accept。该安全性依赖此 core 行为。
+- **其余动作（完整）**：先按 mDNS→Web 监听→全部 UDP→全部 TCP 的顺序关闭上层 PCB（`_teardownUpperNetwork()`），再由 friend-only 的 `executeStationAction()` 做唯一物理执行，随后恢复 Web :80 监听。
+
+`REATTACH` 后状态进入 CONNECTING 并重置本 attempt 计时；若 7s 卡死或 20s 超时仍无进展，下面的 `STUCK_RESTART`/`DISCONNECT_BACKOFF` 升级链照常触发完整有序停网与 radio reset，因此轻量路径不会短路 SDK station 软卡死的自愈。
+
+之所以连普通 `WiFi.disconnect()` 都必须先停 socket：设备崩溃栈（弱网 RSSI≈-78dBm，异常 28 LoadStoreError）实测为 `wifi_station_disconnect→eagle_lwip_if_free→netif_remove→netif_set_down`，即弱网不一致状态下仅断开关联也可能让 SDK 摘除并释放 STA netif；若 MQTT/TLS、Web 的 PCB 仍存活就会 use-after-free，堆损坏还会表现为数秒主循环卡死并触发看门狗安全断开。boot 首连（`begin()` 时尚无上层 socket）与首启无凭证 AP 不走该分层；**门户内保存凭证（`EXIT_PORTAL`）刻意改为延迟到下一轮主循环走该分层**：`/wifi` POST 先在仍存活的 AP 上发完 303，再由主类停掉包括本次 HTTP 连接在内的 PCB 后拆 AP netif，不在 handler 内带着活 PCB 切换 opmode。物理执行日志分别为 `station_reattach_listener_preserved`、`station_reconnect_after_teardown`、`station_stuck_restart_after_teardown`、`station_disconnect_backoff_after_teardown`、`recovery_portal_enter_after_teardown`、`recovery_portal_exit_after_teardown`。AP 配网态（首启与恢复门户）下 radio reset 请求一律丢弃（`station_radio_reset_request_discarded reason=ap_config_active`），防止电台重置拆掉门户。
 
 普通连接 attempt 连续失败达到 `RADIO_RESET_FAILURE_THRESHOLD`（默认 6）时，WiFi 层在重试调度 `_scheduleRetry()` 内每次失败都重新评估资格，满足才**请求**一次 radio reset（`requestRadioReset()`）；不满足则走与普通慢重试完全相同的布臂，绝不提前 return（否则会退化成无间隔重关联）。由 `Esp8266Base` 主类在同一主循环上下文先**按序**关闭上层网络——mDNS 自持 `UdpContext`（`Esp8266BaseMDNS::stop()`→`MDNS.end()`，它不在 `WiFiUDP::stopAll()` 链表里）、Web :80 监听、其余全部 UDP/TCP PCB——再执行唯一物理恢复：断开 STA、`WIFI_OFF`、等待 `RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新 `WiFi.begin()`。先停 socket 是为了避免活跃 PCB 在 `WIFI_OFF→netif_remove` 时触发 use-after-free 崩溃（边界：Core 的 netif 状态回调不会因 `MDNS.end()` 注销，WIFI_OFF 仍可能 queue 一次内部 mDNS restart，且已 accept 未读的 backlog TCP 无公开 API 可丢弃，这两类残留面靠真机长稳证据兜底）。
 
@@ -219,6 +230,8 @@ log_timestamp_mode=absolute_datetime
 
 **设钟门（fail-closed）**：两个钉死权威源必须同时满足才采信——解析到不同 IPv4、各自 RTT ≤ 500ms、时间值落在 2023..2035 合理年份窗、按本地单调钟归一到同一接收时刻后差值在一致窗 `(RTTa+RTTb)/4 + 100ms`（下限 250ms）内。任一不满足（单源快/慢、同一 IP、高延迟、垃圾年份）就丢弃整批并按 2s→60s 有界退避重新采集，期间 `isSynced()` 为 false、MQTT/TLS 不放行；本地定时与 15 分钟安全上限不依赖墙钟，继续工作。每个源只接受当前等待服务器的响应，校验来源 IP、端口 123、server mode、stratum 和 leap indicator；无关 UDP 包记录 `ntp_packet_rejected` 并丢弃。有效响应解析 receive/transmit 的秒与 32 位小数，结合本地单调 RTT 和服务端处理时间估算单程延迟。
 
+**有界同步 DNS**：双源采集/校验中的域名解析统一走 3s 上界的 `hostByName(name,ip,3000)`（`NTP_DNS_TIMEOUT_MS`），不使用 core 默认的 10s；两个源的解析分布在不同主循环轮次（在途 UDP/1s 节流），单轮 NTP 段最坏约 3s，在看门狗 8s 记账内。解析失败按 `dns_failed` 走既有退避，不改变双源信任判定。
+
 **设钟一次 + 运行只校验**：墙钟每次启动至多设置一次，且在首次 MQTT/TLS 放行前。设钟后每 `ESP8266BASE_NTP_SYNC_INTERVAL`（默认 3600s）做一次双源校验，复用启动期解析的 IP（不重新 DNS）；双源一致但与本地墙钟偏差超过 2s 时只记录 `ntp_time_suspect clock_delta_ms=... (clock left unchanged)`，**绝不回拨或前拨墙钟**（回拨会永久冻结命令账本），也不自动重启。WiFi 断开 `reset()` 释放 UDP 但不清已可信闘锁；重连后不重新设钟，墙钟继续走，MQTT 不因重连等待对时。
 
 `ntp_trusted` 后可读取两源平均 RTT 与保守一致窗（`hasMeasuredUncertainty()`/`lastSyncRttMs()`/`estimatedUncertaintyMs()`）；该估计受链路不对称影响，不是硬实时误差保证。明文 NTP 的 nonce 主要防离线伪造；不同 IP + RTT 门 + 年份窗是纵深防护，不宣称抵御完全受控链路上的时间篡改。
@@ -228,6 +241,10 @@ log_timestamp_mode=absolute_datetime
 ## 九、MQTT_TERMINAL 网络生命周期
 
 `ESP8266BASE_PROFILE_MQTT_TERMINAL=1` 要求 Web、OTA、NTP、Watchdog 和 MQTT 同时启用。MQTT 只在 STA 已连接且 NTP 已获双源可信时间后尝试 DNS/TCP/TLS/MQTT 建连；WiFi 掉线释放连接但不清 NTP 可信闘锁，恢复后重连不必再等对时。
+
+**弱信号建连稳定门（默认 `ESP8266BASE_MQTT_LINK_STABLE_MS=5000`）**：除上述门控外，要求 STA 拿到 IP 后至少稳定 5s 才发起昂贵的同步 TLS 建连。弱信号下关联常每几十秒抖动一次，刚关联就做秒级握手会长时间饿死本地 Web；稳定门滤掉大量“秒断”抖动，已建立连接不受影响。拿不到稳定窗口时停留在 backoff 空比较，不发起阻塞调用。
+
+**有界 DNS 预热（`ESP8266BASE_MQTT_DNS_TIMEOUT_MS=3000`）**：建连前先以 3s 上界预解析 broker，命中 lwIP DNS 缓存时立即返回，随后 BearSSL 按主机名建连（仍带 SNI 与证书主机名校验）内部解析不再重复阻塞；3s 内未解析出则按可恢复云端失败走 2s→60s 退避（不拆电台、不忙循环），弱信号/外网丢包时不卡满 core 默认的 10s。
 
 配置由业务在 `Esp8266Base::begin()` 前提供：host/clientId/username/password/LWT topic 复制到固定缓冲；trust anchor `BearSSL::X509List` 和可选 LWT payload 由业务持有且生命周期必须覆盖 MQTT。来源可以是业务私有构建配置或 Config，但仓库示例只含 `.invalid` host、占位 clientId 和公开根证书，不含真实凭据。基础库不新增 broker 配置持久化 key，也不在 `/health` 输出 host、clientId、用户名、密码或证书。
 
@@ -247,7 +264,7 @@ DNS/TCP/TLS I/O、CONNACK server-unavailable 和应用 readiness 等可恢复失
 
 需要关闭 MQTT 或在 OTA 成功重启前正常下线时，业务调用 `beginShutdown(topic, payload)` 提供最终 availability。基础库复制到固定槽，使用 retained QoS1，并只接受对应 packetId 的 PUBACK；随后写入正常 MQTT DISCONNECT、flush 并释放 TLS，保持暂停且不自动重连。不匹配 PUBACK、入队失败、连接丢失、PUBACK 超时和 DISCONNECT 写失败均有独立结果。只有显式 `resumeAfterShutdown()` 恢复连接许可。
 
-使用库内固定内存的 MQTT 3.1.1 同步安全传输，不依赖 `espMqttClient` 或异步 TCP。两个出站槽按优先级和 FIFO 选择，单个 QoS1 在途；默认 topic 128B、出站 payload 512B、RX分块64B、入站 payload 768B。出站 payload 可按业务封闭协议配置为 64～768B；超过 512B 时固定槽位拆成 512B head 与最多 256B tail 并顺序发送，仍不构造动态 packet或大于 512B 的单个静态数组。容量不足明确拒绝。BearSSL 显式为 4096/1024，证书校验不降低。ESP8266 底层 DNS/TCP/TLS connect 单次尝试仍可能阻塞到连接超时；外围门禁与有界退避避免执行器运行期新建连接和失败忙循环。
+使用库内固定内存的 MQTT 3.1.1 同步安全传输，不依赖 `espMqttClient` 或异步 TCP。两个出站槽按优先级和 FIFO 选择，单个 QoS1 在途；默认 topic 128B、出站 payload 512B、RX分块64B、入站 payload 768B。出站 payload 可按业务封闭协议配置为 64～768B；超过 512B 时固定槽位拆成 512B head 与最多 256B tail 并顺序发送，仍不构造动态 packet或大于 512B 的单个静态数组。容量不足明确拒绝。BearSSL 显式为 4096/1024，证书校验不降低。ESP8266 底层 DNS/TCP/TLS connect 单次尝试仍可能阻塞到连接超时；外围门禁（执行器开关、Web 活跃错峰、弱信号稳定门）、有界 DNS（MQTT/NTP 均 3s 上界）与有界退避避免执行器运行期新建连接、弱信号反复握手和失败忙循环。
 
 ---
 

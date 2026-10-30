@@ -51,6 +51,18 @@
 static_assert(ESP8266BASE_WIFI_NO_SLEEP == 0 || ESP8266BASE_WIFI_NO_SLEEP == 1,
               "ESP8266BASE_WIFI_NO_SLEEP must be 0 or 1");
 
+// 发射功率请求值：0 表示不调用 setOutputPower（沿用 SDK 默认）；取值 0..205 表示
+// 0.0..20.5dBm 的请求值（按 0.1dBm 表达）。注意 core setOutputPower() 内部按 0.25dBm
+// 量化（int(dBm*4)→system_phy_set_max_tpw），中间值会就近量化；205 恰好为满功率 20.5dBm。
+// 弱信号现场可设 205 拉满上行，不改变任何缓冲或状态机，仅在 begin() 设置一次。
+#ifndef ESP8266BASE_WIFI_OUTPUT_POWER_X10
+#define ESP8266BASE_WIFI_OUTPUT_POWER_X10 0
+#endif
+
+#if ESP8266BASE_WIFI_OUTPUT_POWER_X10 < 0 || ESP8266BASE_WIFI_OUTPUT_POWER_X10 > 205
+#error "ESP8266BASE_WIFI_OUTPUT_POWER_X10 must be 0 (use SDK default) or 0..205 (0.1dBm)"
+#endif
+
 #ifndef ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS
 #define ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS 100 // ms：WIFI_OFF 后的稳定等待
 #endif
@@ -146,6 +158,10 @@ public:
     // 当前状态机状态
     static Esp8266BaseWiFiState state();
 
+    // 最近一次进入 CONNECTED（拿到 IP）的单调时刻；未连接时返回 0。供上层在弱信号下
+    // 要求“关联已稳定 N 毫秒”后再做昂贵的同步 TLS/DNS 建连，避免抖动期间反复阻塞主循环。
+    static uint32_t connectedAtMs();
+
     // 本次启动累计发起 STA 连接次数 / 完整 WiFi radio 重置次数
     static uint16_t attemptCount();
     static uint8_t radioResetCount();
@@ -180,6 +196,12 @@ public:
         // 门户内保存新凭证：下一轮主循环有序停网后由 AP 切回 STA
         //（不在 Web handler 内拆 AP netif，避免活 PCB use-after-free）。
         EXIT_PORTAL = 5,
+        // 被动掉关联后的第一次“轻重连”：只清已接受的数据 socket（MQTT/NTP/在途
+        // HTTP），保留 STA netif 与 Web:80 监听 PCB，仅重发关联（wifi_station_connect），
+        // 不 disconnect、不切 opmode，因此弱信号抖动期间局域网网页不被主动打断，也无
+        // netif 拆除路径。若 20s 观察窗内仍卡死/超时，状态机照旧升级 STUCK_RESTART /
+        // DISCONNECT_BACKOFF（完整有序停网 + radio reset），保住 SDK station 软卡死自愈。
+        REATTACH = 6,
     };
     // 取出（并清零）一个待执行的运行期 STA 动作；无请求返回 NONE。
     static StationAction consumeStationAction();
@@ -204,6 +226,7 @@ private:
     static uint8_t              _retryCount;   // 1B：已重试次数（用于区分首次/慢速）
     static bool                 _stuckRestarted; // 1B：本轮 attempt 是否已做过 stuck restart
     static Esp8266BaseLinkRecoveryCore::RadioResetGate _radioGate; // 6B：reset 冷却/预算纯核
+    static uint32_t             _connectedAtMs; // 4B：最近一次拿到 IP 的 millis，未连接为 0
     static uint16_t             _attemptCount; // 2B：本次启动累计 WiFi.begin 次数
     static uint8_t              _radioResetCount; // 1B：本次启动完整 radio reset 次数
     static bool                 _radioResetRequest; // 1B：是否有 pending reset 请求

@@ -538,9 +538,24 @@ void Esp8266Base::_teardownUpperNetwork() {
     WiFiClient::stopAll();// 关闭残留 accepted TCP 连接（MQTT/TLS/OTA/流式 HTTP）
 }
 
+// 被动掉线“轻重连”的有序清理：只关闭已接受的数据 socket（MQTT/TLS/NTP/在途 HTTP），
+// 保留 STA netif 与 Web:80 监听 PCB。REATTACH 物理执行不 disconnect/切 opmode，因此
+// 不存在 netif 拆除，监听无需 suspend/resume，弱信号抖动期间局域网网页持续可 accept。
+void Esp8266Base::_teardownDataConnections() {
+    WiFiUDP::stopAll();    // 关闭 NTP 等 WiFiUDP PCB（不影响 WiFiServer 监听）
+    WiFiClient::stopAll(); // 关闭残留 accepted TCP（MQTT/TLS/OTA/流式 HTTP），关不到监听 PCB
+}
+
 void Esp8266Base::_consumeStationAction() {
     const Esp8266BaseWiFi::StationAction action = Esp8266BaseWiFi::consumeStationAction();
     if (action == Esp8266BaseWiFi::StationAction::NONE) return;
+
+    if (action == Esp8266BaseWiFi::StationAction::REATTACH) {
+        // 轻量路径：保 netif、保 Web 监听，仅清数据连接后重发关联。
+        _teardownDataConnections();
+        Esp8266BaseWiFi::executeStationAction(action);
+        return;
+    }
 
     // 普通重连/断连可在已连接后掉线或 CONNECTING 卡死时发生：活动 MQTT TLS / Web
     // 连接可能仍存活。必须先有序关闭上层 PCB，再让 SDK disconnect/重起 STA，避免

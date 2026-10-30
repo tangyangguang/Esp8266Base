@@ -17,6 +17,7 @@ uint32_t             Esp8266BaseWiFi::_retryAt        = 0;
 uint8_t              Esp8266BaseWiFi::_retryCount     = 0;
 bool                 Esp8266BaseWiFi::_stuckRestarted = false;
 Esp8266BaseLinkRecoveryCore::RadioResetGate Esp8266BaseWiFi::_radioGate;
+uint32_t             Esp8266BaseWiFi::_connectedAtMs = 0;
 uint16_t             Esp8266BaseWiFi::_attemptCount   = 0;
 uint8_t              Esp8266BaseWiFi::_radioResetCount = 0;
 bool                 Esp8266BaseWiFi::_radioResetRequest = false;
@@ -60,6 +61,12 @@ bool Esp8266BaseWiFi::begin() {
     // 不启用 MAX 级（按 listen interval 长睡会放大弱信号丢 beacon/deauth 风险）。
     WiFi.setSleepMode(WIFI_MODEM_SLEEP);
     ESP8266BASE_LOG_I_P("WiFi", "sleep_policy=modem_sleep_min level=min_dtim_wake");
+#endif
+#if ESP8266BASE_WIFI_OUTPUT_POWER_X10 > 0
+    // 弱信号现场可选：显式拉满发射功率（0.1dBm 量化），只影响上行，不改变缓冲/状态机。
+    WiFi.setOutputPower(ESP8266BASE_WIFI_OUTPUT_POWER_X10 / 10.0f);
+    ESP8266BASE_LOG_I_P("WiFi", "output_power_explicit_x10=%u",
+                        (unsigned)ESP8266BASE_WIFI_OUTPUT_POWER_X10);
 #endif
     ESP8266BASE_LOG_I_P("WiFi", "wifi_retry_policy connect_timeout=%lus sta_settle=%ums stuck_disconnected=%lus fast_retry=%lus fast_count=%u slow_retry=%lus radio_reset_failures=%u radio_cooldown=%lus radio_budget=%u radio_settle=%ums",
                       (unsigned long)(ESP8266BASE_WIFI_CONNECT_TIMEOUT / 1000UL),
@@ -214,9 +221,12 @@ void Esp8266BaseWiFi::handle() {
                 _state        = Esp8266BaseWiFiState::CONNECTING;
                 _connectStart = millis();
                 _retryAt      = millis();   // 立即开始尝试
-                // 已连接后掉线：MQTT/Web/mDNS 等 socket 可能仍存活，登记立即重连动作，
-                // 由主类先有序停网再重起 STA，避免活 PCB 下拆 netif 触发 UAF。
-                _requestStationAction(StationAction::RECONNECT);
+                // 已连接后被动掉线：先走一次“轻重连”——只清已接受的数据 socket，保留
+                // STA netif 与 Web:80 监听，仅重发关联，弱信号抖动期间不主动砸局域网，
+                // 也不触发 netif 拆除。若本轮 7s/20s 仍无进展，下面的 stuck/超时分支会
+                // 照常升级为完整有序停网 + radio reset（SDK station 软卡死自愈不丢）。
+                _connectedAtMs = 0;
+                _requestStationAction(StationAction::REATTACH);
             }
             break;
         }
@@ -356,6 +366,10 @@ Esp8266BaseWiFiState Esp8266BaseWiFi::state() {
     return _state;
 }
 
+uint32_t Esp8266BaseWiFi::connectedAtMs() {
+    return _connectedAtMs;
+}
+
 uint16_t Esp8266BaseWiFi::attemptCount() {
     return _attemptCount;
 }
@@ -457,6 +471,22 @@ void Esp8266BaseWiFi::executeStationAction(StationAction action) {
         // 保留电台与凭证，仅用缓存凭证重起 STA（内部 disconnect/mode 在停网保护下）。
         _startSTA(_staSSID, _staPass);
         break;
+    case StationAction::REATTACH: {
+        // 被动掉线轻量重连：调用方只清了已接受的数据 socket，netif 与监听 PCB 仍在。
+        // 已在 Arduino core 3.1.2 核实：WiFi.begin()→enableSTA(true) 在已是 STA 时
+        // 立即返回（不切 opmode），同配置仅 wifi_station_connect() 并重确保 DHCP 客户端
+        // 在跑，不 wifi_station_disconnect，故无 netif_remove/UAF。安全性依赖该 core 行为。
+        ESP8266BASE_LOG_W_P("WiFi",
+                          "station_reattach_listener_preserved total_attempts=%u status=%s status_code=%u rssi=%d",
+                          (unsigned)_attemptCount, _statusName(status), (unsigned)status,
+                          (int)WiFi.RSSI());
+        WiFi.begin(_staSSID, (_staPass[0] ? _staPass : nullptr));
+        if (_attemptCount < 0xFFFFU) _attemptCount++;
+        _connectStart    = millis();
+        _retryAt         = millis();
+        _stuckRestarted  = false;
+        break;
+    }
     case StationAction::STUCK_RESTART:
         ESP8266BASE_LOG_W_P("WiFi",
                           "station_stuck_restart_after_teardown total_attempts=%u status=%s status_code=%u rssi=%d",
@@ -591,6 +621,7 @@ void Esp8266BaseWiFi::_startAP(bool recoveryTriggered) {
 void Esp8266BaseWiFi::_handleConnected() {
     _updateIP();
     _state         = Esp8266BaseWiFiState::CONNECTED;
+    if (_connectedAtMs == 0U) _connectedAtMs = millis();  // 仅稳定沿记一次，供上层建连稳定门
 #if ESP8266BASE_USE_JOURNAL
     Esp8266BaseJournal::record(JNL_WIFI_UP, 0, static_cast<int16_t>(WiFi.RSSI()), 0, 0);
 #endif

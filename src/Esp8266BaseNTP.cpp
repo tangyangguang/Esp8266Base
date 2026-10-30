@@ -51,6 +51,11 @@ static core::Sample _sample[2];
 static const uint16_t NTP_PORT = 123;
 static const uint16_t NTP_LOCAL_PORT = 2390;
 static const uint32_t NTP_RESPONSE_TIMEOUT_MS = 3000;
+// 同步 DNS 上界：core 的 hostByName 默认每个名字最长阻塞 10s。双源采集顺序解析两个
+// 名字，弱信号/外网丢包下最坏可在主循环（NTP 段位于 Web 服务之前）阻塞约 20s，期间
+// 本地网页无法响应。限到 3s 与单源 UDP 超时一致，两个源最坏约 6s，仍在 NTP 8s 看门狗
+// 记账内；解析失败按 dns_failed 走既有退避，不改变双源信任判定。
+static const uint32_t NTP_DNS_TIMEOUT_MS = 3000;
 
 // NTP 服务器名（全部在 Flash）
 static const char NTP_S1[] PROGMEM = ESP8266BASE_NTP_SERVER_1;
@@ -200,7 +205,8 @@ bool Esp8266BaseNTP::_requestServer(uint8_t index, uint32_t now) {
     if (static_cast<Mode>(_mode) == Mode::VERIFY && _serverIp[index].isSet()) {
         resolved = true;  // 运行期校验复用启动期解析的 IP，避免 TLS 长连接期间 DNS 阻塞
     } else {
-        resolved = WiFi.hostByName(server, _serverIp[index]) == 1 && _serverIp[index].isSet();
+        resolved = WiFi.hostByName(server, _serverIp[index], NTP_DNS_TIMEOUT_MS) == 1 &&
+                   _serverIp[index].isSet();
     }
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::feed();

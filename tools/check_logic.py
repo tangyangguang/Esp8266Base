@@ -255,7 +255,24 @@ def test_wifi_retry_rules() -> None:
                   "physical radio reset must be a single owner-gated entrypoint")
     if "recoverStation" in wifi_cpp or "recoverStation" in read("src/Esp8266BaseWiFi.h"):
         fail("upper-layer recoverStation() must be removed; radio reset is owner-orchestrated")
+    # 弱信号建连稳定门 + 有界 DNS：MQTT 必须要求拿到 IP 后稳定 LINK_STABLE_MS，且预解析
+    # broker 走带超时的 hostByName 三参重载；DNS 失败必须退避（不忙循环、不拆电台）。
+    mqtt_h = read("src/Esp8266BaseMQTT.h")
     mqtt_cpp = read("src/Esp8266BaseMQTT.cpp")
+    link_stable = parse_define_int(mqtt_h, "ESP8266BASE_MQTT_LINK_STABLE_MS")
+    mqtt_dns_to = parse_define_int(mqtt_h, "ESP8266BASE_MQTT_DNS_TIMEOUT_MS")
+    if not (1000 <= link_stable <= 60000):
+        fail("MQTT link-stable gate must be within 1000..60000ms")
+    if not (500 <= mqtt_dns_to <= 10000):
+        fail("MQTT bounded DNS timeout must be within 500..10000ms")
+    require_token(mqtt_cpp, "Esp8266BaseWiFi::connectedAtMs()",
+                  "MQTT must gate TLS attempts on a stable association")
+    require_token(mqtt_cpp, "WiFi.hostByName(_host, warmed, ESP8266BASE_MQTT_DNS_TIMEOUT_MS)",
+                  "MQTT broker DNS must be bounded by the explicit timeout overload")
+    # NTP 两个源的解析也必须带 3s 超时，不能用 core 默认 10s 的两参 hostByName。
+    ntp_cpp = read("src/Esp8266BaseNTP.cpp")
+    require_token(ntp_cpp, "WiFi.hostByName(server, _serverIp[index], NTP_DNS_TIMEOUT_MS)",
+                  "NTP DNS must use the bounded timeout overload")
     mqtt_code = "\n".join(
         line.split("//", 1)[0] for line in mqtt_cpp.splitlines())
     if ("recoverStation" in mqtt_code or "WiFi.mode(" in mqtt_code
@@ -321,6 +338,53 @@ def test_wifi_retry_rules() -> None:
     backoff_case = exec_body[exec_body.index("StationAction::DISCONNECT_BACKOFF"):]
     if "WiFi.disconnect(false, false)" not in backoff_case or "_scheduleRetry()" not in backoff_case:
         fail("DISCONNECT_BACKOFF must disconnect (after teardown) then run the radio-gated retry scheduler")
+    # REATTACH（被动掉线第一次轻量重连）物理执行绝不能 disconnect/切 opmode/WIFI_OFF，
+    # 只能 WiFi.begin() 重发关联，否则会摘 netif、砸掉 Web:80 监听并回到 UAF 老路。
+    # REATTACH 位于 RECONNECT 之后、STUCK_RESTART 之前；只截到下一个 case，避免把
+    # 后续会 disconnect/切 mode 的分支计入。并剥除注释（注释允许描述这些原语）。
+    _ra_start = exec_body.index("StationAction::REATTACH")
+    _ra_end = exec_body.index("StationAction::STUCK_RESTART", _ra_start)
+    reattach_case = "\n".join(
+        line.split("//", 1)[0]
+        for line in exec_body[_ra_start:_ra_end].splitlines())
+    for forbidden, why in (
+        ("WiFi.disconnect", "REATTACH must not disconnect (would remove the STA netif)"),
+        ("WiFi.mode(", "REATTACH must not switch opmode (would remove the STA netif)"),
+        ("WIFI_OFF", "REATTACH must never power-cycle the radio"),
+        ("_startSTA(", "REATTACH must only re-issue WiFi.begin(), not the full _startSTA path"),
+    ):
+        if forbidden in reattach_case:
+            fail("REATTACH physical action: " + why)
+    if "WiFi.begin(_staSSID" not in reattach_case:
+        fail("REATTACH must re-issue WiFi.begin() with cached credentials only")
+    # 主类消费 REATTACH 必须走轻停网（仅 UDP/TCP 数据 socket），不能 suspend/resume Web 监听。
+    consume_start = base_cpp.index("void Esp8266Base::_consumeStationAction()")
+    consume_end = base_cpp.index("void Esp8266Base::_consumeRadioReset()")
+    consume_body = base_cpp[consume_start:consume_end]
+    reattach_branch = consume_body[consume_body.index("StationAction::REATTACH"):]
+    reattach_branch = reattach_branch[:reattach_branch.index("return;")]
+    if "_teardownDataConnections()" not in reattach_branch:
+        fail("REATTACH consumer must run the light data-socket teardown")
+    for forbidden, why in (
+        ("_teardownUpperNetwork()", "REATTACH must not run the full netif teardown"),
+        ("suspendForRadioReset", "REATTACH must keep the Web :80 listener PCB alive"),
+        ("resumeAfterRadioReset", "REATTACH must not resume a listener it never suspended"),
+    ):
+        if forbidden in reattach_branch:
+            fail("REATTACH consumer: " + why)
+    # 轻停网只能关数据 socket，关不到 WiFiServer 监听。
+    light_td = base_cpp[base_cpp.index("void Esp8266Base::_teardownDataConnections()"):
+                        base_cpp.index("void Esp8266Base::_consumeStationAction()")]
+    if ("WiFiUDP::stopAll()" not in light_td or "WiFiClient::stopAll()" not in light_td
+            or "suspendForRadioReset" in light_td or "Esp8266BaseMDNS::stop" in light_td):
+        fail("_teardownDataConnections must only stop UDP/TCP data sockets, preserving the listener")
+    # 被动掉线边沿首发 REATTACH（而非 RECONNECT），且 connectedAtMs 掉线清零/拿 IP 边沿置位。
+    if "StationAction::REATTACH" not in wifi_cpp:
+        fail("passive association loss must first request a light REATTACH")
+    if "_connectedAtMs = 0;" not in wifi_cpp:
+        fail("connectedAtMs must clear on association loss")
+    if "if (_connectedAtMs == 0U) _connectedAtMs = millis();" not in wifi_cpp:
+        fail("connectedAtMs must be set once on the CONNECTED edge")
     require_token(read("src/Esp8266BaseMDNS.cpp"), "MDNS.end()",
                   "mDNS must release its self-owned UdpContext before radio reset")
     require_token(base_cpp, "_handleLocalLinkRecovery",

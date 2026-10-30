@@ -306,6 +306,38 @@ void Esp8266BaseMQTT::handle() {
         }
     }
 #endif
+    // 弱信号关联稳定门：拿到 IP 后先稳定 LINK_STABLE_MS 再建连。弱信号下关联频繁
+    // 抖动，刚关联就做秒级同步 TLS 握手会长时间饿死本地网页；已建立连接不受影响。
+    // 不额外记账：此刻尚未做任何阻塞调用，延迟到下一轮即可。
+    {
+        const uint32_t connectedAt = Esp8266BaseWiFi::connectedAtMs();
+        if (connectedAt == 0U ||
+            (millis() - connectedAt) < ESP8266BASE_MQTT_LINK_STABLE_MS) {
+            _state = Esp8266BaseMQTTState::BACKOFF;
+            return;
+        }
+    }
+    // 有界预解析：把 BearSSL 内部默认 10s 的 hostByName 限制到 DNS_TIMEOUT。命中
+    // core DNS 缓存时立即返回，随后 client.connect(name) 内部解析不再重复阻塞；
+    // 未命中且超时则本轮放弃、走既有退避，不在弱信号下卡 10s。不保存 IP，仍走带
+    // SNI 与主机名校验的 name connect，避免破坏云端 TLS。
+    {
+        IPAddress warmed;
+        if (WiFi.hostByName(_host, warmed, ESP8266BASE_MQTT_DNS_TIMEOUT_MS) != 1 ||
+            !warmed.isSet()) {
+            // 预解析未命中/超时：按可恢复云端失败退避（不拆电台、不冻结重试节奏），
+            // 避免在弱信号下每轮主循环都发起一次 3s 同步 DNS。
+            ESP8266BASE_LOG_W_P("MQTT", "connect_dns_failed host=%s timeout_ms=%lu action=backoff",
+                _host, (unsigned long)ESP8266BASE_MQTT_DNS_TIMEOUT_MS);
+            _noteRecoveryFailure(Esp8266BaseMQTTDisconnectReason::TCP_DISCONNECTED);
+            if (!Esp8266BaseWiFi::isConnected()) {
+                _state = Esp8266BaseMQTTState::WAITING_WIFI;
+                return;
+            }
+            _scheduleRetry();
+            return;
+        }
+    }
     if (!_prepareWill()) {
         _lastReason = Esp8266BaseMQTTDisconnectReason::PREPARE_REJECTED;
         ESP8266BASE_LOG_W_P("MQTT", "connect_prepare_rejected action=backoff");

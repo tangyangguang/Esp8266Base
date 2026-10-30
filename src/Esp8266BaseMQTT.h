@@ -27,6 +27,19 @@ namespace BearSSL { class X509List; }
 #define ESP8266BASE_MQTT_CONNECT_TIMEOUT_MS 10000UL
 #endif
 
+// 弱信号保护：要求 STA 拿到 IP 后至少稳定这么久，才发起昂贵的同步 DNS/TCP/TLS 建连。
+// 弱信号下关联常每几十秒抖动一次，刚关联就做最长约 10s 的 TLS 握手会持续阻塞主循环、
+// 饿死本地网页；等 5s 可滤掉大量“秒断”抖动，云端延迟 5s 建立无实际影响。
+#ifndef ESP8266BASE_MQTT_LINK_STABLE_MS
+#define ESP8266BASE_MQTT_LINK_STABLE_MS 5000UL
+#endif
+
+// 建连前预解析 broker 的同步 DNS 上界（core hostByName 默认 10s）。命中 core DNS 缓存
+// 时立即返回；未命中时只阻塞到该上界，避免弱信号/外网丢包时在主循环里卡 10s。
+#ifndef ESP8266BASE_MQTT_DNS_TIMEOUT_MS
+#define ESP8266BASE_MQTT_DNS_TIMEOUT_MS 3000UL
+#endif
+
 // 注：旧版“MQTT 连续传输失败即拆 WiFi 电台 / 30min 升级 MCU 重启”阶梯已移除。
 // 云端传输失败只在 MQTT 层退避；本地链路 radio reset 与长期失联受控重启改由
 // Esp8266BaseWiFi 状态机和 Esp8266Base 主类的本地失联阶梯负责。

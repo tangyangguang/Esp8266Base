@@ -115,6 +115,9 @@ private:
     // 在拆除/重起 STA netif 前确定性关闭上层 socket（mDNS→Web→UDP→TCP）。
     // 必须在主循环 WiFi 段、动 WiFi.disconnect/mode 之前同一上下文执行。
     static void _teardownUpperNetwork();
+    // 被动掉线“轻重连”的最小清理：只关已接受的数据 socket（UDP/TCP），保留
+    // STA netif 与 Web:80 监听 PCB；不拆接口，故监听无需 suspend/resume。
+    static void _teardownDataConnections();
 
 #if ESP8266BASE_USE_WATCHDOG
     // 本地链路长期失联阶梯（只认 STA 本地状态，不看云端）：连续不可用达到时长且
