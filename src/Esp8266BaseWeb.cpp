@@ -686,7 +686,7 @@ void Esp8266BaseWeb::suspendForRadioReset() {
     // stop() → WiFiServer::close() → tcp_close(listen pcb)，但不删除已注册路由/hook。
     _server.stop();
     _running = false;
-    ESP8266BASE_LOG_I_P("Web ", "web_listener_suspended_for_radio_reset");
+    ESP8266BASE_LOG_I_P("Web ", "web_listener_suspended_for_network_teardown");
 }
 
 void Esp8266BaseWeb::resumeAfterRadioReset() {
@@ -695,7 +695,7 @@ void Esp8266BaseWeb::resumeAfterRadioReset() {
     _server.close();
     _server.getServer().begin(80, ESP8266BASE_WEB_TCP_BACKLOG);
     _running = true;
-    ESP8266BASE_LOG_I_P("Web ", "web_listener_resumed_after_radio_reset backlog=%u",
+    ESP8266BASE_LOG_I_P("Web ", "web_listener_resumed_after_network_teardown backlog=%u",
                       static_cast<unsigned>(ESP8266BASE_WEB_TCP_BACKLOG));
 }
 

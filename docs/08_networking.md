@@ -75,6 +75,11 @@ station_connect_stuck_restarting ssid=IOTHOME status=WL_DISCONNECTED status_code
 station_connect_stuck_retrying ssid=IOTHOME status=WL_DISCONNECTED status_code=7 elapsed=7000ms restart_count=1 rssi=-72
 station_connect_timeout ssid=IOTHOME status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
 station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
+station_reconnect_after_teardown total_attempts=4 state=1 status=WL_DISCONNECTED status_code=6 rssi=-78
+station_stuck_restart_after_teardown total_attempts=5 status=WL_DISCONNECTED status_code=7 rssi=-78
+station_disconnect_backoff_after_teardown total_attempts=6 status=WL_DISCONNECTED status_code=7 rssi=-78
+web_listener_suspended_for_network_teardown
+web_listener_resumed_after_network_teardown backlog=1
 station_radio_reset_begin window_resets=1 failures=6 total_attempts=9 status=WL_DISCONNECTED status_code=7
 station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 ```
@@ -91,6 +96,20 @@ station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 单次连接观察窗口为 `ESP8266BASE_WIFI_CONNECT_TIMEOUT`，默认 20s。每次切换到 STA 并断开旧状态后，会等待 `ESP8266BASE_WIFI_STA_SETTLE_MS`，默认 150ms，再调用 `WiFi.begin()`；这用于降低 ESP8266 上电后首轮连接停在 `WL_DISCONNECTED` 的概率。
 
 如果连接开始后持续停在 `WL_DISCONNECTED` 且超过 `ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS`，默认 7s，本库会记录 `station_connect_stuck_restarting` 并提前重启本轮 `WiFi.begin()`，避免 ESP8266 WiFi SDK 卡住时白等完整 20s。每个连接 attempt 最多做 1 次 stuck restart；如果重启后仍然卡住，会记录 `station_connect_stuck_retrying` 并进入快速重试，不再继续等满 20s。
+
+#### 运行期重连/断开统一先有序停网
+
+WiFi 状态机本身**绝不**在主循环里直接调用 `WiFi.disconnect()`/`WiFi.mode()`/重起 STA，而是只登记一个带类型的动作 `Esp8266BaseWiFi::StationAction`：
+
+| 动作 | 触发 | 物理执行（停网后） |
+|---|---|---|
+| `RECONNECT` | 已连接后掉线、退避到期、Web 更换凭证 | 用缓存/新凭证重起 STA |
+| `STUCK_RESTART` | 单 attempt 首次卡死 7s | 重起 STA，并保留 `_stuckRestarted=true` |
+| `DISCONNECT_BACKOFF` | 第二次卡死、20s 超时 | 断开关联后走 fast/slow + radio reset 阶梯退避 |
+
+`Esp8266Base` 主类在主循环 WiFi 段之后、NTP/mDNS/Web/MQTT 段之前消费该动作：先按 mDNS→Web 监听→全部 UDP→全部 TCP 的顺序关闭上层 PCB（`_teardownUpperNetwork()`），再由 friend-only 的 `executeStationAction()` 做唯一物理执行，随后恢复 Web :80 监听。
+
+之所以连普通 `WiFi.disconnect()` 都必须先停 socket：设备崩溃栈（弱网 RSSI≈-78dBm，异常 28 LoadStoreError）实测为 `wifi_station_disconnect→eagle_lwip_if_free→netif_remove→netif_set_down`，即弱网不一致状态下仅断开关联也可能让 SDK 摘除并释放 STA netif；若 MQTT/TLS、Web 的 PCB 仍存活就会 use-after-free，堆损坏还会表现为数秒主循环卡死并触发看门狗安全断开。boot 首连（`begin()` 时尚无上层 socket）与 AP 模式更换凭证（仅 AP netif）不走该分层。物理执行日志分别为 `station_reconnect_after_teardown`、`station_stuck_restart_after_teardown`、`station_disconnect_backoff_after_teardown`。
 
 普通连接 attempt 连续失败达到 `RADIO_RESET_FAILURE_THRESHOLD`（默认 6）时，WiFi 层在重试调度 `_scheduleRetry()` 内每次失败都重新评估资格，满足才**请求**一次 radio reset（`requestRadioReset()`）；不满足则走与普通慢重试完全相同的布臂，绝不提前 return（否则会退化成无间隔重关联）。由 `Esp8266Base` 主类在同一主循环上下文先**按序**关闭上层网络——mDNS 自持 `UdpContext`（`Esp8266BaseMDNS::stop()`→`MDNS.end()`，它不在 `WiFiUDP::stopAll()` 链表里）、Web :80 监听、其余全部 UDP/TCP PCB——再执行唯一物理恢复：断开 STA、`WIFI_OFF`、等待 `RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新 `WiFi.begin()`。先停 socket 是为了避免活跃 PCB 在 `WIFI_OFF→netif_remove` 时触发 use-after-free 崩溃（边界：Core 的 netif 状态回调不会因 `MDNS.end()` 注销，WIFI_OFF 仍可能 queue 一次内部 mDNS restart，且已 accept 未读的 backlog TCP 无公开 API 可丢弃，这两类残留面靠真机长稳证据兜底）。
 

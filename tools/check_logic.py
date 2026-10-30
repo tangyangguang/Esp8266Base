@@ -283,6 +283,44 @@ def test_wifi_retry_rules() -> None:
     p_exec = _pos("executeRadioReset()", p_tcp)
     if not (p_mdns < p_web < p_udp < p_tcp < p_exec):
         fail("radio reset must stop mDNS, web, UDP, TCP in order before WIFI_OFF")
+    # 运行期 STA 动作分层（掉线/stuck 重起/断连退避/退避到期重连）：WiFi 状态机只
+    # 登记动作，主类必须先有序停网再物理执行，避免 disconnect()/mode() 在弱网下摘
+    # netif 时活跃 PCB use-after-free（崩溃第一原语就是 wifi_station_disconnect）。
+    require_token(wifi_cpp, "consumeStationAction",
+                  "runtime STA actions must be requested, not performed inside the state machine")
+    require_token(wifi_cpp, "executeStationAction",
+                  "physical STA action must be a single owner-gated entrypoint")
+    require_token(base_cpp, "consumeStationAction",
+                  "owner must consume runtime STA action requests")
+    require_token(base_cpp, "executeStationAction",
+                  "owner must perform the physical STA action after socket teardown")
+    # 物理执行必须排在有序停网原语之后（复用同一 mDNS→Web→UDP→TCP 顺序）。
+    if not (base_cpp.find("_teardownUpperNetwork()") <
+            base_cpp.find("executeStationAction(")):
+        fail("runtime STA action must run the ordered socket teardown before touching WiFi")
+    # handle() 状态机切片内既不得直接 _startSTA，也不得裸 WiFi.disconnect/mode：
+    # disconnect() 在弱网下本身就可能摘 netif，必须在主类有序停网后执行。
+    handle_start = wifi_cpp.index("void Esp8266BaseWiFi::handle()")
+    handle_end = wifi_cpp.index("// connect ")
+    handle_body = wifi_cpp[handle_start:handle_end]
+    for forbidden, why in (
+        ("_startSTA(", "state machine must request reconnect, not call _startSTA directly"),
+        ("WiFi.disconnect", "state machine must not disconnect before ordered socket teardown"),
+        ("WiFi.mode(", "state machine must not switch mode before ordered socket teardown"),
+    ):
+        if forbidden in handle_body:
+            fail("WiFi::handle() %s" % why)
+    # stuck 重起在物理执行时必须保留 _stuckRestarted=true，否则固定 7s 风暴饿死退避/
+    # radio reset 升级；断连退避必须仍走 _scheduleRetry（含 _radioGate.onFailure）。
+    exec_body = wifi_cpp[wifi_cpp.index("void Esp8266BaseWiFi::executeStationAction"):
+                         wifi_cpp.index("const char* Esp8266BaseWiFi::apSSID")]
+    stuck_case = exec_body[exec_body.index("StationAction::STUCK_RESTART"):
+                           exec_body.index("StationAction::DISCONNECT_BACKOFF")]
+    if "_stuckRestarted = true" not in stuck_case:
+        fail("STUCK_RESTART physical action must preserve _stuckRestarted=true to keep backoff/radio escalation alive")
+    backoff_case = exec_body[exec_body.index("StationAction::DISCONNECT_BACKOFF"):]
+    if "WiFi.disconnect(false, false)" not in backoff_case or "_scheduleRetry()" not in backoff_case:
+        fail("DISCONNECT_BACKOFF must disconnect (after teardown) then run the radio-gated retry scheduler")
     require_token(read("src/Esp8266BaseMDNS.cpp"), "MDNS.end()",
                   "mDNS must release its self-owned UdpContext before radio reset")
     require_token(base_cpp, "_handleLocalLinkRecovery",

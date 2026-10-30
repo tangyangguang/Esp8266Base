@@ -109,6 +109,12 @@ private:
 
     // radio reset 主类编排：WiFi 层只置请求，由主类先有序关闭上层网络再物理执行。
     static void _consumeRadioReset();
+    // 运行期 STA 动作主类编排：与 radio reset 相同的有序停网前置，按动作类型
+    // 物理执行立即重连/stuck 重起/断连退避，但不切 WIFI_OFF。
+    static void _consumeStationAction();
+    // 在拆除/重起 STA netif 前确定性关闭上层 socket（mDNS→Web→UDP→TCP）。
+    // 必须在主循环 WiFi 段、动 WiFi.disconnect/mode 之前同一上下文执行。
+    static void _teardownUpperNetwork();
 
 #if ESP8266BASE_USE_WATCHDOG
     // 本地链路长期失联阶梯（只认 STA 本地状态，不看云端）：连续不可用达到时长且

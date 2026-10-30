@@ -20,6 +20,8 @@ Esp8266BaseLinkRecoveryCore::RadioResetGate Esp8266BaseWiFi::_radioGate;
 uint16_t             Esp8266BaseWiFi::_attemptCount   = 0;
 uint8_t              Esp8266BaseWiFi::_radioResetCount = 0;
 bool                 Esp8266BaseWiFi::_radioResetRequest = false;
+Esp8266BaseWiFi::StationAction Esp8266BaseWiFi::_stationAction =
+    Esp8266BaseWiFi::StationAction::NONE;
 char                 Esp8266BaseWiFi::_apSSID[28]     = "";
 char                 Esp8266BaseWiFi::_ip[16]         = "";
 char                 Esp8266BaseWiFi::_staSSID[64]    = "";
@@ -98,7 +100,8 @@ void Esp8266BaseWiFi::handle() {
 
             if (_connectStart == 0) {
                 if (_isDue(now, _retryAt)) {
-                    _startSTA(_staSSID, _staPass);
+                    // 退避后的重起：可能仍有上层 socket 残留，登记动作交主类先有序停网。
+                    _requestStationAction(StationAction::RECONNECT);
                 }
                 break;
             }
@@ -121,8 +124,9 @@ void Esp8266BaseWiFi::handle() {
                                       (unsigned)status,
                                       (unsigned long)(now - _connectStart),
                                       (int)WiFi.RSSI());
-                    WiFi.disconnect(false, false);
-                    _scheduleRetry();
+                    // 已重起过一次仍卡死：断开关联后走 fast/slow + radio reset 阶梯退避。
+                    // 物理 disconnect 交主类在有序停网后执行，避免活 PCB UAF。
+                    _requestStationAction(StationAction::DISCONNECT_BACKOFF);
                     break;
                 }
                 ESP8266BASE_LOG_W_P("WiFi",
@@ -132,9 +136,9 @@ void Esp8266BaseWiFi::handle() {
                                   (unsigned)status,
                                   (unsigned long)(now - _connectStart),
                                   (int)WiFi.RSSI());
-                WiFi.disconnect(false, false);
-                _startSTA(_staSSID, _staPass);
-                _stuckRestarted = true;
+                // 首次卡死立即重起；不在这里 disconnect/_startSTA，登记动作由主类在
+                // 有序停网后执行。_stuckRestarted 语义由该动作在物理执行时置位保留。
+                _requestStationAction(StationAction::STUCK_RESTART);
                 break;
             }
 
@@ -146,8 +150,8 @@ void Esp8266BaseWiFi::handle() {
                                   (unsigned)status,
                                   (unsigned long)(now - _connectStart),
                                   (int)WiFi.RSSI());
-                WiFi.disconnect(false, false);
-                _scheduleRetry();
+                // 物理 disconnect + 退避交主类在有序停网后执行。
+                _requestStationAction(StationAction::DISCONNECT_BACKOFF);
             }
             break;
         }
@@ -167,7 +171,9 @@ void Esp8266BaseWiFi::handle() {
                 _state        = Esp8266BaseWiFiState::CONNECTING;
                 _connectStart = millis();
                 _retryAt      = millis();   // 立即开始尝试
-                _startSTA(_staSSID, _staPass);
+                // 已连接后掉线：MQTT/Web/mDNS 等 socket 可能仍存活，登记立即重连动作，
+                // 由主类先有序停网再重起 STA，避免活 PCB 下拆 netif 触发 UAF。
+                _requestStationAction(StationAction::RECONNECT);
             }
             break;
         }
@@ -226,15 +232,24 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
     strncpy(_staPass, safePass, sizeof(_staPass) - 1);
     _staPass[sizeof(_staPass) - 1] = '\0';
 
-    // 若当前在 AP 模式，先关闭 AP
+    // 若当前在 AP 模式，先关闭 AP（此时仅有 AP netif，无 STA 上层 socket）。
     if (_state == Esp8266BaseWiFiState::AP_CONFIG) {
         WiFi.softAPdisconnect(true);
         delay(100);
+        _startSTA(_staSSID, _staPass);
+    } else {
+        // STA 运行期更换凭证：可能有 MQTT/Web socket 存活，登记立即重连动作，由主类
+        // 先有序停网再用新凭证重起。同步复位 attempt 计时，避免旧凭证在途 attempt 的
+        // stuck/超时布臂与新 attempt 交错。
+        _state = Esp8266BaseWiFiState::CONNECTING;
+        _connectStart = millis();
+        _retryAt = millis();
+        _stuckRestarted = false;
+        _requestStationAction(StationAction::RECONNECT);
     }
 
     _retryCount = 0;
     _radioGate.onNewCredentials();
-    _startSTA(_staSSID, _staPass);
     return true;
 }
 
@@ -352,6 +367,57 @@ void Esp8266BaseWiFi::executeRadioReset() {
                       staOk ? "ok" : "failed");
     _ip[0] = '\0';
     _beginSTA(_staSSID, _staPass, false);
+}
+
+void Esp8266BaseWiFi::_requestStationAction(StationAction action) {
+    // 同一主循环内理论上只会有一个来源命中（switch 互斥）；仍做幂等保护：非 NONE 后
+    // 不被覆盖，保证登记的第一个动作不丢。
+    if (_stationAction == StationAction::NONE) _stationAction = action;
+}
+
+Esp8266BaseWiFi::StationAction Esp8266BaseWiFi::consumeStationAction() {
+    const StationAction action = _stationAction;
+    _stationAction = StationAction::NONE;
+    return action;
+}
+
+void Esp8266BaseWiFi::executeStationAction(StationAction action) {
+    // 仅由 Esp8266Base（friend）在有序停网后调用；此处上层 socket 已全部关闭。
+    const uint8_t status = (uint8_t)WiFi.status();
+    switch (action) {
+    case StationAction::RECONNECT:
+        ESP8266BASE_LOG_W_P("WiFi",
+                          "station_reconnect_after_teardown total_attempts=%u state=%u status=%s status_code=%u rssi=%d",
+                          (unsigned)_attemptCount,
+                          (unsigned)static_cast<uint8_t>(_state),
+                          _statusName(status), (unsigned)status, (int)WiFi.RSSI());
+        // 保留电台与凭证，仅用缓存凭证重起 STA（内部 disconnect/mode 在停网保护下）。
+        _startSTA(_staSSID, _staPass);
+        break;
+    case StationAction::STUCK_RESTART:
+        ESP8266BASE_LOG_W_P("WiFi",
+                          "station_stuck_restart_after_teardown total_attempts=%u status=%s status_code=%u rssi=%d",
+                          (unsigned)_attemptCount, _statusName(status), (unsigned)status,
+                          (int)WiFi.RSSI());
+        _startSTA(_staSSID, _staPass);
+        // 关键：保留“本轮 attempt 已做过一次 stuck restart”语义。物理执行下一轮才发生，
+        // 若不在这里置位，下次再卡死会永远走立即重起（固定 7s 风暴），饿死 fast/slow
+        // 退避与 radio reset 升级链。
+        _stuckRestarted = true;
+        break;
+    case StationAction::DISCONNECT_BACKOFF:
+        ESP8266BASE_LOG_W_P("WiFi",
+                          "station_disconnect_backoff_after_teardown total_attempts=%u status=%s status_code=%u rssi=%d",
+                          (unsigned)_attemptCount, _statusName(status), (unsigned)status,
+                          (int)WiFi.RSSI());
+        // 停网保护下断开当前关联，再按 fast/slow + radio reset 阶梯布退避臂。
+        WiFi.disconnect(false, false);
+        _scheduleRetry();
+        break;
+    case StationAction::NONE:
+    default:
+        break;
+    }
 }
 
 const char* Esp8266BaseWiFi::apSSID() {

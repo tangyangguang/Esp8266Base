@@ -111,6 +111,27 @@ public:
     static bool requestRadioReset();
     static bool consumeRadioResetRequest();
 
+    // 运行期 STA 重连/断开的分层动作。弱网不一致状态下，仅 WiFi.disconnect() 本身
+    // 就可能让 SDK 摘除并释放 STA netif（崩溃栈：wifi_station_disconnect→
+    // eagle_lwip_if_free→netif_remove→netif_set_down），mode(WIFI_STA)/WIFI_OFF 更甚；
+    // 若 MQTT/TLS、Web 的 PCB 仍存活会 use-after-free 崩溃，堆损坏还会表现为数秒
+    // 主循环卡死。因此状态机不直接 disconnect/_startSTA，只置一个带类型的请求，由
+    // Esp8266Base 主类在同一主循环上下文先有序关闭上层网络（mDNS/Web/UDP/TCP），再调
+    // executeStationAction() 物理执行。boot 首连（begin 时尚无上层 socket）与 AP 换
+    // 凭证（仅 AP netif）不走该分层。
+    enum class StationAction : uint8_t {
+        NONE = 0,
+        // 立即用缓存凭证重起 STA（掉线、退避到期、Web 换凭证）。
+        RECONNECT = 1,
+        // 本轮 attempt 卡死（WL_DISCONNECTED 达 7s）的立即重起；必须保留
+        // _stuckRestarted 语义，使下次再卡死走退避，而不是固定 7s 无限重起。
+        STUCK_RESTART = 2,
+        // 断开当前关联并按 fast/slow + radio reset 阶梯退避（stuck retrying、20s 超时）。
+        DISCONNECT_BACKOFF = 3,
+    };
+    // 取出（并清零）一个待执行的运行期 STA 动作；无请求返回 NONE。
+    static StationAction consumeStationAction();
+
     // AP 模式的 SSID（格式：ESP8266-Config-XXXX）
     static const char* apSSID();
 
@@ -126,6 +147,7 @@ private:
     static uint16_t             _attemptCount; // 2B：本次启动累计 WiFi.begin 次数
     static uint8_t              _radioResetCount; // 1B：本次启动完整 radio reset 次数
     static bool                 _radioResetRequest; // 1B：是否有 pending reset 请求
+    static StationAction        _stationAction;     // 1B：pending 的运行期 STA 动作
     static char                 _apSSID[28];   // 28B："ESP8266-Config-XXXX\0"
     static char                 _ip[16];       // 16B：点分十进制 IP
     static char                 _staSSID[64];  // 64B：缓存的 STA SSID，避免重连时重读 Flash
@@ -138,6 +160,10 @@ private:
     static void _scheduleRetry();
     // 唯一物理执行 radio reset，仅编排者 Esp8266Base（friend）在有序停网后调用。
     static void executeRadioReset();
+    // 唯一物理执行运行期 STA 动作，仅编排者 Esp8266Base（friend）在有序停网后调用。
+    static void executeStationAction(StationAction action);
+    // 状态机内登记一个运行期动作（同轮多个只保留优先级最高/最先到的一个）。
+    static void _requestStationAction(StationAction action);
     static bool _isDue(uint32_t now, uint32_t due);
     static void _updateIP();
     static const char* _statusName(uint8_t status);

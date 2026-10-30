@@ -281,6 +281,12 @@ void Esp8266Base::handle() {
 #endif
     Esp8266BaseWiFi::handle();
 
+    // 2.1 运行期 STA 动作分层消费：WiFi 状态机只登记动作（立即重连/stuck 重起/
+    // 断连退避）；主类在同一主循环上下文先有序关闭上层网络（mDNS/Web/UDP/TCP），
+    // 再物理 disconnect/重起 STA，避免 SDK 摘 netif 时活跃 PCB use-after-free。
+    // 必须在 NTP/mDNS/Web/MQTT 段之前完成。
+    _consumeStationAction();
+
     // 2.2 radio reset 分层消费：WiFi 层只置请求；主类在同一主循环上下文先有序
     // 关闭上层网络（Web/UDP/TCP socket），再物理切 WIFI_OFF，避免活跃 PCB 下
     // netif 拆除崩溃。必须在 NTP/mDNS/Web/MQTT 之前完成。
@@ -513,16 +519,14 @@ const char* Esp8266Base::resetReasonName() {
 }
 
 // ----------------------------------------------------------------------------
-// radio reset 主类编排：WiFi 层只置请求，由这里在同一主循环上下文先有序关闭
-// 上层网络，再执行唯一的物理 WIFI_OFF。
+// 拆除/重起 STA netif 前的有序停网：mDNS 自持 UdpContext → Web listen PCB
+// （stopAll 关不到）→ 其余 WiFiUDP（NTP）→ 残留 accepted TCP（MQTT/TLS/OTA/HTTP）。
+// 普通 STA 动作与 radio reset 都由下面的消费编排复用本函数；任何在主循环运行期
+// 调用 WiFi.disconnect/mode/WIFI_OFF 的路径都必须先执行本函数，否则活跃 PCB 在 SDK
+// 摘除并释放 netif（eagle_lwip_if_free→netif_remove）时 use-after-free。
+// 注：deepSleep 预飞是独立停机路径（见 Esp8266BaseSleep.cpp），不经过本函数。
 // ----------------------------------------------------------------------------
-void Esp8266Base::_consumeRadioReset() {
-    if (!Esp8266BaseWiFi::consumeRadioResetRequest()) return;
-
-    // radio reset 只在 CONNECTING（无 IP）时被请求：活动 MQTT TLS / OTA / 流式
-    // HTTP 连接不可能存在。仍确定性关闭上层活跃 PCB，避免 WIFI_OFF→netif_remove
-    // 时活跃 PCB 触发 use-after-free 崩溃。顺序：mDNS 自持 UdpContext → Web listen
-    // PCB（stopAll 关不到）→ 其余 WiFiUDP → 残留 TCP。
+void Esp8266Base::_teardownUpperNetwork() {
 #if ESP8266BASE_USE_MDNS
     Esp8266BaseMDNS::stop();
     _mdnsWasStarted = false;  // 重连后由 handle() 重新 begin
@@ -531,7 +535,33 @@ void Esp8266Base::_consumeRadioReset() {
     Esp8266BaseWeb::suspendForRadioReset();
 #endif
     WiFiUDP::stopAll();   // 关闭 NTP 等 WiFiUDP PCB
-    WiFiClient::stopAll();// 关闭残留 accepted TCP 连接
+    WiFiClient::stopAll();// 关闭残留 accepted TCP 连接（MQTT/TLS/OTA/流式 HTTP）
+}
+
+void Esp8266Base::_consumeStationAction() {
+    const Esp8266BaseWiFi::StationAction action = Esp8266BaseWiFi::consumeStationAction();
+    if (action == Esp8266BaseWiFi::StationAction::NONE) return;
+
+    // 普通重连/断连可在已连接后掉线或 CONNECTING 卡死时发生：活动 MQTT TLS / Web
+    // 连接可能仍存活。必须先有序关闭上层 PCB，再让 SDK disconnect/重起 STA，避免
+    // 摘 netif 时活跃 PCB use-after-free。
+    _teardownUpperNetwork();
+    Esp8266BaseWiFi::executeStationAction(action);
+
+#if ESP8266BASE_USE_WEB
+    // 立即恢复 backlog=1 监听，不等关联完成（与开机时 Web 联网前即监听一致）；
+    // DISCONNECT_BACKOFF 退避期间本地页面仍可用，便于现场查看诊断。
+    Esp8266BaseWeb::resumeAfterRadioReset();
+#endif
+}
+
+void Esp8266Base::_consumeRadioReset() {
+    if (!Esp8266BaseWiFi::consumeRadioResetRequest()) return;
+
+    // radio reset 只在 CONNECTING（无 IP）时被请求：MQTT 连接闸（需 isConnected）
+    // 正常不会建立活动 TLS，即使有残留 socket 也由统一 teardown 确定性关闭，避免
+    // WIFI_OFF→netif_remove 时活跃 PCB 触发 use-after-free 崩溃。
+    _teardownUpperNetwork();
 
     Esp8266BaseWiFi::executeRadioReset();
 
