@@ -52,6 +52,7 @@ struct FakeMDNS {
     bool begin(const char*) { ++calls; return allowed; }
     void addService(const char*,const char*,int) { ++services; }
     void update() { ++updates; }
+    void end() {}
 };
 extern FakeMDNS MDNS;
 ''',

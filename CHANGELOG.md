@@ -34,6 +34,17 @@
 
 没有内容的小节可以省略。
 
+## 2026-10-30
+
+### 修复 / 行为变化
+- **radio reset 从“约每 2 分钟一次的常规动作”降为低频最后手段，消除错密码/弱信号下反复冷拆电台**。上一版（10-29 三）虽然把 radio reset 的触发面从云端收窄到本地 CONNECTING 失败，但连续失败 6 次即冷拆、无冷却，错密码或路由器长期关机时仍会约每 2 分钟 `WIFI_OFF` 一次（实测 9 分钟 4 次），−80dBm 下反复冷关联可能拖死自愈。现把节奏抽进纯核 `Esp8266BaseLinkRecoveryCore::RadioResetGate`：**本 boot 首次**仍连续 6 败即触发（约 2 分钟，保留 SDK station 软卡死的快速自愈）；其后受 **10 分钟绝对冷却**（`RADIO_RESET_MIN_INTERVAL_MS`）与**每失联窗口最多 3 次**（`RADIO_RESET_WINDOW_BUDGET`）约束，冷却中/预算用完只走普通 10s 慢重试，绝不冷拆。错密码/持续弱信号下 reset 只出现在约失联后 2/12/22 分钟共 3 次。成功关联清零窗口预算与连续失败，但不清绝对冷却（偶发 flap 不解除安全带）。资格判定必须在 `_scheduleRetry()` 内每次失败重评，不合格时走与普通慢重试相同的布臂。
+- **radio reset 前确定性停止 mDNS**：新增 `Esp8266BaseMDNS::stop()`（`MDNS.end()`），在主类有序停网时先于 Web/UDP/TCP 调用。mDNS 自持的 Core 内部 `UdpContext` 不在 `WiFiUDP::stopAll()` 链表，是原 netif 拆除 use-after-free 崩溃最疑似的残留 PCB。边界：Core netif 状态回调不会因此注销，已 accept 未读的 backlog TCP 无公开 API 可丢弃，这两类残留仍靠真机长稳证据。
+- **连续重启链可由本地链路健康清零**：新增 `Esp8266BaseWatchdog::setLocalLinkHealthy(bool)`，与云端 `setApplicationReady()` 独立。本地 STA 连续健康 30 分钟（非 AP 态）同样只清 `_consecutiveRestarts`，不清可信 UTC 的 24h 预算；修复“不连云的设备连续链只能靠外部复位清”的潜在缺陷，避免纯外网长期不通吃光后续 `LOOP_STALL` 合法重启预算。
+
+### 破坏性 API 变更
+- 删除 `Esp8266BaseRadioResetSource` 枚举与 `lastRadioResetSource()`；`requestRadioReset()/consumeRadioResetRequest()` 去掉来源形参（请求降为 bool），`executeRadioReset()` 收窄为 `private` 并 `friend Esp8266Base`，业务不再能绕过主类有序停网直接物理复位。来源唯一（本地状态机），`JNL_RADIO_RESET` 的 flags 字节固定记 0、p1 仍为累计次数。
+- 删除 WiFi 头中的 `ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT` 与 `ESP8266BASE_LOCAL_LINK_MCU_*` 宏；节奏常量统一在纯核 `src/Esp8266BaseLinkRecoveryCore.h`（`RADIO_RESET_*` / `LINK_RESTART_*`），新增配套 host 状态机测试 `tools/link_recovery_core_host_test.cpp`（含 millis 跨 2^32 回绕），由 `tools/check_logic.py` 编译执行。
+
 ## 2026-10-29（三）
 
 ### 修复

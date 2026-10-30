@@ -216,8 +216,8 @@ build_flags =
 | `ESP8266BASE_WIFI_RETRY_FAST` | `2000` | WiFi 快速重试间隔 ms |
 | `ESP8266BASE_WIFI_RETRY_FAST_COUNT` | `3` | WiFi 快速重试次数，之后进入慢速重试 |
 | `ESP8266BASE_WIFI_RETRY_SLOW` | `10000` | WiFi 慢速重试间隔 ms |
-| `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS` | `1800000` | 本地链路连续不可达多久后可申请受控 MCU 重启 |
-| `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS` | `2` | 上述窗口内本地 radio reset 增量阈值 |
+
+radio reset 节奏（连续失败阈值 6、首次后 10min 绝对冷却、每失联窗口预算 3）与本地失联受控重启阶梯（30min 且 ≥2 次 radio reset）不是编译宏，统一在纯核 `src/Esp8266BaseLinkRecoveryCore.h` 以 `constexpr` 定义，详见 `docs/08_networking.md`。
 
 根目录 `platformio.ini` 使用 `examples/full_demo/src` 作为默认构建入口；各示例目录提供独立的 `platformio.ini`。上传建议使用 `460800` baud，避免部分 ESP8266 硬件在 `921600` 下出现 packet error。
 

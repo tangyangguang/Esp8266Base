@@ -81,6 +81,8 @@ uint32_t Esp8266BaseWatchdog::_coveredMs = 0;
 uint32_t Esp8266BaseWatchdog::_resetCount = 0;
 uint32_t Esp8266BaseWatchdog::_startedMs = 0;
 uint32_t Esp8266BaseWatchdog::_applicationReadySinceMs = 0;
+bool Esp8266BaseWatchdog::_localLinkHealthy = false;
+uint32_t Esp8266BaseWatchdog::_localLinkHealthySinceMs = 0;
 uint32_t Esp8266BaseWatchdog::_budgetWindowStartedEpoch = 0;
 uint32_t Esp8266BaseWatchdog::_trustedEpoch = 0;
 volatile uint32_t Esp8266BaseWatchdog::_heartbeat = 0;
@@ -165,6 +167,8 @@ bool Esp8266BaseWatchdog::begin(uint32_t timeoutMs) {
     _paused = false;
     _applicationReady = false;
     _applicationReadySinceMs = 0;
+    _localLinkHealthy = false;
+    _localLinkHealthySinceMs = 0;
     _trustedEpoch = 0;
     _lastDecisionReport = Esp8266BaseRestartDecisionReport{};
     _running = true;
@@ -245,6 +249,16 @@ void Esp8266BaseWatchdog::handle() {
                           static_cast<unsigned long>((now - _applicationReadySinceMs) / 1000UL),
                           static_cast<unsigned>(_restartsInWindow));
     }
+    if (_localLinkHealthy && _consecutiveRestarts != 0 &&
+        static_cast<uint32_t>(now - _localLinkHealthySinceMs) >=
+            ESP8266BASE_RECOVERY_HEALTHY_RESET_MS) {
+        _consecutiveRestarts = 0;
+        writeRtc(_resetCount, 0, 0, _budgetWindowStartedEpoch,
+                 _restartsInWindow);
+        ESP8266BASE_LOG_I_P("WDT ", "recovery_consecutive_chain_reset local_link_healthy_s=%lu window=%u/2",
+                          static_cast<unsigned long>((now - _localLinkHealthySinceMs) / 1000UL),
+                          static_cast<unsigned>(_restartsInWindow));
+    }
     const uint32_t elapsed = now - _cycleStartMs;
     const uint32_t uncovered = elapsed > _coveredMs ? elapsed - _coveredMs : 0;
     if (uncovered < _timeoutMs) return;
@@ -279,6 +293,13 @@ void Esp8266BaseWatchdog::setApplicationReady(bool ready) {
     if (_applicationReady == ready) return;
     _applicationReady = ready;
     _applicationReadySinceMs = ready ? millis() : 0;
+}
+
+void Esp8266BaseWatchdog::setLocalLinkHealthy(bool healthy) {
+    if (_localLinkHealthy == healthy) return;
+    _localLinkHealthy = healthy;
+    // false 边沿清零计时：偶发 flap 必须重新积累连续 30min，不能跨断开累计。
+    _localLinkHealthySinceMs = healthy ? millis() : 0;
 }
 
 Esp8266BaseRestartDecision Esp8266BaseWatchdog::_decision(Esp8266BaseRecoveryCause cause,

@@ -80,10 +80,7 @@ bool Esp8266Base::_mdnsWasStarted  = false;
 #endif
 
 #if ESP8266BASE_USE_WATCHDOG
-bool     Esp8266Base::_linkOutageActive        = false;
-uint32_t Esp8266Base::_linkOutageStartedAt     = 0;
-uint8_t  Esp8266Base::_linkOutageRadioBaseline = 0;
-uint32_t Esp8266Base::_linkRestartRetryAt      = 0;
+Esp8266BaseLinkRecoveryCore::LinkRestartLadder Esp8266Base::_linkLadder;
 #endif
 
 // ----------------------------------------------------------------------------
@@ -520,20 +517,23 @@ const char* Esp8266Base::resetReasonName() {
 // 上层网络，再执行唯一的物理 WIFI_OFF。
 // ----------------------------------------------------------------------------
 void Esp8266Base::_consumeRadioReset() {
-    Esp8266BaseRadioResetSource source;
-    if (!Esp8266BaseWiFi::consumeRadioResetRequest(source)) return;
+    if (!Esp8266BaseWiFi::consumeRadioResetRequest()) return;
 
     // radio reset 只在 CONNECTING（无 IP）时被请求：活动 MQTT TLS / OTA / 流式
-    // HTTP 连接不可能存在。仍确定性关闭 Web listen PCB（stopAll 关不到它）与全部
-    // UDP/TCP PCB，避免 WIFI_OFF→netif_remove 时活跃 PCB 触发 use-after-free 崩溃。
+    // HTTP 连接不可能存在。仍确定性关闭上层活跃 PCB，避免 WIFI_OFF→netif_remove
+    // 时活跃 PCB 触发 use-after-free 崩溃。顺序：mDNS 自持 UdpContext → Web listen
+    // PCB（stopAll 关不到）→ 其余 WiFiUDP → 残留 TCP。
+#if ESP8266BASE_USE_MDNS
+    Esp8266BaseMDNS::stop();
+    _mdnsWasStarted = false;  // 重连后由 handle() 重新 begin
+#endif
 #if ESP8266BASE_USE_WEB
     Esp8266BaseWeb::suspendForRadioReset();
 #endif
-    WiFiUDP::stopAll();   // 关闭 NTP 等 WiFiUDP PCB（mDNS 用 Core 内部 UdpContext，
-                          // 不在此链表，其 socket 由 Core 的 netif 状态回调自重启）
+    WiFiUDP::stopAll();   // 关闭 NTP 等 WiFiUDP PCB
     WiFiClient::stopAll();// 关闭残留 accepted TCP 连接
 
-    Esp8266BaseWiFi::executeRadioReset(source);
+    Esp8266BaseWiFi::executeRadioReset();
 
 #if ESP8266BASE_USE_WEB
     // stop()/begin() 不删除已注册路由；恢复自定义 backlog=1 监听，不等关联完成，
@@ -550,43 +550,28 @@ void Esp8266Base::_consumeRadioReset() {
 // Watchdog）。WiFi 关联正常但外网断→isConnected 恒真，永不 arm，不重启。
 // ----------------------------------------------------------------------------
 void Esp8266Base::_handleLocalLinkRecovery(bool wifiConnected) {
-    if (wifiConnected) {
-        _linkOutageActive = false;
-        return;
-    }
-    // AP 配网态由 AP 提供本地服务，不属于失联。
-    if (Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG) return;
+    const bool apMode = Esp8266BaseWiFi::state() == Esp8266BaseWiFiState::AP_CONFIG;
+    // 独立于 MQTT application-ready 的本地健康通道：本地 STA 连续健康 30min 也可清
+    // 连续重启链（不连云的设备同样适用）；false 边沿在 Watchdog 内清零计时。
+    Esp8266BaseWatchdog::setLocalLinkHealthy(wifiConnected && !apMode);
 
     const uint32_t now = millis();
-    if (!_linkOutageActive) {
-        _linkOutageActive = true;
-        _linkOutageStartedAt = now;
-        _linkOutageRadioBaseline = Esp8266BaseWiFi::radioResetCount();
-        _linkRestartRetryAt = 0;
-        return;
-    }
-
-    const uint32_t outageMs = now - _linkOutageStartedAt;
-    const uint8_t radioResets =
-        (uint8_t)(Esp8266BaseWiFi::radioResetCount() - _linkOutageRadioBaseline);
-    // _linkRestartRetryAt==0 表示本窗口尚未申请过（arm 时置 0），应立即可申请；
-    // 不能直接 (now-0)<0 判断，否则 millis 越过 2^31 后会长期抑制首次申请。
-    if (outageMs < ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS ||
-        radioResets < ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS ||
-        (_linkRestartRetryAt != 0 && static_cast<int32_t>(now - _linkRestartRetryAt) < 0)) {
+    if (!_linkLadder.onTick(wifiConnected, apMode,
+                            Esp8266BaseWiFi::radioResetCount(), now)) {
         return;
     }
 
     const Esp8266BaseRestartDecision decision =
         Esp8266BaseWatchdog::requestRestart(Esp8266BaseRecoveryCause::NETWORK_UNRECOVERABLE);
-    // guard（如继电器运行中）/cooldown/预算拒绝时低率重试，保持可观测。
-    _linkRestartRetryAt = now + 60000UL;
+    // guard（如继电器运行中）/cooldown/预算拒绝时，纯核内部已按 60s 布下重试臂。
     if (decision != Esp8266BaseRestartDecision::RESTARTING) {
+        const uint32_t outage = now - _linkLadder.startedMs;
         ESP8266BASE_LOG_W_P("Net",
                           "local_link_mcu_recovery_deferred decision=%u outage_s=%lu radio_resets=%u",
                           static_cast<unsigned>(decision),
-                          static_cast<unsigned long>(outageMs / 1000UL),
-                          static_cast<unsigned>(radioResets));
+                          static_cast<unsigned long>(outage / 1000UL),
+                          static_cast<unsigned>(
+                              (uint8_t)(Esp8266BaseWiFi::radioResetCount() - _linkLadder.radioBaseline)));
     }
 }
 #endif

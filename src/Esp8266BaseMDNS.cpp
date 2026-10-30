@@ -46,6 +46,18 @@ void Esp8266BaseMDNS::handle() {
     MDNS.update();
 }
 
+// ----------------------------------------------------------------------------
+// stop — radio reset 前确定性释放自持的 UDP PCB
+// ----------------------------------------------------------------------------
+void Esp8266BaseMDNS::stop() {
+    if (!_running && !_retryPending) return;
+    MDNS.end();  // close()：释放内部 UdpContext、离开组播；无 IP 时不发 goodbye
+    _running = false;
+    _retryPending = false;
+    _lastFailureMs = 0;
+    ESP8266BASE_LOG_I("mDNS", "mdns_stopped_for_radio_reset");
+}
+
 bool Esp8266BaseMDNS::isRunning() {
     return _running;
 }

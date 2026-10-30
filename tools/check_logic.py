@@ -83,6 +83,13 @@ def parse_define_int(text: str, name: str) -> int:
     return int(m.group(1))
 
 
+def parse_constexpr_int(text: str, name: str) -> int:
+    m = re.search(rf"constexpr\s+\w+\s+{re.escape(name)}\s*=\s*(\d+)", text)
+    if not m:
+        fail(f"missing constexpr integer: {name}")
+    return int(m.group(1))
+
+
 def require_token(text: str, token: str, label: str) -> None:
     if token not in text:
         fail(f"missing {label}: {token}")
@@ -171,38 +178,42 @@ def test_log_file_buffer_rules() -> None:
 def test_wifi_retry_rules() -> None:
     wifi_h = read("src/Esp8266BaseWiFi.h")
     wifi_cpp = read("src/Esp8266BaseWiFi.cpp")
+    core_h = read("src/Esp8266BaseLinkRecoveryCore.h")
     networking = read("docs/08_networking.md")
     api = read("docs/03_api_reference.md")
     fast = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RETRY_FAST")
     fast_count = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RETRY_FAST_COUNT")
     slow = parse_define_int(wifi_h, "ESP8266BASE_WIFI_RETRY_SLOW")
     stuck = parse_define_int(wifi_h, "ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS")
-    radio_reset_failures = parse_define_int(
-        wifi_h, "ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT")
     radio_reset_settle = parse_define_int(
         wifi_h, "ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS")
+    radio_reset_failures = parse_constexpr_int(
+        core_h, "RADIO_RESET_FAILURE_THRESHOLD")
+    radio_reset_interval = parse_constexpr_int(
+        core_h, "RADIO_RESET_MIN_INTERVAL_MS")
+    radio_reset_budget = parse_constexpr_int(core_h, "RADIO_RESET_WINDOW_BUDGET")
+    local_after = parse_constexpr_int(core_h, "LINK_RESTART_AFTER_MS")
+    local_resets = parse_constexpr_int(core_h, "LINK_RESTART_MIN_RADIO_RESETS")
     assert_eq(fast, 2000, "default fast retry")
     assert_eq(fast_count, 3, "default fast retry count")
     assert_eq(slow, 10000, "default slow retry")
     assert_eq(stuck, 7000, "default stuck disconnected restart")
-    assert_eq(radio_reset_failures, 6, "default WiFi radio reset failure count")
+    assert_eq(radio_reset_failures, 6, "default WiFi radio reset failure threshold")
+    assert_eq(radio_reset_interval, 600000, "default WiFi radio reset min interval")
+    assert_eq(radio_reset_budget, 3, "default WiFi radio reset window budget")
     assert_eq(radio_reset_settle, 100, "default WiFi radio reset settle")
+    assert_eq(local_after, 1800000, "default local-link MCU recovery after")
+    assert_eq(local_resets, 2, "default local-link MCU recovery radio resets")
     assert_eq([retry_interval(i, fast_count, fast, slow) for i in range(1, 6)],
               [2000, 2000, 2000, 10000, 10000],
               "retry interval sequence")
-    # 本地失联阶梯阈值
-    local_after = parse_define_int(
-        wifi_h, "ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS")
-    local_resets = parse_define_int(
-        wifi_h, "ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS")
-    assert_eq(local_after, 1800000, "default local-link MCU recovery after")
-    assert_eq(local_resets, 2, "default local-link MCU recovery radio resets")
-    # 时间基：两次 radio reset 的最坏耗时必须小于本地阶梯时长，否则真失联时阶梯永不触发。
-    # 每组 6 连败最坏 ≈ 1 个 20s 观察窗 + stuck 提前重启余量，保守按 2*connect_timeout
-    # + 3*fast + 2*slow + settle；两组需严格小于 local_after。
+    # 时间基：新节奏下攒满阶梯所需的 2 次 radio reset 的最坏耗时必须小于本地阶梯
+    # 时长（30min），否则真失联时阶梯永不触发。首次 reset 最坏约一组失败窗，第二次
+    # 必须等 10min 绝对冷却 + 最多一轮慢重试。
     connect_timeout = parse_define_int(
         wifi_h, "ESP8266BASE_WIFI_CONNECT_TIMEOUT")
-    worst_two_resets = 2 * (2 * connect_timeout + 3 * fast + 2 * slow + 500)
+    first_reset_worst = 2 * connect_timeout + 3 * fast + 2 * slow + 500
+    worst_two_resets = first_reset_worst + radio_reset_interval + slow
     if worst_two_resets >= local_after:
         fail("two radio resets worst-case (%dms) must be < local MCU recovery (%dms)"
              % (worst_two_resets, local_after))
@@ -224,8 +235,19 @@ def test_wifi_retry_rules() -> None:
                   "WiFi radio reset start diagnostic")
     require_token(wifi_cpp, "station_radio_reset_complete",
                   "WiFi radio reset completion diagnostic")
-    require_token(wifi_cpp, "_failuresSinceRadioReset >= ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT",
-                  "WiFi radio reset failure threshold")
+    # radio reset 资格必须在 WiFi 层重试调度内、每次失败重新评估；冷却/预算不合格
+    # 时走普通慢重试布臂，不能提前 return（否则退化成无间隔重关联）。
+    require_token(wifi_cpp, "_radioGate.onFailure(now)",
+                  "radio reset eligibility evaluated inside the retry scheduler")
+    require_token(core_h, "RADIO_RESET_MIN_INTERVAL_MS",
+                  "radio reset cadence enforced by the pure core")
+    require_token(core_h, "RADIO_RESET_WINDOW_BUDGET",
+                  "radio reset per-window budget in the pure core")
+    sched = wifi_cpp[wifi_cpp.index("void Esp8266BaseWiFi::_scheduleRetry()"):]
+    gate_pos = sched.index("_radioGate.onFailure(now)")
+    arm_pos = sched.index("_connectStart = 0;", gate_pos)
+    if not (sched.index("if (_radioGate.onFailure(now))") < arm_pos):
+        fail("radio reset gate must be evaluated before the normal slow-retry arm")
     # radio reset 分层：WiFi 层只请求，主类消费并在有序停网后物理执行。
     require_token(wifi_cpp, "requestRadioReset",
                   "WiFi local failures must request (not directly perform) radio reset")
@@ -248,12 +270,21 @@ def test_wifi_retry_rules() -> None:
                   "owner must consume radio reset requests")
     require_token(base_cpp, "executeRadioReset",
                   "owner must perform the physical radio reset")
-    require_token(base_cpp, "WiFiUDP::stopAll()",
-                  "owner must close UDP PCBs before WIFI_OFF")
-    require_token(base_cpp, "WiFiClient::stopAll()",
-                  "owner must close TCP PCBs before WIFI_OFF")
-    require_token(base_cpp, "suspendForRadioReset",
-                  "owner must suspend the Web listener before WIFI_OFF")
+    # 有序停网顺序：mDNS 自持 UdpContext → Web listen → 其余 UDP → TCP → WIFI_OFF。
+    def _pos(token, after=0):
+        i = base_cpp.find(token, after)
+        if i < 0:
+            fail("ordered teardown missing token: %s" % token)
+        return i
+    p_mdns = _pos("Esp8266BaseMDNS::stop();")
+    p_web = _pos("suspendForRadioReset()", p_mdns)
+    p_udp = _pos("WiFiUDP::stopAll()", p_web)
+    p_tcp = _pos("WiFiClient::stopAll()", p_udp)
+    p_exec = _pos("executeRadioReset()", p_tcp)
+    if not (p_mdns < p_web < p_udp < p_tcp < p_exec):
+        fail("radio reset must stop mDNS, web, UDP, TCP in order before WIFI_OFF")
+    require_token(read("src/Esp8266BaseMDNS.cpp"), "MDNS.end()",
+                  "mDNS must release its self-owned UdpContext before radio reset")
     require_token(base_cpp, "_handleLocalLinkRecovery",
                   "owner must run the local-link outage MCU ladder")
     if "ESP.restart()" in wifi_cpp:
@@ -285,6 +316,23 @@ def test_wifi_retry_rules() -> None:
     require_token(networking, "密码可以为空，用于连接开放 WiFi", "WiFi open network doc")
     require_token(api, "避免 Config 中保存的值与实际 `WiFi.begin()` 使用的截断值不一致",
                   "WiFi credential truncation doc")
+
+    # 纯核 host 实编译 + 断言（与固件共用同一份 LinkRecoveryCore.h），覆盖 radio reset
+    # 冷却/预算与 30min 失联阶梯的全部分支，含 millis 跨 2^32 回绕。
+    cxx = shutil.which("clang++") or shutil.which("g++")
+    if not cxx:
+        fail("no C++ compiler available for link-recovery core host test")
+    with tempfile.TemporaryDirectory() as tmp:
+        binary = Path(tmp) / "link_recovery_core_test"
+        compiled = subprocess.run(
+            [cxx, "-std=c++17", "-Wall", "-Wextra",
+             str(ROOT / "tools/link_recovery_core_host_test.cpp"), "-o", str(binary)],
+            capture_output=True, text=True)
+        if compiled.returncode != 0:
+            fail("link-recovery core host test compile error:\n" + compiled.stderr)
+        ran = subprocess.run([str(binary)], capture_output=True, text=True)
+        if ran.returncode != 0:
+            fail("link-recovery core host test failed:\n" + ran.stdout + ran.stderr)
 
 
 def test_ntp_manual_packet_validation() -> None:
@@ -550,7 +598,7 @@ def test_watchdog_and_ota_failure_contract() -> None:
         fail("Watchdog must not keep WDT pending compatibility key")
     require_token(watchdog_doc, "异步监护回调只写 RTC user memory", "Watchdog no-Flash timeout doc")
     require_token(watchdog_doc, "64-70", "Watchdog RTC reserved words doc")
-    require_token(memory_doc, "144B DRAM + 28B RTC", "Watchdog RTC memory budget")
+    require_token(memory_doc, "152B DRAM + 28B RTC", "Watchdog RTC memory budget")
     require_token(memory_doc, "RTC user memory word 64-70", "Watchdog RTC memory budget detail")
     require_token(watchdog_cpp, "ESP8266BASE_RECOVERY_HEALTHY_RESET_MS", "30-minute application-ready chain reset")
     require_token(watchdog_cpp, "_restartsInWindow", "trusted 24-hour restart budget")
@@ -575,416 +623,6 @@ def test_watchdog_and_ota_failure_contract() -> None:
     require_token(ota_cpp, "OTA_PROGRESS_STEP = 25", "OTA progress log step")
     require_token(ota_cpp, '_failUpload(500, "Update failed: write failed", true,',
                   "OTA write failure immediate closeout")
-
-
-def legacy_mqtt_terminal_and_ota_lifecycle_contract() -> None:
-    options_h = read("src/Esp8266BaseOptions.h")
-    base_cpp = read("src/Esp8266Base.cpp")
-    mqtt_h = read("src/Esp8266BaseMQTT.h")
-    mqtt_cpp = read("src/Esp8266BaseMQTT.cpp")
-    web_cpp = read("src/Esp8266BaseWeb.cpp")
-    web_h = read("src/Esp8266BaseWeb.h")
-    ota_cpp = read("src/Esp8266BaseOTA.cpp")
-    ota_h = read("src/Esp8266BaseOTA.h")
-    terminal_ini = read("examples/mqtt_terminal/platformio.ini")
-    terminal_example = read("examples/mqtt_terminal/src/main.cpp")
-    upload_script = read("tools/ota_upload.sh")
-    config_cpp = read("src/Esp8266BaseConfig.cpp")
-
-    require_token(options_h, "#define ESP8266BASE_PROFILE_MQTT_TERMINAL 0", "MQTT_TERMINAL default")
-    require_token(options_h, '#define ESP8266BASE_TERMINAL_HOME_PATH "/health"',
-                  "MQTT_TERMINAL default home")
-    require_token(options_h, 'ESP8266BASE_PROFILE_MQTT_TERMINAL must be 0 or 1', "profile value guard")
-    for dependency in ["ESP8266BASE_USE_WEB", "ESP8266BASE_USE_OTA", "ESP8266BASE_USE_NTP",
-                       "ESP8266BASE_USE_WATCHDOG", "ESP8266BASE_USE_MQTT"]:
-        require_token(options_h, f"ESP8266BASE_PROFILE_MQTT_TERMINAL && !{dependency}",
-                      f"MQTT_TERMINAL requires {dependency}")
-    require_token(terminal_ini, "-DESP8266BASE_PROFILE_MQTT_TERMINAL=1", "MQTT_TERMINAL build")
-    require_token(terminal_ini, "bertmelis/espMqttClient @ 1.7.3", "pinned MQTT client")
-    require_token(terminal_ini, "-DEMC_MIN_FREE_MEMORY=4096", "ESP8266 MQTT outbox reserve")
-    require_token(terminal_ini, "-DESP8266BASE_WEB_MAX_APP_PAGES=0", "zero page capacity")
-    require_token(terminal_ini, "-DESP8266BASE_WEB_MAX_APP_APIS=0", "zero API capacity")
-    require_token(web_h, "#if ESP8266BASE_WEB_MAX_APP_PAGES > 0", "page array compile exclusion")
-    require_token(web_h, "#if ESP8266BASE_WEB_MAX_APP_APIS > 0", "API array compile exclusion")
-
-    begin_start = web_cpp.index("bool Esp8266BaseWeb::begin()")
-    begin_end = web_cpp.index("void Esp8266BaseWeb::handle()", begin_start)
-    begin_body = web_cpp[begin_start:begin_end]
-    for route in ["/wifi", "/auth", "/health"]:
-        require_token(begin_body, f'_server.on("{route}"', f"terminal retained route {route}")
-    require_token(begin_body, '_server.on("/",       HTTP_GET,  _handleTerminalRoot);',
-                  "terminal root route")
-    root_start = web_cpp.index("void Esp8266BaseWeb::_handleTerminalRoot()")
-    root_end = web_cpp.index("#endif", root_start)
-    root_body = web_cpp[root_start:root_end]
-    require_token(root_body, 'Esp8266BaseWiFiState::AP_CONFIG', "AP root state check")
-    require_token(root_body, '_redirect("/wifi")', "AP root WiFi redirect")
-    require_token(root_body, '_redirect(ESP8266BASE_TERMINAL_HOME_PATH)',
-                  "STA configurable terminal home redirect")
-    full_guard_start = begin_body.index("#if !ESP8266BASE_PROFILE_MQTT_TERMINAL")
-    full_guard_end = begin_body.index("#endif", full_guard_start)
-    full_routes = begin_body[full_guard_start:full_guard_end]
-    for route in ["/esp8266base", "/logs", "/system", "/reboot"]:
-        require_token(full_routes, route, f"full-only route {route}")
-    require_token(ota_cpp, 'server().on("/ota", HTTP_POST', "OTA POST route independent of GET page")
-    if '_server.on("/ota",    HTTP_GET' not in web_cpp:
-        fail("full Web mode OTA GET route missing")
-    require_token(web_h, "ESP8266BASE_USE_OTA && !ESP8266BASE_PROFILE_MQTT_TERMINAL",
-                  "MQTT_TERMINAL OTA GET exclusion")
-
-    # WiFi and NTP must gate every MQTT/TLS attempt; loop/connect happen only afterward.
-    handle_start = mqtt_cpp.index("void Esp8266BaseMQTT::handle()")
-    handle_end = mqtt_cpp.index("uint16_t Esp8266BaseMQTT::publish", handle_start)
-    mqtt_handle = mqtt_cpp[handle_start:handle_end]
-    wifi_gate = mqtt_handle.index("!Esp8266BaseWiFi::isConnected()")
-    ntp_gate = mqtt_handle.index("!Esp8266BaseNTP::isSynced()")
-    shutdown_gate = mqtt_handle.index("if (_shutdownActive)")
-    client_loop = mqtt_handle.index("\n    mqttClient.loop();", ntp_gate)
-    connect_gate = mqtt_handle.index("if (!_connectAttemptsEnabled)")
-    connect_call = mqtt_handle.index("mqttClient.connect()")
-    if not (shutdown_gate < wifi_gate < ntp_gate < client_loop < connect_gate < connect_call):
-        fail("MQTT handle must gate client loop/new connects on WiFi, NTP and business permission")
-
-    base_handle_start = base_cpp.index("void Esp8266Base::handle()")
-    base_handle_end = base_cpp.index("void Esp8266Base::logDiagnostics()", base_handle_start)
-    base_handle = base_cpp[base_handle_start:base_handle_end]
-    if base_handle.index("Esp8266BaseWeb::handle()") > base_handle.index("Esp8266BaseMQTT::handle()"):
-        fail("Web handle must run before potentially blocking MQTT connect work")
-
-    for state in ["UNCONFIGURED", "WAITING_WIFI", "WAITING_TIME", "BACKOFF",
-                  "CONNECTING", "CONNECTED", "SHUTDOWN_WAIT_ACK",
-                  "SHUTDOWN_DISCONNECTING", "PAUSED"]:
-        require_token(mqtt_h, state, f"MQTT state {state}")
-    require_token(mqtt_cpp, "if (_retryDelay < ESP8266BASE_MQTT_RETRY_MAX_MS)", "bounded backoff")
-    require_token(mqtt_cpp, "_retryDelay * 2UL", "exponential backoff")
-    require_token(mqtt_cpp, "return (int32_t)(now - due) >= 0;", "wrap-safe retry due check")
-    delays = []
-    delay = 2000
-    for _ in range(7):
-        delays.append(delay)
-        delay = min(delay * 2, 60000)
-    if delays != [2000, 4000, 8000, 16000, 32000, 60000, 60000]:
-        fail("MQTT backoff model is not bounded exponential")
-    def due(now: int, deadline: int) -> bool:
-        delta = (now - deadline) & 0xFFFFFFFF
-        signed = delta if delta < 0x80000000 else delta - 0x100000000
-        return signed >= 0
-    if due(0xFFFFFFF0, 0x00000010) or not due(0x00000010, 0xFFFFFFF0):
-        fail("MQTT retry due policy is not uint32 wrap-safe")
-    require_token(mqtt_cpp, "if (_connectedCallback) _connectedCallback(sessionPresent);",
-                  "business resubscribe callback on every connect")
-    require_token(mqtt_cpp, "ota_pause ready=%s result=%u heap=%u max=%u",
-                  "OTA post-TLS-release heap diagnostic")
-    require_token(mqtt_h, "static bool requestReconnect();", "deferred reconnect public API")
-    require_token(mqtt_h, "static bool markConnectionReady();", "application ready public API")
-    require_token(mqtt_h, "static void setConnectAttemptsEnabled(bool enabled);",
-                  "new connection gate public API")
-    require_token(mqtt_h, "static bool connectAttemptsEnabled();",
-                  "new connection gate query API")
-    setter_start = mqtt_cpp.index("void Esp8266BaseMQTT::setConnectAttemptsEnabled")
-    setter_end = mqtt_cpp.index("bool Esp8266BaseMQTT::connectAttemptsEnabled", setter_start)
-    setter_body = mqtt_cpp[setter_start:setter_end]
-    require_token(setter_body, "_connectAttemptsEnabled = enabled;", "new connection gate state")
-    if "mqttClient.disconnect(" in setter_body or "mqttClient.connect()" in setter_body:
-        fail("setConnectAttemptsEnabled must not synchronously change transport")
-    request_start = mqtt_cpp.index("bool Esp8266BaseMQTT::requestReconnect()")
-    request_end = mqtt_cpp.index("bool Esp8266BaseMQTT::markConnectionReady()", request_start)
-    request_body = mqtt_cpp[request_start:request_end]
-    require_token(request_body, "_reconnectRequested = true;", "deferred reconnect request flag")
-    if "mqttClient.disconnect" in request_body or "mqttClient.connect" in request_body:
-        fail("requestReconnect must not change transport synchronously")
-    reconnect_branch = mqtt_handle.index("if (_reconnectRequested)")
-    ordinary_loop = mqtt_handle.index("\n    mqttClient.loop();", reconnect_branch)
-    if not ntp_gate < reconnect_branch < ordinary_loop:
-        fail("deferred reconnect must run after network gates and before ordinary MQTT work")
-    reconnect_body = mqtt_handle[reconnect_branch:ordinary_loop]
-    for token in ["_reconnectRequested = false;", "mqttClient.disconnect(true);",
-                  "_scheduleRetry();", "return;"]:
-        require_token(reconnect_body, token, f"deferred reconnect handling {token}")
-    require_token(reconnect_body,
-                  "mqttClient.disconnected() && _state != Esp8266BaseMQTTState::BACKOFF",
-                  "async disconnect callback double-schedule guard")
-    ready_start = mqtt_cpp.index("bool Esp8266BaseMQTT::markConnectionReady()")
-    ready_end = mqtt_cpp.index("bool Esp8266BaseMQTT::connected()", ready_start)
-    ready_body = mqtt_cpp[ready_start:ready_end]
-    for token in ["_configured", "_begun", "_shutdownActive", "_reconnectRequested",
-                  "mqttClient.connected()", "_retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS;"]:
-        require_token(ready_body, token, f"application ready boundary {token}")
-    on_connect_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onConnect")
-    on_connect_end = mqtt_cpp.index("void Esp8266BaseMQTT::_onDisconnect", on_connect_start)
-    on_connect_body = mqtt_cpp[on_connect_start:on_connect_end]
-    if "_retryDelay = ESP8266BASE_MQTT_RETRY_INITIAL_MS" in on_connect_body:
-        fail("CONNACK must not reset application handshake backoff")
-    handshake_delay = 2000
-    handshake_schedule = []
-    for _ in range(7):
-        handshake_schedule.append(handshake_delay)
-        # CONNACK intentionally preserves the current value.
-        handshake_delay = min(handshake_delay * 2, 60000)
-    if handshake_schedule != [2000, 4000, 8000, 16000, 32000, 60000, 60000]:
-        fail("application handshake failures must retain bounded exponential backoff")
-    handshake_delay = 2000  # markConnectionReady contract
-    if handshake_delay != 2000:
-        fail("application readiness must restore initial ordinary-disconnect backoff")
-    disconnect_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onDisconnect")
-    disconnect_end = mqtt_cpp.index("void Esp8266BaseMQTT::_onMessage", disconnect_start)
-    disconnect_body = mqtt_cpp[disconnect_start:disconnect_end]
-    require_token(disconnect_body, "_reconnectRequested = false;",
-                  "completed transport release clears deferred request")
-    clean_session_guard = disconnect_body.index("if (_cleanSession)")
-    queue_size = disconnect_body.index("mqttClient.queueSize()", clean_session_guard)
-    clear_session_queue = disconnect_body.index("mqttClient.clearQueue(true)", queue_size)
-    business_disconnect = disconnect_body.index("if (_disconnectedCallback)", clear_session_queue)
-    if not clean_session_guard < queue_size < clear_session_queue < business_disconnect:
-        fail("clean-session disconnect must discard queued session data before business reconnect")
-    require_token(disconnect_body, "session_queue_discarded clean_session=yes packets=%u",
-                  "clean-session queue discard diagnostic")
-
-    # Controlled shutdown is one fixed contract: retained QoS1 enqueue, exact PUBACK,
-    # graceful DISCONNECT, then a paused terminal state until explicit resume.
-    begin_shutdown = mqtt_cpp[mqtt_cpp.index("bool Esp8266BaseMQTT::beginShutdown("):
-                              mqtt_cpp.index("Esp8266BaseMQTTShutdownResult Esp8266BaseMQTT::shutdownResult")]
-    for token in ["mqttClient.publish(topic, 1, true, payload, length)",
-                  "Esp8266BaseMQTTShutdownResult::PUBLISH_FAILED",
-                  "_finishShutdown(Esp8266BaseMQTTShutdownResult::PUBLISH_FAILED)",
-                  "_shutdownActive = true;"]:
-        require_token(begin_shutdown, token, f"controlled shutdown start {token}")
-    graceful_start = mqtt_cpp.index("void Esp8266BaseMQTT::_startGracefulDisconnect()")
-    graceful_end = mqtt_cpp.index("void Esp8266BaseMQTT::_finishShutdown", graceful_start)
-    graceful_body = mqtt_cpp[graceful_start:graceful_end]
-    require_token(graceful_body, "mqttClient.disconnect(false)", "normal MQTT DISCONNECT")
-    if "disconnect(true)" in graceful_body:
-        fail("controlled shutdown must never force disconnect and risk LWT overwrite")
-    publish_ack_start = mqtt_cpp.index("void Esp8266BaseMQTT::_onPublishAck")
-    publish_ack_end = mqtt_cpp.index("void Esp8266BaseMQTT::_onClientError", publish_ack_start)
-    publish_ack_body = mqtt_cpp[publish_ack_start:publish_ack_end]
-    exact_ack = publish_ack_body.index("packetId == _shutdownPacketId")
-    graceful_after_ack = publish_ack_body.index("_startGracefulDisconnect();", exact_ack)
-    ignored_ack = publish_ack_body.index("shutdown_ack_ignored", graceful_after_ack)
-    if not exact_ack < graceful_after_ack < ignored_ack:
-        fail("only the exact shutdown PUBACK may advance graceful disconnect")
-    shutdown_handle_start = mqtt_cpp.index("void Esp8266BaseMQTT::_handleShutdown()")
-    shutdown_handle_end = mqtt_cpp.index("void Esp8266BaseMQTT::resumeAfterShutdown", shutdown_handle_start)
-    shutdown_handle = mqtt_cpp[shutdown_handle_start:shutdown_handle_end]
-    for token in ["PUBACK_TIMEOUT", "DISCONNECT_TIMEOUT"]:
-        require_token(shutdown_handle, token, f"bounded shutdown failure {token}")
-    timeout_branch = shutdown_handle[shutdown_handle.index("SHUTDOWN_WAIT_ACK"):]
-    if timeout_branch.index("mqttClient.clearQueue(true)") > timeout_branch.index("PUBACK_TIMEOUT"):
-        fail("PUBACK timeout must discard the stale final packet before recovery")
-    resume_start = mqtt_cpp.index("void Esp8266BaseMQTT::resumeAfterShutdown()")
-    resume_end = mqtt_cpp.index("bool Esp8266BaseMQTT::pauseForOTA()", resume_start)
-    resume_body = mqtt_cpp[resume_start:resume_end]
-    require_token(resume_body, "_shutdownActive = false;", "explicit shutdown recovery")
-    require_token(resume_body, "reconnect=yes", "explicit reconnect recovery diagnostic")
-    require_token(resume_body, "_state = Esp8266BaseMQTTState::UNCONFIGURED;",
-                  "unconfigured OTA failure recovery state")
-    ota_pause_start = mqtt_cpp.index("bool Esp8266BaseMQTT::pauseForOTA()")
-    ota_pause_end = mqtt_cpp.index("void Esp8266BaseMQTT::resumeAfterOTAFailure", ota_pause_start)
-    ota_pause_body = mqtt_cpp[ota_pause_start:ota_pause_end]
-    for token in ["!_configured || !_begun", "mqttClient.disconnected()",
-                  "Esp8266BaseMQTTShutdownResult::NOT_CONNECTED",
-                  "_shutdownActive = true;", "_state = Esp8266BaseMQTTState::PAUSED;"]:
-        require_token(ota_pause_body, token, f"OTA inactive-transport pause {token}")
-    if "shutdownSucceeded()" in ota_pause_body:
-        fail("OTA readiness must not require or forge shutdown SUCCESS when no transport is active")
-    inactive_gate = ota_pause_body.index("if (!mqttClient.disconnected())")
-    missing_shutdown_failure = ota_pause_body.index("return false;", inactive_gate)
-    enter_inactive_pause = ota_pause_body.index("_shutdownActive = true;", missing_shutdown_failure)
-    transport_ready = ota_pause_body.index("bool ready = mqttClient.disconnected();",
-                                           enter_inactive_pause)
-    if not inactive_gate < missing_shutdown_failure < enter_inactive_pause < transport_ready:
-        fail("OTA pause must reject active/busy transport and accept only fully disconnected transport")
-    for blocked_api in ["uint16_t Esp8266BaseMQTT::publish", "uint16_t Esp8266BaseMQTT::subscribe",
-                        "bool Esp8266BaseMQTT::requestReconnect", "bool Esp8266BaseMQTT::markConnectionReady"]:
-        start = mqtt_cpp.index(blocked_api)
-        end = mqtt_cpp.index("\n}", start)
-        require_token(mqtt_cpp[start:end], "_shutdownActive", f"paused API gate {blocked_api}")
-
-    # Executable transition vectors cover success, mismatched ACK, enqueue failure,
-    # ACK timeout, normal disconnect completion, and explicit recovery.
-    def shutdown_vector(enqueued: bool, acks: list[int], expected: int,
-                        ack_timeout: bool, disconnect_reason: str) -> tuple[str, bool, bool]:
-        paused = True
-        if not enqueued:
-            return ("publish_failed", paused, False)
-        matched = any(packet_id == expected for packet_id in acks)
-        if not matched:
-            return ("puback_timeout" if ack_timeout else "in_progress", paused, False)
-        if disconnect_reason == "user_ok":
-            return ("success", paused, True)
-        return ("connection_lost", paused, False)
-
-    vectors = [
-        (shutdown_vector(True, [41], 41, False, "user_ok"), ("success", True, True)),
-        (shutdown_vector(True, [40], 41, False, "none"), ("in_progress", True, False)),
-        (shutdown_vector(False, [], 0, False, "none"), ("publish_failed", True, False)),
-        (shutdown_vector(True, [], 41, True, "none"), ("puback_timeout", True, False)),
-        (shutdown_vector(True, [41], 41, False, "tcp_lost"), ("connection_lost", True, False)),
-    ]
-    for actual, expected in vectors:
-        if actual != expected:
-            fail(f"controlled shutdown vector mismatch: {actual} != {expected}")
-
-    # OTA readiness is separate from final-message success. An absent/released transport
-    # may proceed with an honest non-success result; active or connecting transports may not.
-    def ota_pause_vector(configured: bool, begun: bool, transport: str,
-                         shutdown_started: bool, shutdown_terminal: bool,
-                         shutdown_result: str) -> tuple[bool, str]:
-        if not configured or not begun:
-            return (True, "not_connected")
-        if not shutdown_started:
-            if transport != "disconnected":
-                return (False, shutdown_result)
-            return (True, "not_connected")
-        if not shutdown_terminal:
-            return (False, shutdown_result)
-        return (transport == "disconnected", shutdown_result)
-
-    ota_vectors = [
-        (ota_pause_vector(False, False, "disconnected", False, False, "none"),
-         (True, "not_connected")),
-        (ota_pause_vector(True, False, "disconnected", False, False, "none"),
-         (True, "not_connected")),
-        (ota_pause_vector(True, True, "disconnected", False, False, "none"),
-         (True, "not_connected")),
-        (ota_pause_vector(True, True, "connected", False, False, "none"),
-         (False, "none")),
-        (ota_pause_vector(True, True, "connecting", False, False, "none"),
-         (False, "none")),
-        (ota_pause_vector(True, True, "connected", True, True, "publish_failed"),
-         (False, "publish_failed")),
-        (ota_pause_vector(True, True, "disconnected", True, True, "success"),
-         (True, "success")),
-        (ota_pause_vector(True, True, "disconnected", True, True, "connection_lost"),
-         (True, "connection_lost")),
-    ]
-    for actual, expected in ota_vectors:
-        if actual != expected:
-            fail(f"OTA pause vector mismatch: {actual} != {expected}")
-    require_token(mqtt_cpp, "missing_required_config", "missing MQTT config failure")
-    require_token(mqtt_cpp, "config.password == nullptr || config.password[0] == '\\0' ||",
-                  "password requires username")
-    require_token(mqtt_cpp, "config.willTopic != nullptr && config.willTopic[0] != '\\0'",
-                  "LWT payload requires topic")
-    require_token(mqtt_cpp, ".setBufferSizes(4096, 1024)", "reliable TLS buffer baseline")
-    if "EMC_RX_BUFFER_SIZE" in mqtt_cpp or "EMC_TX_BUFFER_SIZE" in terminal_ini:
-        fail("MQTT_TERMINAL must not shrink espMqttClient communication buffers")
-    for api in ["publish", "subscribe", "setWill", "setKeepAlive", "onMessage", "onDisconnect",
-                "onSubscribe", "onPublish", "setClientErrorCallback"]:
-        require_token(mqtt_cpp, api, f"MQTT transport API {api}")
-    require_token(terminal_example, "Esp8266BaseMQTT::setCallbacks", "generic MQTT callback example")
-    require_token(terminal_example, "Esp8266BaseMQTT::requestReconnect()",
-                  "application readiness reconnect example")
-    require_token(terminal_example, "Esp8266BaseMQTT::markConnectionReady()",
-                  "application readiness success example")
-    for callback in ["onMqttSubscribeAck", "onMqttPublishAck", "onMqttClientError"]:
-        require_token(terminal_example, callback, f"MQTT example callback {callback}")
-    require_token(mqtt_cpp, "class DiagnosticSecureClient", "private diagnostic secure client")
-    require_token(mqtt_cpp, "State::disconnectingTcp1", "TLS error capture before transport release")
-    require_token(mqtt_cpp, "getLastSSLError", "BearSSL last TLS error capture")
-    require_token(mqtt_cpp, "clearTlsError();", "clear stale TLS error before connect")
-    require_token(mqtt_cpp, "suback_rejected", "SUBACK rejection diagnostic")
-    require_token(mqtt_cpp, "client_error", "MQTT client error diagnostic")
-    require_token(mqtt_h, "lastTlsErrorCode", "TLS error code diagnostic API")
-    require_token(mqtt_h, "lastTlsErrorText", "TLS error text diagnostic API")
-    require_token(mqtt_h, "Esp8266BaseMQTTSubscribeAckCallback", "stable SUBACK callback API")
-    require_token(mqtt_h, "Esp8266BaseMQTTPublishAckCallback", "stable publish ack callback API")
-    require_token(mqtt_h, "Esp8266BaseMQTTClientError", "stable client error mapping")
-    if "espMqttClientTypes" in mqtt_h or "espMqttClient.h" in mqtt_h:
-        fail("third-party MQTT types must not leak into the public header")
-
-    diagnostic_start = mqtt_cpp.index("class DiagnosticSecureClient")
-    diagnostic_end = mqtt_cpp.index("}  // namespace Esp8266BaseMQTTInternal", diagnostic_start)
-    diagnostic = mqtt_cpp[diagnostic_start:diagnostic_end]
-    base_loop = diagnostic.index("MqttClient::loop();")
-    first_capture = diagnostic.index("captureTlsError();")
-    second_capture = diagnostic.index("captureTlsError();", first_capture + 1)
-    if not first_capture < base_loop < second_capture:
-        fail("TLS error capture must bracket the third-party loop before transport release")
-
-    prepare_call = ota_cpp.index("_prepareCallback(_failureMessage")
-    update_begin = ota_cpp.index("Update.begin(ESP.getFreeSketchSpace())")
-    if prepare_call >= update_begin:
-        fail("OTA prepare callback must run before Update.begin")
-    rejection_return = ota_cpp.index("return;", prepare_call)
-    mqtt_pause = ota_cpp.index("Esp8266BaseMQTT::pauseForOTA()", prepare_call)
-    if not (rejection_return < mqtt_pause < update_begin):
-        fail("OTA prepare rejection must leave MQTT untouched; accepted prepare must pause MQTT before Update.begin")
-    require_token(ota_cpp, "if (_prepareCallback &&", "optional prepare callback")
-    require_token(ota_cpp, "if (_failureCallback)", "optional failure callback")
-    require_token(ota_cpp, "if (_successCallback)", "optional success callback")
-    require_token(ota_cpp, "if (_failureNotified) return;", "failure callback once guard")
-    require_token(ota_cpp, "_failureNotified = false;", "failure callback per-request reset")
-    fail_start = ota_cpp.index("void Esp8266BaseOTA::_failUpload")
-    fail_end = ota_cpp.index("// ----------------------------------------------------------------------------", fail_start)
-    fail_body = ota_cpp[fail_start:fail_end]
-    if not (fail_body.index("_resumeWatchdog();") <
-            fail_body.index("Esp8266BaseMQTT::resumeAfterOTAFailure();") <
-            fail_body.index("_notifyFailure(failure);")):
-        fail("OTA failure must restore Watchdog and MQTT before business callback")
-    success_start = ota_cpp.index("void Esp8266BaseOTA::_notifySuccess()")
-    success_end = ota_cpp.index("void Esp8266BaseOTA::_failUpload", success_start)
-    success_body = ota_cpp[success_start:success_end]
-    require_token(success_body, "Esp8266BaseMQTT::keepPausedAfterOTASuccess();",
-                  "OTA success keeps MQTT paused")
-    for failure in ["UNAUTHORIZED", "INVALID_FIRMWARE", "PREPARE_REJECTED",
-                    "UPDATE_BEGIN_FAILED", "UPDATE_WRITE_FAILED", "UPDATE_END_FAILED",
-                    "UPLOAD_ABORTED", "NO_FIRMWARE_DATA", "CONFIG_FLUSH_FAILED",
-                    "FILELOG_FLUSH_FAILED", "MQTT_PAUSE_FAILED", "PREPARE_TIMEOUT"]:
-        require_token(ota_h, failure, f"OTA failure reason {failure}")
-    require_token(ota_cpp, "pre_reboot_config_flush_failed", "OTA config flush failure diagnostic")
-    require_token(ota_cpp, "action=abort_update", "OTA flush failure aborts update")
-    config_flush = ota_cpp.index("if (!Esp8266BaseConfig::flush())")
-    update_end = ota_cpp.index("if (Update.end(true))")
-    if config_flush >= update_end:
-        fail("OTA Config flush must succeed before Update.end(true)")
-    require_token(ota_cpp, '"Config flush failed; update aborted", true,',
-                  "OTA Config flush failure aborts Update")
-    require_token(ota_cpp, "保留首个失败的 HTTP 状态", "OTA first failure status preservation")
-    require_token(ota_cpp, "if (_status == 200 && (!_started || _uploadedBytes == 0))",
-                  "OTA completion preserves prior rejection status")
-    require_token(ota_cpp, "upload_failed status=%u", "OTA failure diagnostic before state reset")
-    require_token(ota_cpp, "_resetRequestState();\n    }", "OTA failure internal state reset")
-
-    for token in ["firmware", "version", "uptime", "heap", "maxBlock", "wifi",
-                  "wifiSsid", "wifiRssi", "ip",
-                  "ntp", "mqtt", "mqttConnected", "mqttAttempt", "mqttLastReason",
-                  "mqttTlsError", "lastWdtReset", "otaInProgress"]:
-        require_token(web_cpp, token, f"health field {token}")
-    health_start = web_cpp.index("void Esp8266BaseWeb::_handleHealth()")
-    health_end = web_cpp.index("void Esp8266BaseWeb::_handleNotFound()", health_start)
-    if "lastTlsErrorText" in web_cpp[health_start:health_end]:
-        fail("health endpoint must not expose long TLS error text")
-    web_json = read("src/Esp8266BaseWebJson.h")
-    require_token(web_json, "char chunk_[96];", "health/hostname bounded JSON buffer")
-    require_token(web_cpp, "WebJsonWriter json(_writeWebJson, &output);", "production bounded JSON encoder")
-    require_token(web_cpp, "output.startedMs", "whole-response write budget")
-    if any(int(size) > 100 for size in re.findall(r"\bchar\s+\w+\[(\d+)\]", web_cpp)):
-        fail("Web must not reintroduce >100B temporary character arrays")
-    require_token(web_json, "sink_(reinterpret_cast<const uint8_t*>(chunk_), used_, context_)",
-                  "JSON sink receives buffered chunks, not individual bytes")
-
-    require_token(upload_script, "--fail-with-body", "curl body-preserving fail support")
-    require_token(upload_script, "exit 22", "legacy curl explicit HTTP failure")
-    if "--fail --fail-with-body" in upload_script or "--fail-with-body --fail" in upload_script:
-        fail("OTA upload script must not combine mutually exclusive curl fail options")
-    require_token(upload_script, 'firmware=@${firmware}', "curl firmware field")
-    require_token(upload_script, "Firmware size:", "OTA script firmware size output")
-    require_token(upload_script, "HTTP result:", "OTA script HTTP result output")
-    require_token(upload_script, "Device response:", "OTA script response output")
-    require_token(ota_cpp, "OTA_RESPONSE_ACK_TIMEOUT_MS = 1500",
-                  "OTA success response bounded ACK wait")
-    require_token(ota_cpp, "response_delivered=%s", "OTA response delivery diagnostic")
-    require_token(ota_cpp, "_status == 200 && !_started && _uploadedBytes == 0",
-                  "OTA empty POST prepare dispatch")
-    require_token(ota_cpp, 'Content-Length: 5\\r\\nConnection: close\\r\\n\\r\\nREADY',
-                  "OTA prepare readiness response")
-    require_token(ota_cpp, "OTA_PREPARE_LEASE_MS = 15000UL", "OTA bounded prepare lease")
-    require_token(base_cpp, "Esp8266BaseOTA::handle();", "OTA prepare lease main-loop handling")
-
-    for token in [".tmp", ".bak", "verify_failed", "backup_rename_failed",
-                  "commit_rename_failed", "LittleFS.rename(bak, path)"]:
-        require_token(config_cpp, token, f"Config recovery invariant {token}")
 
 
 def test_fixed_mqtt_terminal_and_ota_lifecycle_contract() -> None:

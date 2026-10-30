@@ -27,7 +27,7 @@ run git diff --check
 run bash tools/check_static.sh
 run python3 tools/check_logic.py
 run python3 tools/test_resource_budget.py
-run python3 tools/test_local_recovery.py
+run python3 tools/test_config_mdns_host.py
 run python3 tools/test_mqtt_prepare.py
 run bash tools/test_record_store.sh
 run bash tools/test_mqtt_fixed.sh

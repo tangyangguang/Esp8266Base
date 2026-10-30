@@ -114,10 +114,7 @@ private:
     // 本地链路长期失联阶梯（只认 STA 本地状态，不看云端）：连续不可用达到时长且
     // 期间本地 radio reset 增量达阈值，才申请受控 MCU 重启；guard/cooldown/预算在
     // Watchdog 内。WiFi 关联正常但外网断时不 arm。
-    static bool     _linkOutageActive;       // 1B：当前是否处于本地失联窗口
-    static uint32_t _linkOutageStartedAt;    // 4B：窗口起点 millis
-    static uint8_t  _linkOutageRadioBaseline;// 1B：窗口起点 radioResetCount
-    static uint32_t _linkRestartRetryAt;     // 4B：拒绝后低率重试
+    static Esp8266BaseLinkRecoveryCore::LinkRestartLadder _linkLadder;  // 纯核阶梯
     static void _handleLocalLinkRecovery(bool wifiConnected);
 #endif
 };

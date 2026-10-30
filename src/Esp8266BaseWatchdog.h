@@ -78,6 +78,11 @@ public:
     // 30 分钟只打断连续重启链；可信 UTC 下的 24 小时预算独立保留。
     static void setApplicationReady(bool ready);
 
+    // 本地链路健康（仅 STA 关联成功、非 AP 配网态），与云端 application-ready
+    // 相互独立：云端长期不通但 WiFi 关联正常时，连续本地健康 30 分钟同样只清
+    // 连续重启链，避免纯外网故障吃光后续 LOOP_STALL 合法重启预算。
+    static void setLocalLinkHealthy(bool healthy);
+
     // 立即执行注册的 emergency-stop 安全回调（未注册则 no-op），不评估重启预算、
     // 不自行重启。供人工 Web 软重启等非看门狗路径复用同一条“先断开受控输出”原语，
     // 保证断输出优先于网络回复、落盘和复位。
@@ -127,6 +132,8 @@ private:
     static uint32_t _resetCount;
     static uint32_t _startedMs;
     static uint32_t _applicationReadySinceMs;
+    static bool _localLinkHealthy;
+    static uint32_t _localLinkHealthySinceMs;
     static uint32_t _budgetWindowStartedEpoch;
     static uint32_t _trustedEpoch;
     static volatile uint32_t _heartbeat;

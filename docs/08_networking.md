@@ -75,7 +75,7 @@ station_connect_stuck_restarting ssid=IOTHOME status=WL_DISCONNECTED status_code
 station_connect_stuck_retrying ssid=IOTHOME status=WL_DISCONNECTED status_code=7 elapsed=7000ms restart_count=1 rssi=-72
 station_connect_timeout ssid=IOTHOME status=WL_NO_SSID_AVAIL status_code=1 elapsed=20000ms rssi=-76
 station_reconnect_scheduled attempt=1 retry_in=2s mode=fast status=WL_DISCONNECTED status_code=6 rssi=-76
-station_radio_reset_begin failures=6 total_attempts=9 status=WL_DISCONNECTED status_code=7
+station_radio_reset_begin window_resets=1 failures=6 total_attempts=9 status=WL_DISCONNECTED status_code=7
 station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 ```
 
@@ -92,11 +92,19 @@ station_radio_reset_complete reset_count=1 off=ok sta=ok action=reconnect
 
 如果连接开始后持续停在 `WL_DISCONNECTED` 且超过 `ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS`，默认 7s，本库会记录 `station_connect_stuck_restarting` 并提前重启本轮 `WiFi.begin()`，避免 ESP8266 WiFi SDK 卡住时白等完整 20s。每个连接 attempt 最多做 1 次 stuck restart；如果重启后仍然卡住，会记录 `station_connect_stuck_retrying` 并进入快速重试，不再继续等满 20s。
 
-普通连接 attempt 连续失败达到 `ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT`（默认 6）时，WiFi 层只**请求**一次 radio reset（`requestRadioReset(STATE_MACHINE)`），由 `Esp8266Base` 主类在同一主循环上下文先有序关闭上层网络（Web :80 监听、全部 UDP/TCP PCB），再执行唯一的物理恢复：断开 STA、切换 `WIFI_OFF`、等待 `ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新调用 `WiFi.begin()`。先停 socket 是为了避免活跃 PCB 在 `WIFI_OFF→netif_remove` 时触发 use-after-free 崩溃。这用于恢复路由器晚于终端启动或路由器重启时，ESP8266 SDK 可能长期停在 station 连接状态的问题。radio reset 不重启 MCU、不清除 Config、不进入 AP；已有业务仍按本地状态机运行。路由器持续不可用时，每 6 次失败最多一次 radio reset，连接成功后重新计数。
+普通连接 attempt 连续失败达到 `RADIO_RESET_FAILURE_THRESHOLD`（默认 6）时，WiFi 层在重试调度 `_scheduleRetry()` 内每次失败都重新评估资格，满足才**请求**一次 radio reset（`requestRadioReset()`）；不满足则走与普通慢重试完全相同的布臂，绝不提前 return（否则会退化成无间隔重关联）。由 `Esp8266Base` 主类在同一主循环上下文先**按序**关闭上层网络——mDNS 自持 `UdpContext`（`Esp8266BaseMDNS::stop()`→`MDNS.end()`，它不在 `WiFiUDP::stopAll()` 链表里）、Web :80 监听、其余全部 UDP/TCP PCB——再执行唯一物理恢复：断开 STA、`WIFI_OFF`、等待 `RADIO_RESET_SETTLE_MS`（默认 100ms）、恢复 `WIFI_STA` 并重新 `WiFi.begin()`。先停 socket 是为了避免活跃 PCB 在 `WIFI_OFF→netif_remove` 时触发 use-after-free 崩溃（边界：Core 的 netif 状态回调不会因 `MDNS.end()` 注销，WIFI_OFF 仍可能 queue 一次内部 mDNS restart，且已 accept 未读的 backlog TCP 无公开 API 可丢弃，这两类残留面靠真机长稳证据兜底）。
 
-**分层原则（设备只负责“设备↔路由器”这一段）**：WiFi radio reset 只由本地链路证据触发（CONNECTING 连续失败）。MQTT/TLS/DNS 等**云端传输失败不再拆电台**——STA 可能本地关联正常、只是路由器 WAN 或 broker 不可达，冷拆电台只会砸掉可用的局域网并在弱信号下冷重连极慢；云端失败只在 MQTT 层退避重连。
+radio reset 是针对“ESP8266 SDK station 软卡死、不再重连”这一本地故障的**低频最后手段**，不是常规重试，节奏由纯核 `Esp8266BaseLinkRecoveryCore::RadioResetGate` 决定：
 
-**本地链路长期失联的受控 MCU 重启阶梯**：`Esp8266Base` 主类按 STA 本地状态（不看云端）维护失联窗口——连续 `!isConnected()`（非 AP 配网态）达到 `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_AFTER_MS`（默认 30min）且窗口内本地 radio reset 增量达到 `ESP8266BASE_LOCAL_LINK_MCU_RECOVERY_RADIO_RESETS`（默认 2），才通过 Watchdog 申请一次受 guard/冷却/预算约束的 `NETWORK_UNRECOVERABLE` 重启，拒绝后按 60s 低率重试。WiFi 关联正常但外网断时不 arm；路由器关机/纯关联失败时仍能按授权恢复。
+- **本 boot 首次**：连续 6 败即触发（约 2 分钟），保留历史确证的快速自愈；
+- **其后绝对冷却**：距上次 reset 不足 `RADIO_RESET_MIN_INTERVAL_MS`（默认 10min）时，即使失败满 6 次也只做普通 10s 慢重试；冷却一到，下一次失败立即触发，不必再攒满 6 次；
+- **每失联窗口预算**：`RADIO_RESET_WINDOW_BUDGET`（默认 3）次，之后本窗口不再冷拆电台，只靠 SDK + 10s 慢重试；任意一次成功关联清零窗口预算与连续失败计数，但**不清绝对冷却**（偶发 flap 不会解除“≤1 次/10min”安全带）。
+
+因此错密码/路由器长期关机/持续弱信号下，reset 只出现在约失联后 **2min / 12min / 22min** 共 3 次然后停止，而不是过去的约每 2 分钟一次（冷关联在 -80dBm 下可能拖死自己）。radio reset 不重启 MCU、不清除 Config、不进入 AP；已有业务仍按本地状态机运行。
+
+**分层原则（设备只负责“设备↔路由器”这一段）**：WiFi radio reset 只由本地链路证据触发（CONNECTING 连续失败），且不区分断连 reason——弱信号也会伪装成鉴权/握手失败，硬分类脆弱。MQTT/TLS/DNS 等**云端传输失败不拆电台**——STA 可能本地关联正常、只是路由器 WAN 或 broker 不可达，冷拆电台只会砸掉可用的局域网并在弱信号下冷重连极慢；云端失败只在 MQTT 层退避重连。
+
+**本地链路长期失联的受控 MCU 重启阶梯**：纯核 `LinkRestartLadder` 按 STA 本地状态（不看云端）维护失联窗口——连续 `!isConnected()`（非 AP 配网态）达到 `LINK_RESTART_AFTER_MS`（默认 30min）且窗口内本地 radio reset 增量达到 `LINK_RESTART_MIN_RADIO_RESETS`（默认 2），才通过 Watchdog 申请一次受 guard/冷却/预算约束的 `NETWORK_UNRECOVERABLE` 重启，拒绝后按 `LINK_RESTART_RETRY_MS`（默认 60s）低率重试。在上述冷却节奏下，第 2 次 radio reset 约在失联 12min 完成，故首次有效 MCU 重启约在失联 30min；重启后因 RTC marker，第二次网络重启最早在新 boot 60min，连续链 2 次后封死。WiFi 关联正常但外网断时不 arm；注册了 restart guard 的业务（如运行中的继电器）会拒绝该重启，停机后 60s 内补发。另：Watchdog 连续重启链除云端 `setApplicationReady()` 外，也可由**本地 STA 连续健康 30min**（`setLocalLinkHealthy()`）清零，避免纯外网长期不通吃光后续 `LOOP_STALL` 合法重启预算；24h 可信窗口预算不受此影响。
 
 `/health` 的 `wifiSsid` / `wifiRssi` 表示当前 STA WiFi 名称和 RSSI(dBm)，`wifiAttempt` 和 `wifiRadioReset` 分别表示本次启动累计 `WiFi.begin()` 次数和 radio reset 次数，可在恢复后确认信号环境及是否走过升级恢复路径。该接口无需认证，因此 SSID 对同一局域网可见。
 

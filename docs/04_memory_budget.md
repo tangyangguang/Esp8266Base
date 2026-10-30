@@ -90,7 +90,7 @@ python3 tools/check_resource_budget.py \
 | Esp8266BaseLog | <= 16B | runtime/serial level + timeFn/hook/internal hook；格式缓冲在栈上 |
 | Esp8266BaseFileLog | <= 80B 默认；INFO 文件缓存另加 <=512B | mode/path/current size/dir state；默认 ERROR 时不编译低优先级缓存 |
 | Esp8266BaseConfig | <= 432B | deferred 队列 + _ready + audit flags + deferred flush timer |
-| Esp8266BaseWiFi | <= 384B | 状态/计时器及恢复计数(22B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B)；上层假在线恢复不新增缓冲 |
+| Esp8266BaseWiFi | <= 384B | 状态/计时器(15B) + radio reset 冷却/预算纯核 RadioResetGate(6B) + _apSSID(28B) + _ip(16B) + _staSSID(64B) + _staPass(64B)；上层假在线恢复不新增缓冲 |
 | Esp8266BaseWeb | <= 1.20KB | ESP8266WebServer(~272B) + AppRoute 4×52+6×52=520B + auth/device/home/hostname/firmware/title/labels/active request + 4B 表单令牌；页面临时缓冲在栈上 |
 | Esp8266BaseWeb（MQTT_TERMINAL 0+0 路由） | <= 640B | ESP8266WebServer + auth/device/hostname/firmware/active request + 4B 表单令牌；应用数组和完整导航状态均排除 |
 | Esp8266BaseOTA | <= 160B | 上传状态/计时 + 两阶段准备租约状态 + 64B 固定失败原因 + 三个可选生命周期函数指针 |
@@ -99,7 +99,7 @@ python3 tools/check_resource_budget.py \
 | Esp8266BaseNTP | <= 232B（2026-10-27 ELF 实测自有静态约 170B） | 可信闘锁/双源采集状态与计时器、两个 16B 样本、双 IP 缓存、8B nonce、UDP 控制块、32B 服务器名缓存、20B 时间串与 RTT/一致窗证据 |
 | Esp8266BaseMDNS | <= 96B | 运行状态 |
 | Esp8266BaseSleep | <= 48B | _wakeReason ptr(4B) + _initialized(1B) + _modemSleeping(1B) |
-| Esp8266BaseWatchdog | <= 144B DRAM + 28B RTC | SDK timer + heartbeat/阶段 + timeout/pause/count + application-ready 计时 + 两套预算 + 最近拒绝快照 + 两个安全函数指针；RTC user memory word 64-70 保存恢复原因、预算与校验 |
+| Esp8266BaseWatchdog | <= 152B DRAM + 28B RTC | SDK timer + heartbeat/阶段 + timeout/pause/count + application-ready 计时 + 本地链路健康计时(5B) + 两套预算 + 最近拒绝快照 + 两个安全函数指针；RTC user memory word 64-70 保存恢复原因、预算与校验 |
 | **核心裁剪目标（自有）** | **< 1.25KB** | Log + Config + WiFi + Sleep + Watchdog + 默认 FileLog，不含 Web/OTA/NTP/mDNS 和 Arduino SDK 内部开销 |
 | **全模块默认目标（自有）** | **<= 2.9KB** | Web/OTA/NTP/mDNS/Sleep/Watchdog 全开，默认 ERROR FileLog，无 INFO 缓存 |
 | **全模块 INFO FileLog 目标（自有）** | **<= 3.4KB** | 全模块默认目标 + INFO 文件日志缓存，缓存上限仍为单个静态缓冲 512B |

@@ -16,12 +16,10 @@ uint32_t             Esp8266BaseWiFi::_connectStart   = 0;
 uint32_t             Esp8266BaseWiFi::_retryAt        = 0;
 uint8_t              Esp8266BaseWiFi::_retryCount     = 0;
 bool                 Esp8266BaseWiFi::_stuckRestarted = false;
-uint8_t              Esp8266BaseWiFi::_failuresSinceRadioReset = 0;
+Esp8266BaseLinkRecoveryCore::RadioResetGate Esp8266BaseWiFi::_radioGate;
 uint16_t             Esp8266BaseWiFi::_attemptCount   = 0;
 uint8_t              Esp8266BaseWiFi::_radioResetCount = 0;
-uint8_t              Esp8266BaseWiFi::_radioResetRequest = 0;
-Esp8266BaseRadioResetSource Esp8266BaseWiFi::_lastRadioResetSource =
-    Esp8266BaseRadioResetSource::STATE_MACHINE;
+bool                 Esp8266BaseWiFi::_radioResetRequest = false;
 char                 Esp8266BaseWiFi::_apSSID[28]     = "";
 char                 Esp8266BaseWiFi::_ip[16]         = "";
 char                 Esp8266BaseWiFi::_staSSID[64]    = "";
@@ -56,14 +54,16 @@ bool Esp8266BaseWiFi::begin() {
     WiFi.setSleepMode(WIFI_MODEM_SLEEP);
     ESP8266BASE_LOG_I_P("WiFi", "sleep_policy=modem_sleep_min level=min_dtim_wake");
 #endif
-    ESP8266BASE_LOG_I_P("WiFi", "wifi_retry_policy connect_timeout=%lus sta_settle=%ums stuck_disconnected=%lus fast_retry=%lus fast_count=%u slow_retry=%lus radio_reset_failures=%u radio_settle=%ums",
+    ESP8266BASE_LOG_I_P("WiFi", "wifi_retry_policy connect_timeout=%lus sta_settle=%ums stuck_disconnected=%lus fast_retry=%lus fast_count=%u slow_retry=%lus radio_reset_failures=%u radio_cooldown=%lus radio_budget=%u radio_settle=%ums",
                       (unsigned long)(ESP8266BASE_WIFI_CONNECT_TIMEOUT / 1000UL),
                       (unsigned)ESP8266BASE_WIFI_STA_SETTLE_MS,
                       (unsigned long)(ESP8266BASE_WIFI_STUCK_DISCONNECTED_MS / 1000UL),
                       (unsigned long)(ESP8266BASE_WIFI_RETRY_FAST / 1000UL),
                       (unsigned)ESP8266BASE_WIFI_RETRY_FAST_COUNT,
                       (unsigned long)(ESP8266BASE_WIFI_RETRY_SLOW / 1000UL),
-                      (unsigned)ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT,
+                      (unsigned)Esp8266BaseLinkRecoveryCore::RADIO_RESET_FAILURE_THRESHOLD,
+                      (unsigned long)(Esp8266BaseLinkRecoveryCore::RADIO_RESET_MIN_INTERVAL_MS / 1000UL),
+                      (unsigned)Esp8266BaseLinkRecoveryCore::RADIO_RESET_WINDOW_BUDGET,
                       (unsigned)ESP8266BASE_WIFI_RADIO_RESET_SETTLE_MS);
 
     // 读取凭证并缓存，后续重连直接使用缓存，避免重复读 Flash
@@ -233,7 +233,7 @@ bool Esp8266BaseWiFi::connect(const char* ssid, const char* pass) {
     }
 
     _retryCount = 0;
-    _failuresSinceRadioReset = 0;
+    _radioGate.onNewCredentials();
     _startSTA(_staSSID, _staPass);
     return true;
 }
@@ -300,43 +300,35 @@ uint8_t Esp8266BaseWiFi::radioResetCount() {
     return _radioResetCount;
 }
 
-Esp8266BaseRadioResetSource Esp8266BaseWiFi::lastRadioResetSource() {
-    return _lastRadioResetSource;
-}
-
 // ----------------------------------------------------------------------------
 // radio reset 分层请求（不在此处触碰电台，由 Esp8266Base 主类消费后有序停网）
 // ----------------------------------------------------------------------------
-bool Esp8266BaseWiFi::requestRadioReset(Esp8266BaseRadioResetSource source) {
+bool Esp8266BaseWiFi::requestRadioReset() {
     if (_staSSID[0] == '\0' || _state == Esp8266BaseWiFiState::AP_CONFIG) return false;
     // 仅保留最早的 pending 请求，避免重复；主类每轮只消费一次。
-    if (_radioResetRequest == 0U) {
-        _radioResetRequest = static_cast<uint8_t>(source);
-    }
+    _radioResetRequest = true;
     return true;
 }
 
-bool Esp8266BaseWiFi::consumeRadioResetRequest(Esp8266BaseRadioResetSource& source) {
-    if (_radioResetRequest == 0U) return false;
-    source = static_cast<Esp8266BaseRadioResetSource>(_radioResetRequest);
-    _radioResetRequest = 0U;
+bool Esp8266BaseWiFi::consumeRadioResetRequest() {
+    if (!_radioResetRequest) return false;
+    _radioResetRequest = false;
     return true;
 }
 
-void Esp8266BaseWiFi::executeRadioReset(Esp8266BaseRadioResetSource source) {
-    _lastRadioResetSource = source;
+void Esp8266BaseWiFi::executeRadioReset() {
     const uint8_t status = (uint8_t)WiFi.status();
     ESP8266BASE_LOG_W_P("WiFi",
-                      "station_radio_reset_begin source=%u failures=%u total_attempts=%u status=%s status_code=%u",
-                      (unsigned)static_cast<uint8_t>(source),
-                      (unsigned)_failuresSinceRadioReset,
+                      "station_radio_reset_begin window_resets=%u failures=%u total_attempts=%u status=%s status_code=%u",
+                      (unsigned)(_radioGate.windowResets + 1U),
+                      (unsigned)_radioGate.failures,
                       (unsigned)_attemptCount,
                       _statusName(status),
                       (unsigned)status);
 
     // 普通 disconnect + begin 仍可能保留 ESP8266 SDK 的卡滞 station 状态。
     // 只重置无线子系统，不重启 MCU、不触碰 Config，也不切换到配置 AP。
-    // 调用方（Esp8266Base 主类）必须已在此前有序关闭 Web/UDP/TCP socket，
+    // 调用方（Esp8266Base 主类）必须已在此前有序关闭 mDNS/Web/UDP/TCP socket，
     // 否则活跃 PCB 在 netif 摘除时会触发 use-after-free 崩溃。
     WiFi.disconnect(false, false);
     const bool offOk = WiFi.mode(WIFI_OFF);
@@ -347,15 +339,14 @@ void Esp8266BaseWiFi::executeRadioReset(Esp8266BaseRadioResetSource source) {
     if (_radioResetCount < 0xFFU) {
         _radioResetCount++;
     }
-    _failuresSinceRadioReset = 0;
+    _radioGate.onResetExecuted(millis());
 #if ESP8266BASE_USE_JOURNAL
-    Esp8266BaseJournal::record(JNL_RADIO_RESET,
-                               static_cast<uint8_t>(source),
+    // flags=0：来源唯一（本地状态机），该字节保留；p1 为累计 reset 次数。
+    Esp8266BaseJournal::record(JNL_RADIO_RESET, 0,
                                static_cast<int16_t>(_radioResetCount), 0, 0);
 #endif
     ESP8266BASE_LOG_W_P("WiFi",
-                      "station_radio_reset_complete source=%u reset_count=%u off=%s sta=%s action=reconnect",
-                      (unsigned)static_cast<uint8_t>(source),
+                      "station_radio_reset_complete reset_count=%u off=%s sta=%s action=reconnect",
                       (unsigned)_radioResetCount,
                       offOk ? "ok" : "failed",
                       staOk ? "ok" : "failed");
@@ -426,7 +417,7 @@ void Esp8266BaseWiFi::_handleConnected() {
 #endif
     _retryCount    = 0;
     _stuckRestarted = false;
-    _failuresSinceRadioReset = 0;
+    _radioGate.onLinkHealthy();
     char gateway[16];
     char dns[16];
     _formatIP(WiFi.gatewayIP(), gateway, sizeof(gateway));
@@ -439,14 +430,14 @@ void Esp8266BaseWiFi::_scheduleRetry() {
     if (_retryCount < 0xFF) {
         _retryCount++;
     }
-    if (_failuresSinceRadioReset < 0xFFU) {
-        _failuresSinceRadioReset++;
-    }
-    if (ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT > 0 &&
-        _failuresSinceRadioReset >= ESP8266BASE_WIFI_RADIO_RESET_FAILURE_COUNT) {
-        // 只置请求；真正的 WIFI_OFF 由 Esp8266Base 主类在本轮 WiFi::handle()
-        // 之后、有序停网后立即消费执行（executeRadioReset 内部 _beginSTA 重置计时）。
-        requestRadioReset(Esp8266BaseRadioResetSource::STATE_MACHINE);
+    const uint32_t now = millis();
+    // 资格判定必须在本函数内、且每次失败都重新评估。返回 true 才置 radio reset
+    // 请求（主类本轮消费后 executeRadioReset 会重置计时）；返回 false（失败数不足/
+    // 10min 冷却中/窗口预算用完）必须与普通慢重试走完全相同的布臂，不能提前 return，
+    // 否则下一帧会落入 stuck 分支立即重关联，退化成无间隔重连。
+    if (_radioGate.onFailure(now)) {
+        // 此处必在 CONNECTING 且有凭证，requestRadioReset() 不会拒绝；返回值仅作防御。
+        requestRadioReset();
         return;
     }
     uint32_t interval = (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT)
@@ -458,7 +449,7 @@ void Esp8266BaseWiFi::_scheduleRetry() {
                       (_retryCount <= ESP8266BASE_WIFI_RETRY_FAST_COUNT) ? "fast" : "slow",
                       _statusName(status), (unsigned)status, (int)WiFi.RSSI());
     _connectStart = 0;
-    _retryAt      = millis() + interval;
+    _retryAt      = now + interval;
     _stuckRestarted = false;
 }
 
