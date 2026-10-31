@@ -118,7 +118,7 @@ static bool _isLikelyEsp8266Firmware(const uint8_t* data, size_t len, const char
 // ----------------------------------------------------------------------------
 bool Esp8266BaseOTA::begin() {
     if (!Esp8266BaseWeb::isRunning()) {
-        ESP8266BASE_LOG_E("OTA ", "Web not running, cannot register OTA route");
+        ESP8266BASE_LOG_E_P("OTA ", "Web not running, cannot register OTA route");
         return false;
     }
 
@@ -128,7 +128,7 @@ bool Esp8266BaseOTA::begin() {
         _handleUploadChunk      // 接收每个数据块
     );
 
-    ESP8266BASE_LOG_I("OTA ", "ota_upload_route_registered method=POST path=/ota");
+    ESP8266BASE_LOG_I_P("OTA ", "ota_upload_route_registered method=POST path=/ota");
     return true;
 }
 
@@ -308,7 +308,7 @@ void Esp8266BaseOTA::_handleUploadComplete() {
         Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
         _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
         _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-        ESP8266BASE_LOG_I("OTA ", "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s response_delivered=%s action=reboot",
+        ESP8266BASE_LOG_I_P("OTA ", "upload_success uploaded=%s elapsed=%s average_speed=%s free_heap=%s response_delivered=%s action=reboot",
                           uploadedBuf, elapsedBuf, rateBuf, heapBuf,
                           responseDelivered ? "yes" : "no");
         delay(500);
@@ -321,7 +321,7 @@ void Esp8266BaseOTA::_handleUploadComplete() {
         Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
         _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
         _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-        ESP8266BASE_LOG_E("OTA ", "upload_failed status=%u uploaded=%s elapsed=%s average_speed=%s error=%s",
+        ESP8266BASE_LOG_E_P("OTA ", "upload_failed status=%u uploaded=%s elapsed=%s average_speed=%s error=%s",
                           (unsigned)_status, uploadedBuf, elapsedBuf, rateBuf,
                           _failureMessage);
         _resetRequestState();
@@ -386,7 +386,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         _resetRequestState(usePrepared);
         if (!Esp8266BaseWeb::verifyAuth()) {
             _failUpload(401, "Unauthorized", false, Esp8266BaseOTAFailure::UNAUTHORIZED);
-            ESP8266BASE_LOG_W("OTA ", "upload_rejected reason=unauthorized");
+            ESP8266BASE_LOG_W_P("OTA ", "upload_rejected reason=unauthorized");
             return;
         }
 
@@ -401,7 +401,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
         Esp8266BaseUtil::formatBytes(ESP.getFreeSketchSpace(), spaceBuf, sizeof(spaceBuf));
         Esp8266BaseUtil::formatBytes(_requestBytes, requestBuf, sizeof(requestBuf));
-        ESP8266BASE_LOG_I("OTA ", "upload_started file=%s request_total=%s started_ms=%lu free_heap=%s sketch_space=%s",
+        ESP8266BASE_LOG_I_P("OTA ", "upload_started file=%s request_total=%s started_ms=%lu free_heap=%s sketch_space=%s",
                           upload.filename.c_str(), requestBuf,
                           (unsigned long)_startedMs, heapBuf, spaceBuf);
 
@@ -413,7 +413,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             if (!_isLikelyEsp8266Firmware(upload.buf, upload.currentSize, &reason)) {
                 _failUpload(400, "Invalid firmware: not an ESP8266 app image", false,
                             Esp8266BaseOTAFailure::INVALID_FIRMWARE);
-                ESP8266BASE_LOG_E("OTA ", "upload_rejected reason=%s detail=not_esp8266_firmware", reason);
+                ESP8266BASE_LOG_E_P("OTA ", "upload_rejected reason=%s detail=not_esp8266_firmware", reason);
                 return;
             }
             _failureMessage[0] = '\0';
@@ -425,7 +425,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
                     _failureMessage[sizeof(_failureMessage) - 1] = '\0';
                 }
                 _failUpload(409, _failureMessage, false, Esp8266BaseOTAFailure::PREPARE_REJECTED);
-                ESP8266BASE_LOG_W("OTA ", "upload_rejected reason=application_prepare detail=%s",
+                ESP8266BASE_LOG_W_P("OTA ", "upload_rejected reason=application_prepare detail=%s",
                                   _failureMessage);
                 return;
             }
@@ -436,7 +436,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             if (!_prepared && !Esp8266BaseMQTT::pauseForOTA()) {
                 _failUpload(503, "MQTT/TLS did not stop for OTA", false,
                             Esp8266BaseOTAFailure::MQTT_PAUSE_FAILED);
-                ESP8266BASE_LOG_E("OTA ", "upload_rejected reason=mqtt_pause_failed");
+                ESP8266BASE_LOG_E_P("OTA ", "upload_rejected reason=mqtt_pause_failed");
                 return;
             }
 #endif
@@ -444,7 +444,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             if (!Update.begin(ESP.getFreeSketchSpace())) {
                 _failUpload(500, "Update failed: begin failed", false,
                             Esp8266BaseOTAFailure::UPDATE_BEGIN_FAILED);
-                ESP8266BASE_LOG_E("OTA ", "update_begin_failed error=%s", Update.getErrorString().c_str());
+                ESP8266BASE_LOG_E_P("OTA ", "update_begin_failed error=%s", Update.getErrorString().c_str());
                 return;
             }
             _updateStarted = true;
@@ -460,7 +460,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
             _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
             _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-            ESP8266BASE_LOG_E("OTA ", "update_write_failed uploaded=%s elapsed=%s average_speed=%s error=%s",
+            ESP8266BASE_LOG_E_P("OTA ", "update_write_failed uploaded=%s elapsed=%s average_speed=%s error=%s",
                               uploadedBuf, elapsedBuf, rateBuf, _failureMessage);
         } else {
             _uploadedBytes = uploadedNow;
@@ -479,7 +479,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
                     Esp8266BaseUtil::formatBytes(_requestBytes, requestBuf, sizeof(requestBuf));
                     _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
                     _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-                    ESP8266BASE_LOG_I("OTA ", "upload_progress progress=%u%% bytes=%s request_total=%s speed=%s elapsed=%s",
+                    ESP8266BASE_LOG_I_P("OTA ", "upload_progress progress=%u%% bytes=%s request_total=%s speed=%s elapsed=%s",
                                       (unsigned)_lastProgressPct, uploadedBuf, requestBuf, rateBuf, elapsedBuf);
                 }
             }
@@ -498,13 +498,13 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         if (!_updateStarted || _uploadedBytes == 0) {
             _failUpload(400, "Invalid upload: no firmware data", false,
                         Esp8266BaseOTAFailure::NO_FIRMWARE_DATA);
-            ESP8266BASE_LOG_E("OTA ", "upload_rejected reason=no_firmware_data");
+            ESP8266BASE_LOG_E_P("OTA ", "upload_rejected reason=no_firmware_data");
             _resumeWatchdog();
             return;
         }
 #if ESP8266BASE_USE_CONFIG
         if (!Esp8266BaseConfig::flush()) {
-            ESP8266BASE_LOG_E("OTA ", "pre_reboot_config_flush_failed pending=%u action=abort_update",
+            ESP8266BASE_LOG_E_P("OTA ", "pre_reboot_config_flush_failed pending=%u action=abort_update",
                               (unsigned)Esp8266BaseConfig::pendingCount());
             _failUpload(500, "Config flush failed; update aborted", true,
                         Esp8266BaseOTAFailure::CONFIG_FLUSH_FAILED);
@@ -513,7 +513,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
 #endif
 #if ESP8266BASE_USE_FILELOG
         if (!Esp8266BaseFileLog::flush()) {
-            ESP8266BASE_LOG_E("OTA ", "pre_reboot_filelog_flush_failed action=abort_update");
+            ESP8266BASE_LOG_E_P("OTA ", "pre_reboot_filelog_flush_failed action=abort_update");
             _failUpload(500, "Log flush failed; update aborted", true,
                         Esp8266BaseOTAFailure::FILELOG_FLUSH_FAILED);
             return;
@@ -530,7 +530,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
             _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
             _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-            ESP8266BASE_LOG_I("OTA ", "upload_finished uploaded=%s elapsed=%s average_speed=%s free_heap=%s",
+            ESP8266BASE_LOG_I_P("OTA ", "upload_finished uploaded=%s elapsed=%s average_speed=%s free_heap=%s",
                               uploadedBuf, elapsedBuf, rateBuf, heapBuf);
         } else {
             _updateStarted = false;
@@ -543,7 +543,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
             Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
             _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
             _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-            ESP8266BASE_LOG_E("OTA ", "update_end_failed uploaded=%s elapsed=%s average_speed=%s error=%s",
+            ESP8266BASE_LOG_E_P("OTA ", "update_end_failed uploaded=%s elapsed=%s average_speed=%s error=%s",
                               uploadedBuf, elapsedBuf, rateBuf, Update.getErrorString().c_str());
         }
         _resumeWatchdog();
@@ -566,7 +566,7 @@ void Esp8266BaseOTA::_handleUploadChunk() {
         Esp8266BaseUtil::formatBytes(_uploadedBytes, uploadedBuf, sizeof(uploadedBuf));
         _formatSeconds(elapsed, elapsedBuf, sizeof(elapsedBuf));
         _formatRate(_uploadedBytes, elapsed, rateBuf, sizeof(rateBuf));
-        ESP8266BASE_LOG_W("OTA ", "upload_aborted uploaded=%s elapsed=%s average_speed=%s",
+        ESP8266BASE_LOG_W_P("OTA ", "upload_aborted uploaded=%s elapsed=%s average_speed=%s",
                           uploadedBuf, elapsedBuf, rateBuf);
     }
 }

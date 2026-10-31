@@ -25,7 +25,7 @@ static uint32_t _loadBootCount(const char* invalidAction) {
     if (valid) {
         count = (uint32_t)strtoul(raw, nullptr, 10);
     } else if (found) {
-        ESP8266BASE_LOG_W("Boot", "restart_count_invalid value=%s action=%s",
+        ESP8266BASE_LOG_W_P("Boot", "restart_count_invalid value=%s action=%s",
                           raw, invalidAction ? invalidAction : "use_0");
     }
 
@@ -43,7 +43,7 @@ static uint32_t _loadAndIncrementBootCount() {
     if (Esp8266BaseSleep::isDeepSleepWake()) {
         // skip restart_count increment: periodic deep sleep wake is a normal resume path.
         uint32_t count = _loadBootCount("skip_increment");
-        ESP8266BASE_LOG_I("Boot", "restart_count_skip reason=deep_sleep_wake value=%lu",
+        ESP8266BASE_LOG_I_P("Boot", "restart_count_skip reason=deep_sleep_wake value=%lu",
                           (unsigned long)count);
         return count;
     }
@@ -54,7 +54,7 @@ static uint32_t _loadAndIncrementBootCount() {
     if (count < 0xFFFFFFFFUL) {
         count++;
     } else {
-        ESP8266BASE_LOG_W("Boot", "restart_count_saturated value=%lu", (unsigned long)count);
+        ESP8266BASE_LOG_W_P("Boot", "restart_count_saturated value=%lu", (unsigned long)count);
     }
 
     char next[11];
@@ -120,7 +120,7 @@ void Esp8266Base::_resolveHostname() {
     const char* source = "default";
 
     if (!isValidHostname(selected)) {
-        ESP8266BASE_LOG_W("Base", "default_hostname_invalid value=%s action=fallback fallback=esp8266base",
+        ESP8266BASE_LOG_W_P("Base", "default_hostname_invalid value=%s action=fallback fallback=esp8266base",
                           selected ? selected : "(null)");
         selected = "esp8266base";
         source = "fallback";
@@ -142,16 +142,16 @@ void Esp8266Base::_resolveHostname() {
                 _hostname[sizeof(_hostname) - 1] = '\0';
                 source = "persisted";
             } else {
-                ESP8266BASE_LOG_W("Base", "persisted_hostname_invalid value=%s action=ignored default=%s",
+                ESP8266BASE_LOG_W_P("Base", "persisted_hostname_invalid value=%s action=ignored default=%s",
                                   persisted, _hostname);
             }
         }
     } else {
-        ESP8266BASE_LOG_W("Base", "hostname_config_unavailable action=use_default host=%s", _hostname);
+        ESP8266BASE_LOG_W_P("Base", "hostname_config_unavailable action=use_default host=%s", _hostname);
     }
 #endif
 
-    ESP8266BASE_LOG_I("Base", "hostname_resolved host=%s source=%s", _hostname, source);
+    ESP8266BASE_LOG_I_P("Base", "hostname_resolved host=%s source=%s", _hostname, source);
 }
 
 // ----------------------------------------------------------------------------
@@ -414,22 +414,22 @@ void Esp8266Base::logDiagnostics() {
     Esp8266BaseUtil::formatBytes(ESP.getFreeHeap(), heapBuf, sizeof(heapBuf));
     Esp8266BaseUtil::formatBytes(ESP.getMaxFreeBlockSize(), maxBuf, sizeof(maxBuf));
 
-    ESP8266BASE_LOG_I("Base", "firmware=%s version=%s hostname=%s free_heap=%s",
+    ESP8266BASE_LOG_I_P("Base", "firmware=%s version=%s hostname=%s free_heap=%s",
                       _fwName, _fwVersion, _hostname, heapBuf);
 
 #if ESP8266BASE_USE_SLEEP
-    ESP8266BASE_LOG_I("SLEP", "wake_reason=%s", Esp8266BaseSleep::wakeReason());
+    ESP8266BASE_LOG_I_P("SLEP", "wake_reason=%s", Esp8266BaseSleep::wakeReason());
 #else
-    ESP8266BASE_LOG_I("SLEP", "sleep_module=disabled");
+    ESP8266BASE_LOG_I_P("SLEP", "sleep_module=disabled");
 #endif
 
 #if ESP8266BASE_USE_CONFIG
-    ESP8266BASE_LOG_I("Cfg ", "config_ready=%s pending_writes=%d/%d",
+    ESP8266BASE_LOG_I_P("Cfg ", "config_ready=%s pending_writes=%d/%d",
                       Esp8266BaseConfig::isReady() ? "yes" : "no",
                       (int)Esp8266BaseConfig::pendingCount(),
                       ESP8266BASE_CFG_DEFERRED_SIZE);
 #else
-    ESP8266BASE_LOG_I("Cfg ", "config_module=disabled filesystem=%s",
+    ESP8266BASE_LOG_I_P("Cfg ", "config_module=disabled filesystem=%s",
                       ESP8266BASE_USE_FILESYSTEM ? "enabled" : "disabled");
 #endif
 
@@ -440,20 +440,20 @@ void Esp8266Base::logDiagnostics() {
 #else
         strncpy(ssid, Esp8266BaseWiFi::ssid(), sizeof(ssid) - 1);
 #endif
-        ESP8266BASE_LOG_I("WiFi", "saved_station_ssid=%s default_config_ap_ssid=%s",
+        ESP8266BASE_LOG_I_P("WiFi", "saved_station_ssid=%s default_config_ap_ssid=%s",
                           ssid, Esp8266BaseWiFi::apSSID());
     }
 
 #if ESP8266BASE_USE_WATCHDOG
-    ESP8266BASE_LOG_I("WDT ", "watchdog_enabled=yes previous_watchdog_reset=%s reset_count=%u",
+    ESP8266BASE_LOG_I_P("WDT ", "watchdog_enabled=yes previous_watchdog_reset=%s reset_count=%u",
                       Esp8266BaseWatchdog::wasWatchdogReset() ? "yes" : "no",
                       (unsigned)Esp8266BaseWatchdog::resetCount());
 #else
-    ESP8266BASE_LOG_I("WDT ", "watchdog_enabled=no");
+    ESP8266BASE_LOG_I_P("WDT ", "watchdog_enabled=no");
 #endif
 
 #if ESP8266BASE_USE_WEB
-    ESP8266BASE_LOG_I("Web ", "web_enabled=yes profile=%s ota_enabled=%s",
+    ESP8266BASE_LOG_I_P("Web ", "web_enabled=yes profile=%s ota_enabled=%s",
 #if ESP8266BASE_PROFILE_MQTT_TERMINAL
                       "mqtt_terminal",
 #else
@@ -466,19 +466,19 @@ void Esp8266Base::logDiagnostics() {
 #endif
     );
 #else
-    ESP8266BASE_LOG_I("Web ", "web_enabled=no ota_enabled=no");
+    ESP8266BASE_LOG_I_P("Web ", "web_enabled=no ota_enabled=no");
 #endif
 
 #if ESP8266BASE_USE_MQTT
-    ESP8266BASE_LOG_I("MQTT", "mqtt_enabled=yes configured=%s state=%s attempt=%lu",
+    ESP8266BASE_LOG_I_P("MQTT", "mqtt_enabled=yes configured=%s state=%s attempt=%lu",
                       Esp8266BaseMQTT::isConfigured() ? "yes" : "no",
                       Esp8266BaseMQTT::stateName(),
                       (unsigned long)Esp8266BaseMQTT::attemptCount());
 #else
-    ESP8266BASE_LOG_I("MQTT", "mqtt_enabled=no");
+    ESP8266BASE_LOG_I_P("MQTT", "mqtt_enabled=no");
 #endif
 
-    ESP8266BASE_LOG_I("Heap", "free_heap=%s max_block=%s", heapBuf, maxBuf);
+    ESP8266BASE_LOG_I_P("Heap", "free_heap=%s max_block=%s", heapBuf, maxBuf);
 }
 
 // ----------------------------------------------------------------------------

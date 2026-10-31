@@ -36,6 +36,9 @@
 
 ## 2026-10-31
 
+### 优化
+- **固定日志格式串全部 Flash 化，回收约 4.8KB 静态 DRAM**：Web/Config/OTA/Base 主类中剩余的 `ESP8266BASE_LOG_{I,W,E}` 字面量格式串此前驻留 DRAM `.rodata`，统一改用 `_P`（`PSTR`+`vsnprintf_P`），文案、级别、参数与运行行为不变。接入本库的 esp12f-relay 目标实测静态 RAM 54012→约 49.2KB（80KB 占用 66.0%→60.1%），Flash 基本不变；稳态空闲堆随之抬高约 4.7KB，使空闲堆重新越过 TLS 握手准入的 16KB 闸门，MQTT/TLS 在不降低任何准入/缓冲保护的前提下恢复可建连。与 2026-09 已完成的首批 51 处 Flash 化同手段，仅转换字面量调用；经变量传入的格式串不得套用 `_P`。
+
 ### 修复
 - **弱网合法重连不再被误判为主循环冻结而强制断开输出**：`handle()` 此前只给 NTP/Web/MQTT 段声明了看门狗阻塞预算，WiFi 段（被动掉线 `REATTACH` 的 `stopAll()+WiFi.begin()`、radio reset 的有序停网与 settle delay、恢复键门户回调内的同步结案）零记账。弱信号下这些秒级合法重连会累计成 `uncovered>=2.5s`，触发轮末 `LOOP_STALL` 先 `emergencyStop()` 断开执行器，表现为“请求 N 分钟、实际跑 1～2 分钟被设备安全断开”。现以新常量 `ESP8266BASE_WDT_WIFI_ACCOUNT_MS`（默认 5000ms，可编译覆盖）包裹整个 WiFi 动作段，与 NTP/Web/MQTT 同款 `account()`；预算只覆盖本段阻塞之和（每轮至多消费一个 station action），超出部分仍计 uncovered，永不返回的循环仍由独立的 90s stall os_timer 兜底，不削弱任何冻结/安全保护。
 

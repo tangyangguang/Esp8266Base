@@ -38,7 +38,7 @@ enum Esp8266BaseJournalKind : uint8_t {
     JNL_MQTT_UP = 5,
     JNL_MQTT_CLOSED = 6,
     JNL_RADIO_RESET = 7,
-    JNL_STALL = 8,        // f=watchdog phase, p1=timeout seconds
+    JNL_STALL = 8,        // f=watchdog phase, p1=uncovered seconds, p2=covered(declared budget) seconds
     JNL_NTP_SYNC = 9,
     JNL_BUSINESS = 10,
     JNL_RECOVERY = 11,    // f=action, p1=result/budget reason, p2/p3 optional

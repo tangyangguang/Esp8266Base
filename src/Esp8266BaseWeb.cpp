@@ -578,7 +578,7 @@ bool Esp8266BaseWeb::_verifyFormToken() {
     char* end = nullptr;
     const unsigned long value = strtoul(raw.c_str(), &end, 10);
     if (raw.length() > 0 && end && *end == '\0' && value == _formToken) return true;
-    ESP8266BASE_LOG_W("Web ", "form_rejected reason=invalid_csrf_token");
+    ESP8266BASE_LOG_W_P("Web ", "form_rejected reason=invalid_csrf_token");
     _server.send(403, "text/plain", "invalid form token");
     return false;
 }
@@ -639,7 +639,7 @@ bool Esp8266BaseWeb::begin() {
     _running = true;
     ESP8266BASE_LOG_I_P("Web ", "web_listener backlog=%u",
                       static_cast<unsigned>(ESP8266BASE_WEB_TCP_BACKLOG));
-    ESP8266BASE_LOG_I("Web ", "web_server_started profile=%s auth_required=yes builtin_routes=%u app_pages_registered=%d/%d app_apis_registered=%d/%d",
+    ESP8266BASE_LOG_I_P("Web ", "web_server_started profile=%s auth_required=yes builtin_routes=%u app_pages_registered=%d/%d app_apis_registered=%d/%d",
 #if ESP8266BASE_PROFILE_MQTT_TERMINAL
                       "mqtt_terminal", 8U,
 #else
@@ -671,7 +671,7 @@ void Esp8266BaseWeb::handle() {
 #if ESP8266BASE_LOG_LEVEL <= 0
         const char* method = _activeMethod[0] ? _activeMethod : "?";
         const char* uri = _activeUri[0] ? _activeUri : "(unknown)";
-        ESP8266BASE_LOG_D("Web ", "slow_request method=%s uri=%s elapsed=%lums",
+        ESP8266BASE_LOG_D_P("Web ", "slow_request method=%s uri=%s elapsed=%lums",
                           method, uri, (unsigned long)elapsed);
 #endif
     }
@@ -703,21 +703,21 @@ bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWeb
 #if ESP8266BASE_WEB_MAX_APP_PAGES == 0
     (void)title;
     (void)handler;
-    ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=capacity_disabled path=%s", path ? path : "(null)");
+    ESP8266BASE_LOG_W_P("Web ", "addPage_rejected reason=capacity_disabled path=%s", path ? path : "(null)");
     return false;
 #else
     if (!path || !handler) return false;
     if (!_running) {
-        ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=web_not_running path=%s", path);
+        ESP8266BASE_LOG_W_P("Web ", "addPage_rejected reason=web_not_running path=%s", path);
         return false;
     }
     if (!_isValidPath(path)) {
-        ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
+        ESP8266BASE_LOG_W_P("Web ", "addPage_rejected reason=invalid_path path=%s count=%u max=%u",
                           path, (unsigned)_pageCount, (unsigned)ESP8266BASE_WEB_MAX_APP_PAGES);
         return false;
     }
     if (_pageCount >= ESP8266BASE_WEB_MAX_APP_PAGES) {
-        ESP8266BASE_LOG_W("Web ", "addPage_rejected reason=table_full path=%s count=%u max=%u",
+        ESP8266BASE_LOG_W_P("Web ", "addPage_rejected reason=table_full path=%s count=%u max=%u",
                           path, (unsigned)_pageCount, (unsigned)ESP8266BASE_WEB_MAX_APP_PAGES);
         return false;
     }
@@ -743,7 +743,7 @@ bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWeb
         case 3: _server.on(path, HTTP_GET, _handleAppPage3); break;
         default: return false;
     }
-    ESP8266BASE_LOG_I("Web ", "app_page_registered path=%s title=%s app_pages_registered=%d/%d",
+    ESP8266BASE_LOG_I_P("Web ", "app_page_registered path=%s title=%s app_pages_registered=%d/%d",
                       path, _pages[index].title, (int)_pageCount, ESP8266BASE_WEB_MAX_APP_PAGES);
     return true;
 #endif
@@ -752,21 +752,21 @@ bool Esp8266BaseWeb::addPage(const char* path, const char* title, Esp8266BaseWeb
 bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
 #if ESP8266BASE_WEB_MAX_APP_APIS == 0
     (void)handler;
-    ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=capacity_disabled path=%s", path ? path : "(null)");
+    ESP8266BASE_LOG_W_P("Web ", "addApi_rejected reason=capacity_disabled path=%s", path ? path : "(null)");
     return false;
 #else
     if (!path || !handler) return false;
     if (!_running) {
-        ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=web_not_running path=%s", path);
+        ESP8266BASE_LOG_W_P("Web ", "addApi_rejected reason=web_not_running path=%s", path);
         return false;
     }
     if (!_isValidPath(path)) {
-        ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=invalid_path path=%s count=%u max=%u",
+        ESP8266BASE_LOG_W_P("Web ", "addApi_rejected reason=invalid_path path=%s count=%u max=%u",
                           path, (unsigned)_apiCount, (unsigned)ESP8266BASE_WEB_MAX_APP_APIS);
         return false;
     }
     if (_apiCount >= ESP8266BASE_WEB_MAX_APP_APIS) {
-        ESP8266BASE_LOG_W("Web ", "addApi_rejected reason=table_full path=%s count=%u max=%u",
+        ESP8266BASE_LOG_W_P("Web ", "addApi_rejected reason=table_full path=%s count=%u max=%u",
                           path, (unsigned)_apiCount, (unsigned)ESP8266BASE_WEB_MAX_APP_APIS);
         return false;
     }
@@ -789,7 +789,7 @@ bool Esp8266BaseWeb::addApi(const char* path, Esp8266BaseWebHandler handler) {
         case 5: _server.on(path, _handleAppApi5); break;
         default: return false;
     }
-    ESP8266BASE_LOG_I("Web ", "app_api_registered path=%s app_apis_registered=%d/%d",
+    ESP8266BASE_LOG_I_P("Web ", "app_api_registered path=%s app_apis_registered=%d/%d",
                       path, (int)_apiCount, ESP8266BASE_WEB_MAX_APP_APIS);
     return true;
 #endif
@@ -842,7 +842,7 @@ void Esp8266BaseWeb::setBuiltinLabel(Esp8266BaseWebBuiltinLabel label, const cha
 
 void Esp8266BaseWeb::setDefaultAuth(const char* user, const char* pass) {
     if (_running) {
-        ESP8266BASE_LOG_W("Web ", "set_default_auth_ignored reason=web_already_running");
+        ESP8266BASE_LOG_W_P("Web ", "set_default_auth_ignored reason=web_already_running");
         return;
     }
     if (user) { strncpy(_authUser, user, 23); _authUser[23] = '\0'; }
@@ -910,7 +910,7 @@ ESP8266WebServer::ClientFuture Esp8266BaseWeb::_heapGateHook(
         maxBlock >= ESP8266BASE_WEB_HEAP_GATE_BLOCK_BYTES) {
         return ESP8266WebServer::CLIENT_REQUEST_CAN_CONTINUE;
     }
-    ESP8266BASE_LOG_W("Web", "heap_gate_reject free_heap=%u max_block=%u action=503",
+    ESP8266BASE_LOG_W_P("Web", "heap_gate_reject free_heap=%u max_block=%u action=503",
                       (unsigned)freeHeap, (unsigned)maxBlock);
     if (client) {
         // 预解析阶段：直接写最小响应后要求关闭连接，不进入请求头解析。
@@ -944,7 +944,7 @@ void Esp8266BaseWeb::_loadPersistedAuth() {
         strncpy(_authPass, pass, sizeof(_authPass) - 1);
         _authPass[sizeof(_authPass) - 1] = '\0';
     }
-    ESP8266BASE_LOG_I("Web ", "web_auth_loaded user=%s password=[redacted] pass_source=%s password_length=%u",
+    ESP8266BASE_LOG_I_P("Web ", "web_auth_loaded user=%s password=[redacted] pass_source=%s password_length=%u",
                       _authUser, (passFound && pass[0]) ? "persisted" : "default",
                       (unsigned)strlen(_authPass));
 }
@@ -1347,19 +1347,19 @@ void Esp8266BaseWeb::_handleWiFiPost() {
         return;
     }
     if (ssidArg.length() > 32) {
-        ESP8266BASE_LOG_W("Web ", "wifi_credentials_form_rejected reason=ssid_too_long length=%u max=32",
+        ESP8266BASE_LOG_W_P("Web ", "wifi_credentials_form_rejected reason=ssid_too_long length=%u max=32",
                           (unsigned)ssidArg.length());
         _redirect("/wifi?error=ssid_too_long");
         return;
     }
     if (passArg.length() > 63) {
-        ESP8266BASE_LOG_W("Web ", "wifi_credentials_form_rejected reason=password_too_long length=%u max=63",
+        ESP8266BASE_LOG_W_P("Web ", "wifi_credentials_form_rejected reason=password_too_long length=%u max=63",
                           (unsigned)passArg.length());
         _redirect("/wifi?error=password_too_long");
         return;
     }
 
-    ESP8266BASE_LOG_I("Web ", "wifi_credentials_form_submitted ssid=%s password=[redacted] password_length=%u",
+    ESP8266BASE_LOG_I_P("Web ", "wifi_credentials_form_submitted ssid=%s password=[redacted] password_length=%u",
                       ssidArg.c_str(), (unsigned)passArg.length());
     if (Esp8266BaseWiFi::connect(ssidArg.c_str(), passArg.c_str())) {
         _redirect("/wifi?saved=1");
@@ -1406,12 +1406,12 @@ void Esp8266BaseWeb::_handleAuthPost() {
     const String confirmArg = _server.arg("confirm");
 
     if (newArg.length() == 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=empty");
+        ESP8266BASE_LOG_W_P("Web ", "web_password_change_rejected reason=empty");
         _redirect("/auth?error=empty");
         return;
     }
     if (newArg.length() > 23 || currentArg.length() > 23 || confirmArg.length() > 23) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=too_long current_length=%u new_length=%u confirm_length=%u",
+        ESP8266BASE_LOG_W_P("Web ", "web_password_change_rejected reason=too_long current_length=%u new_length=%u confirm_length=%u",
                           (unsigned)currentArg.length(), (unsigned)newArg.length(), (unsigned)confirmArg.length());
         _redirect("/auth?error=too_long");
         return;
@@ -1425,19 +1425,19 @@ void Esp8266BaseWeb::_handleAuthPost() {
     strncpy(confirm, confirmArg.c_str(), sizeof(confirm) - 1);
 
     if (strcmp(current, _authPass) != 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=current_password_mismatch current=[redacted] expected=[redacted]");
+        ESP8266BASE_LOG_W_P("Web ", "web_password_change_rejected reason=current_password_mismatch current=[redacted] expected=[redacted]");
         _redirect("/auth?error=current");
         return;
     }
     if (strcmp(newPass, confirm) != 0) {
-        ESP8266BASE_LOG_W("Web ", "web_password_change_rejected reason=mismatch new=[redacted] confirm=[redacted]");
+        ESP8266BASE_LOG_W_P("Web ", "web_password_change_rejected reason=mismatch new=[redacted] confirm=[redacted]");
         _redirect("/auth?error=mismatch");
         return;
     }
 
 #if ESP8266BASE_USE_WEB_AUTH_CONFIG
     if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_WEB_PASS, newPass)) {
-        ESP8266BASE_LOG_E("Web ", "web_password_update_failed password=[redacted] password_length=%u",
+        ESP8266BASE_LOG_E_P("Web ", "web_password_update_failed password=[redacted] password_length=%u",
                           (unsigned)strlen(newPass));
         _redirect("/auth?error=save_failed");
         return;
@@ -1446,7 +1446,7 @@ void Esp8266BaseWeb::_handleAuthPost() {
 
     strncpy(_authPass, newPass, sizeof(_authPass) - 1);
     _authPass[sizeof(_authPass) - 1] = '\0';
-    ESP8266BASE_LOG_I("Web ", "web_password_updated password=[redacted] password_length=%u result=success",
+    ESP8266BASE_LOG_I_P("Web ", "web_password_updated password=[redacted] password_length=%u result=success",
                       (unsigned)strlen(_authPass));
     _redirect("/auth?saved=1");
 }
@@ -1566,7 +1566,7 @@ void Esp8266BaseWeb::_handleLogsClearPost() {
     if (!checkAuth()) return;
     _markRequest();
     bool ok = Esp8266BaseFileLog::clear();
-    ESP8266BASE_LOG_I("Web ", "log_file_clear_requested result=%s", ok ? "success" : "failed");
+    ESP8266BASE_LOG_I_P("Web ", "log_file_clear_requested result=%s", ok ? "success" : "failed");
     _redirect(ok ? "/system?cleared=1" : "/system?error=clear_failed");
 }
 
@@ -1576,12 +1576,12 @@ void Esp8266BaseWeb::_handleFileLogPost() {
 
     Esp8266BaseFileLog::Mode mode = Esp8266BaseFileLog::OFF;
     if (!_fileLogModeFromArg(_server.arg("mode"), mode)) {
-        ESP8266BASE_LOG_W("Web ", "filelog_mode_rejected value=%s", _server.arg("mode").c_str());
+        ESP8266BASE_LOG_W_P("Web ", "filelog_mode_rejected value=%s", _server.arg("mode").c_str());
         _redirect("/system?error=filelog_invalid_mode");
         return;
     }
 
-    ESP8266BASE_LOG_W("Web ", "filelog_mode_requested old=%s new=%s",
+    ESP8266BASE_LOG_W_P("Web ", "filelog_mode_requested old=%s new=%s",
                       Esp8266BaseFileLog::modeName(),
                       mode == Esp8266BaseFileLog::OFF ? "off" :
                       mode == Esp8266BaseFileLog::ERROR ? "error" :
@@ -1600,18 +1600,18 @@ void Esp8266BaseWeb::_handleHostnamePost() {
     _trimWhitespace(hostname);
 
     if (!Esp8266Base::isValidHostname(hostname)) {
-        ESP8266BASE_LOG_W("Web ", "hostname_update_rejected reason=invalid value=%s", hostname);
+        ESP8266BASE_LOG_W_P("Web ", "hostname_update_rejected reason=invalid value=%s", hostname);
         _redirect("/system?error=hostname_invalid");
         return;
     }
 
     if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_HOSTNAME, hostname)) {
-        ESP8266BASE_LOG_E("Web ", "hostname_update_failed hostname=%s", hostname);
+        ESP8266BASE_LOG_E_P("Web ", "hostname_update_failed hostname=%s", hostname);
         _redirect("/system?error=hostname_save_failed");
         return;
     }
 
-    ESP8266BASE_LOG_I("Web ", "hostname_saved hostname=%s reboot_required=yes", hostname);
+    ESP8266BASE_LOG_I_P("Web ", "hostname_saved hostname=%s reboot_required=yes", hostname);
     _redirect("/system?hostname_saved=1");
 }
 
@@ -1656,18 +1656,18 @@ void Esp8266BaseWeb::_handleHostnameApiPost() {
     _trimWhitespace(hostname);
 
     if (!Esp8266Base::isValidHostname(hostname)) {
-        ESP8266BASE_LOG_W("Web ", "hostname_api_update_rejected reason=invalid value=%s", hostname);
+        ESP8266BASE_LOG_W_P("Web ", "hostname_api_update_rejected reason=invalid value=%s", hostname);
         _server.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_hostname\"}");
         return;
     }
 
     if (!Esp8266BaseConfig::setStr(ESP8266BASE_CFG_KEY_HOSTNAME, hostname)) {
-        ESP8266BASE_LOG_E("Web ", "hostname_api_update_failed hostname=%s", hostname);
+        ESP8266BASE_LOG_E_P("Web ", "hostname_api_update_failed hostname=%s", hostname);
         _server.send(500, "application/json", "{\"ok\":false,\"error\":\"save_failed\"}");
         return;
     }
 
-    ESP8266BASE_LOG_I("Web ", "hostname_api_saved hostname=%s reboot_required=yes", hostname);
+    ESP8266BASE_LOG_I_P("Web ", "hostname_api_saved hostname=%s reboot_required=yes", hostname);
     _server.send(200, "application/json", "{\"ok\":true,\"rebootRequired\":true}");
 }
 
@@ -1765,7 +1765,7 @@ void Esp8266BaseWeb::_performReboot() {
     sendContent_P(WEB_REBOOTING);
     sendFooter();
     _server.client().stop();
-    ESP8266BASE_LOG_I("Web ", "reboot_requested source=web");
+    ESP8266BASE_LOG_I_P("Web ", "reboot_requested source=web");
 #if ESP8266BASE_USE_RECORD_STORE
     Esp8266BaseRecordStore::prepareMaintenance();
 #endif
