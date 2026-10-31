@@ -34,6 +34,14 @@
 
 没有内容的小节可以省略。
 
+## 2026-10-31
+
+### 修复
+- **弱网合法重连不再被误判为主循环冻结而强制断开输出**：`handle()` 此前只给 NTP/Web/MQTT 段声明了看门狗阻塞预算，WiFi 段（被动掉线 `REATTACH` 的 `stopAll()+WiFi.begin()`、radio reset 的有序停网与 settle delay、恢复键门户回调内的同步结案）零记账。弱信号下这些秒级合法重连会累计成 `uncovered>=2.5s`，触发轮末 `LOOP_STALL` 先 `emergencyStop()` 断开执行器，表现为“请求 N 分钟、实际跑 1～2 分钟被设备安全断开”。现以新常量 `ESP8266BASE_WDT_WIFI_ACCOUNT_MS`（默认 5000ms，可编译覆盖）包裹整个 WiFi 动作段，与 NTP/Web/MQTT 同款 `account()`；预算只覆盖本段阻塞之和（每轮至多消费一个 station action），超出部分仍计 uncovered，永不返回的循环仍由独立的 90s stall os_timer 兜底，不削弱任何冻结/安全保护。
+
+### 优化
+- `JNL_STALL` 诊断在原有 `phase`/未覆盖秒数外，新增 `p2=covered`（已声明预算）秒数，并把 `/diag` 行改为 `stall phase=.. uncovered=..s covered=..s`，用于区分“合法重连超出预算”与“完全未记账段冻结”；开机合成的 90s 硬冻结记录仍为 covered=0。
+
 ## 2026-10-30（二）
 
 ### 新增

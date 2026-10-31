@@ -9,6 +9,20 @@
 #define ESP8266BASE_WDT_STALL_TIMEOUT_MS 90000UL
 #endif
 
+// Declared worst-case blocking budget for the WiFi action segment of one loop:
+// passive-loss reattach (stopAll data sockets + WiFi.begin) and the ordered
+// radio-reset teardown (stopAll + mode/disconnect settle delays). On weak links
+// these are legitimate multi-hundred-ms to few-second operations; without an
+// account() they accumulated as uncovered time and a short reattach could be
+// misclassified as a main-loop freeze past WDT_TIMEOUT_MS, forcing the output
+// off mid-run. This covers the SUM of all blocking in the WiFi segment, which
+// assumes at most one station action is consumed per loop. Time beyond this cap
+// stays uncovered, and a loop that never returns is still caught independently by
+// the WDT_STALL_TIMEOUT os_timer, so genuine freezes are never hidden.
+#ifndef ESP8266BASE_WDT_WIFI_ACCOUNT_MS
+#define ESP8266BASE_WDT_WIFI_ACCOUNT_MS 5000UL
+#endif
+
 #ifndef ESP8266BASE_RECOVERY_RESTART_COOLDOWN_MS
 #define ESP8266BASE_RECOVERY_RESTART_COOLDOWN_MS 3600000UL
 #endif

@@ -278,6 +278,7 @@ void Esp8266Base::handle() {
     // 2. WiFi 状态机
 #if ESP8266BASE_USE_WATCHDOG
     Esp8266BaseWatchdog::setPhase(Esp8266BaseWatchdogPhase::WIFI);
+    const uint32_t _wdtWifiMs = millis();
 #endif
     Esp8266BaseWiFi::handle();
 
@@ -291,6 +292,14 @@ void Esp8266Base::handle() {
     // 关闭上层网络（Web/UDP/TCP socket），再物理切 WIFI_OFF，避免活跃 PCB 下
     // netif 拆除崩溃。必须在 NTP/mDNS/Web/MQTT 之前完成。
     _consumeRadioReset();
+#if ESP8266BASE_USE_WATCHDOG
+    // 弱网合法重连（REATTACH 的 stopAll + begin、radio reset 的有序停网与
+    // settle delay、恢复键门户回调内的同步结案）是本段已知的合法阻塞，必须
+    // 声明预算，否则秒级重连会被轮末未记账检查误判成主循环冻结而强制断输出。
+    // 该预算覆盖本段所有阻塞之和（每轮至多消费一个 station action）；超出部分
+    // 仍计 uncovered，真死锁由独立的 stall os_timer 兜底。
+    Esp8266BaseWatchdog::account(ESP8266BASE_WDT_WIFI_ACCOUNT_MS, _wdtWifiMs);
+#endif
 
     // 2.5 Journal — 趋势采样与批下刷（每轮轻量检查）
 #if ESP8266BASE_USE_JOURNAL

@@ -554,7 +554,7 @@ void Esp8266BaseJournal::formatRecord(uint32_t t, uint8_t kind, uint8_t flags, i
             break;
         }
         case JNL_RADIO_RESET: snprintf(out, outLen, "%s radio_reset total=%u", timestamp, static_cast<unsigned>(p1)); break;
-        case JNL_STALL: snprintf(out, outLen, "%s stall phase=%u timeout=%us", timestamp, static_cast<unsigned>(flags), static_cast<unsigned>(p1)); break;
+        case JNL_STALL: snprintf_P(out, outLen, PSTR("%s stall phase=%u uncovered=%us covered=%us"), timestamp, static_cast<unsigned>(flags), static_cast<unsigned>(p1), static_cast<unsigned>(p2)); break;
         case JNL_NTP_SYNC: snprintf(out, outLen, "%s ntp_sync epoch=%lu", timestamp, static_cast<unsigned long>(static_cast<uint32_t>(p2) | (static_cast<uint32_t>(p3) << 16U))); break;
         case JNL_BUSINESS: snprintf(out, outLen, "%s biz subtype=%u a=%d b=%u", timestamp, static_cast<unsigned>(flags), static_cast<int>(p1), static_cast<unsigned>(p2)); break;
         case JNL_RECOVERY: snprintf(out, outLen, "%s recovery action=%u result=%d", timestamp, static_cast<unsigned>(flags), static_cast<int>(p1)); break;

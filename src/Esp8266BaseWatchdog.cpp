@@ -263,8 +263,14 @@ void Esp8266BaseWatchdog::handle() {
     const uint32_t uncovered = elapsed > _coveredMs ? elapsed - _coveredMs : 0;
     if (uncovered < _timeoutMs) return;
 #if ESP8266BASE_USE_JOURNAL
+    // flags=watchdog phase, p1=uncovered seconds, p2=covered (declared budget)
+    // seconds. Covered>0 on a weak-link WiFi stall distinguishes a legitimate
+    // reattach/teardown that merely exceeded its declared budget from a freeze in
+    // an entirely unaccounted segment; both stay actionable, not collapsed into
+    // one number.
     Esp8266BaseJournal::recordNow(JNL_STALL, _phase,
-        static_cast<int16_t>(uncovered / 1000UL > 0x7FFFU ? 0x7FFFU : uncovered / 1000UL), 0, 0);
+        static_cast<int16_t>(uncovered / 1000UL > 0x7FFFU ? 0x7FFFU : uncovered / 1000UL),
+        static_cast<uint16_t>(_coveredMs / 1000UL > 0xFFFFU ? 0xFFFFU : _coveredMs / 1000UL), 0);
 #endif
     ESP8266BASE_LOG_E_P("WDT ", "loop_overrun uncovered=%lums elapsed=%lums covered=%lums phase=%u action=recovery_restart",
                       static_cast<unsigned long>(uncovered), static_cast<unsigned long>(elapsed),
